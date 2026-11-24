@@ -1,0 +1,45 @@
+{
+  "id": "ftp",
+  "name": "FTP",
+  "description": "List, upload, download, delete, and create directories on an FTP server",
+  "type": "native",
+  "manifest": {
+    "executor": "ftp",
+    "codeFile": "ftp.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "title": "Host", "description": "FTP server host", "required": false, "configKey": "ftp.host", "label": "Host" },
+        "port": { "type": "integer", "title": "Port", "description": "FTP server port", "required": false, "configKey": "ftp.port", "label": "Port" },
+        "username": { "type": "string", "title": "Username", "description": "FTP username", "required": false, "configKey": "ftp.username", "label": "Username" },
+        "password": { "type": "string", "title": "Password", "description": "FTP password", "sensitive": true, "required": false, "configKey": "ftp.password", "label": "Password" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "host": { "type": "string" },
+      "port": { "type": "integer", "default": 21 },
+      "username": { "type": "string" },
+      "password": { "type": "string" },
+      "operation": { "type": "string", "enum": ["list", "upload", "download", "delete", "mkdir"], "default": "list" },
+      "remotePath": { "type": "string" },
+      "localPath": { "type": "string" },
+      "content": { "type": "string" }
+    },
+    "required": ["host", "username", "password", "operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "output": { "type": "string" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

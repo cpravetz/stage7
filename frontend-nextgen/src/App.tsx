@@ -28,6 +28,8 @@ function App() {
         <Route path="vault" element={<Vault />} />
         <Route path="artifacts" element={<Artifacts />} />
         <Route path="tools" element={<Tools />} />
+        <Route path="tools/:toolId/config" element={<Tools />} />
+        <Route path="tools/:toolId" element={<Tools />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

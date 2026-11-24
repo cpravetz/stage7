@@ -1,0 +1,47 @@
+{
+  "id": "jira_issue_track",
+  "name": "Jira Issue Tracker",
+  "description": "Create, query, and transition Jira issues via the Jira REST API. Requires the `jiraUrl` credential (Jira base URL, e.g. jira_url) and a `jiraToken` API token (or `apiToken`) for HTTP Basic auth. Supports create_issue, query_issues, and transition operations.",
+  "type": "native",
+  "manifest": {
+    "executor": "vendor",
+    "codeFile": "vendor.js",
+    "vendor": "jira",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "jiraUrl": { "type": "string", "title": "Jira URL", "description": "Jira base URL (e.g. jira_url)", "required": false, "configKey": "jira.url", "label": "Jira URL" },
+        "jiraToken": { "type": "string", "title": "Jira Token", "description": "Jira API token (or apiToken)", "sensitive": true, "required": false, "envVar": "JIRA_TOKEN", "label": "Jira Token" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["create_issue", "query_issues", "transition"], "description": "Jira REST operation to perform" },
+      "projectKey": { "type": "string", "description": "Jira project key, e.g. PROJ (required for create_issue)" },
+      "summary": { "type": "string", "description": "Issue summary/title (required for create_issue)" },
+      "description": { "type": "string", "description": "Issue description body (for create_issue)" },
+      "issueType": { "type": "string", "description": "Issue type name, e.g. Task, Bug, Story (for create_issue; defaults to Task)" },
+      "priority": { "type": "string", "description": "Priority name, e.g. High, Medium, Low (for create_issue)" },
+      "assignee": { "type": "string", "description": "Assignee account identifier (for create_issue)" },
+      "jql": { "type": "string", "description": "Jira Query Language statement (for query_issues; defaults to \"order by created DESC\")" },
+      "maxResults": { "type": "integer", "minimum": 1, "description": "Maximum issues to return (for query_issues; default 50)" },
+      "issueKey": { "type": "string", "description": "Issue key, e.g. PROJ-123 (required for transition)" },
+      "transitionName": { "type": "string", "description": "Workflow transition name (for transition)" }
+    },
+    "required": ["operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "issue": { "type": "object", "description": "Created or transitioned issue object" },
+      "issues": { "type": "array", "description": "List of matching issues (for query_issues)" },
+      "total": { "type": "integer", "description": "Total matching issue count (for query_issues)" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

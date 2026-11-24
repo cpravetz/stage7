@@ -27,6 +27,31 @@ describe('agent message sanitization', () => {
     expect(sanitizeAgentMessage(manifest).text).not.toContain('sms_sender');
   });
 
+  it('suppresses tool manifests that do not use transport keys', () => {
+    const manifest = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      description: 'Analyze content performance across channels.',
+      type: 'code',
+      capabilities: [],
+      inputs: { query: 'string' },
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+      outputs: { 'report.md': { type: 'file' } },
+    });
+
+    expect(isAgentConversationPayload(manifest)).toBe(true);
+    expect(sanitizeAgentMessage(manifest).suppressed).toBe(true);
+    expect(sanitizeAgentMessage(manifest).text).not.toContain('content-performance-seo');
+  });
+
+  it('strips JSON payloads embedded in otherwise readable text', () => {
+    const text = 'The task could not finish. {"id":"leaked","inputSchema":{"type":"object"}} Retry with a different approach.';
+    expect(sanitizeAgentMessage(text)).toEqual({
+      text: 'The task could not finish. Retry with a different approach.',
+      suppressed: false,
+    });
+  });
+
   it('suppresses plans and structured review payloads', () => {
     expect(isAgentConversationPayload(JSON.stringify({
       summary: 'A mission plan',

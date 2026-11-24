@@ -1,5 +1,5 @@
 import { Phase, Plan, Task } from '@stage7-nextgen/shared'
-import { buildTaskPrompt } from '../src/agent/TaskPromptBuilder'
+import { buildTaskPrompt, recoveryDeliverableInstructions } from '../src/agent/TaskPromptBuilder'
 import { applyRuntimeTaskRequirements } from '../src/agent/TaskRequirements'
 import {
   CompletedTaskSummary,
@@ -41,21 +41,35 @@ const plan: Plan = {
 }
 
 describe('runtime task requirements', () => {
-  it('recognizes repeated provider/configuration blockers without depending on attempt numbers', () => {
-    const first = 'Tool "email_sender" is not in the live system catalog (attempt 1).'
-    const second = 'Tool "email_sender" is not in the live system catalog (attempt 4).'
+  it('includes the original requirements for the missing recovery deliverable', () => {
+    const original = { ...task, id: 'phase-1-task-1', description: 'Research five concepts', systemPrompt: 'Include costs for each concept', expectedArtifacts: ['brief.txt'] }
+    const recovery = { ...task, id: 'phase-1-mission-recovery-1', systemPrompt: 'Obsolete recovery instructions', expectedArtifacts: ['brief.txt'] }
+    expect(recoveryDeliverableInstructions([original, recovery], ['BRIEF.TXT']))
+      .toContain('Research five concepts\nInclude costs for each concept')
+    expect(recoveryDeliverableInstructions([original, recovery], ['brief.txt']))
+      .not.toContain('Obsolete recovery instructions')
+    expect(buildTaskPrompt(original, phase, plan, [])).toContain('Produce each deliverable')
+    const recoveryPlan = { ...plan, phases: [{ ...phase, tasks: [original, recovery] }] }
+    expect(buildTaskPrompt(recovery, phase, recoveryPlan, [])).toContain('Include costs for each concept')
+  })
+
+  it('treats only secret/authorization gaps as configuration blockers, independent of attempt numbers', () => {
+    const first = 'The email_sender API key is missing (attempt 1).'
+    const second = 'The email_sender API key is missing (attempt 4).'
 
     expect(isConfigurationBlocker([first])).toBe(true)
     expect(recoveryGapFingerprint([first])).toBe(recoveryGapFingerprint([second]))
+    // A missing tool/capability is self-service, not a user blocker.
+    expect(isConfigurationBlocker(['Tool "email_sender" is not in the live system catalog.'])).toBe(false)
     expect(isConfigurationBlocker(['The output file has not been produced.'])).toBe(false)
   })
 
-  it('directs the user to configure a service and wait for secure credential prompts', () => {
+  it('asks only for the specific secret or authorization, not tool setup', () => {
     const question = missionConfigurationQuestion('Send an SMS and email.')
 
-    expect(question).toContain('Tools configuration')
-    expect(question).toContain('secure form')
-    expect(question).toContain('continue after you save')
+    expect(question).toContain('secret or authorization')
+    expect(question).toContain('reply here so I can resume')
+    expect(question).not.toContain('Tools configuration')
   })
 
   it('gives task agents a recovery path for missing tools, configuration, and dependency inputs', () => {
@@ -68,8 +82,11 @@ describe('runtime task requirements', () => {
 
     expect(prompt).toContain('Check the live tool catalog')
     expect(prompt).toContain('use capability resolution to find or create one')
-    expect(prompt).toContain('secure tool configuration form and wait')
+    expect(prompt).toContain('If explicit authorization is missing, ask the user for that specific permission and wait')
+    expect(prompt).toContain('execute the registered tool so Tool Executor can present its secure credential request')
+    expect(prompt).toContain('Never ask the user to choose, install, or configure tools')
     expect(prompt).toContain('never ask the user to retrieve or provide them')
+    expect(prompt).not.toContain('request its Agent to provide the artifact')
     expect(prompt).toContain('name its task ID as an internal blocker')
     expect(prompt).not.toContain('request its Agent to provide the artifact')
     expect(prompt).toContain('Do not expose internal JSON')
@@ -104,7 +121,7 @@ describe('runtime task requirements', () => {
 
     expect(plannedTask.requiresExternalAction).toBe(true)
     expect(buildTaskPrompt(plannedTask, phase, plan, [], 'Send the requested text message.'))
-      .toContain('Original mission goal: Send the requested text message.')
+      .toContain('Original mission goal (authoritative scope): Send the requested text message.')
   })
 
   it('migrates the former synthetic tool requirement without exposing it as an action', () => {
@@ -158,8 +175,9 @@ describe('runtime task requirements', () => {
     const prompt = buildTaskPrompt(dependentTask, phase, plan, [sourceSummary, ...recoverySummaries])
 
     expect(prompt).toContain('"taskId":"source-task"')
-    expect(prompt).toContain('"taskId":"task-mission-recovery-19"')
+    // Recovery tasks are internal bookkeeping and are deliberately kept out of task prompts.
     expect(prompt).not.toContain('"taskId":"task-mission-recovery-0"')
+    expect(prompt).not.toContain('"taskId":"task-mission-recovery-19"')
   })
 })
 

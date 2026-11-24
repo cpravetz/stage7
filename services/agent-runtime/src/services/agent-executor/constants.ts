@@ -5,6 +5,18 @@ export const CREATE_TOOL_ACTION = '__create_tool'
 export const DELEGATE_ACTION = '__delegate'
 export const LIST_TOOLS_ACTION = '__list_tools'
 
+/**
+ * True when a Brain-proposed action name is really the built-in "ask the user"
+ * intent, regardless of casing/spacing. Models frequently emit it as a pseudo-tool
+ * (`__ask_user__`, `Ask_User`, `ask-user`) instead of the `__ASK_USER__:` text
+ * marker; this normalizes those forms to one comparison so the action is handled
+ * as a question, not looked up in the tool catalog. This is the single general
+ * mechanism for ask-user detection — do not add ad-hoc string comparisons.
+ */
+export function isAskUserTool(tool: string | undefined | null): boolean {
+  return typeof tool === 'string' && tool.toLowerCase().replace(/[^a-z]/g, '') === 'askuser';
+}
+
 /** Size / length limits. */
 export const MAX_TOOL_DESCRIPTION_LENGTH = 200
 export const MAX_BRAIN_REQUEST_BYTES = 192 * 1024

@@ -18,6 +18,19 @@ import {
   parseAgentExecutionCheckpoint,
   AgentExecutionCheckpoint,
 } from './AgentExecutor';
+import { ASK_USER_MARKER } from './agent-executor/constants';
+
+/**
+ * A task that stopped to ask the user a question is recorded as a "completed"
+ * receipt by the executor (its output is the question text). That is NOT a real
+ * completion: replaying it on a later resume re-emits the same question and the
+ * Brain never sees the user's answer. Detect that shape so the short-circuit
+ * below re-executes instead of replaying a stale question.
+ */
+export function isPendingQuestionResult(result: unknown): boolean {
+  const output = (result as { output?: unknown } | undefined)?.output;
+  return typeof output === 'string' && output.trimStart().startsWith(ASK_USER_MARKER);
+}
 
 export class PersistentAgentRuntime {
   private runtime: AgentRuntime;
@@ -158,7 +171,7 @@ export class PersistentAgentRuntime {
         : `Checkpointed task ${taskId} has no completed Agent receipt`;
       throw new Error(`${reason}; refusing to execute it again`);
     }
-    if (receipt?.status === 'completed') {
+    if (receipt?.status === 'completed' && !isPendingQuestionResult(receipt.result)) {
       task.status = 'completed';
       task.result = receipt.result;
       task.completedAt = receipt.completedAt || new Date().toISOString();

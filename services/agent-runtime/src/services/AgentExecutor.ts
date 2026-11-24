@@ -1,4 +1,5 @@
 import type { AgentDefinition, AgentTask } from '../types'
+import { httpRequest } from '@stage7-nextgen/shared'
 import { ActionExecutor } from './agent-executor/ActionExecutor'
 import { BrainClient, brainRequestTimeoutFromEnvironment } from './agent-executor/BrainClient'
 import { CapabilityResolver } from './agent-executor/CapabilityResolver'
@@ -65,7 +66,14 @@ export class AgentExecutor {
 
     const brain = new BrainClient(brainUrl, fetcher, brainRequestTimeoutMs)
     const catalog = new ToolCatalogClient(toolExecutorUrl, fetcher)
-    const resolver = new CapabilityResolver(toolExecutorUrl, fetcher, catalog)
+    const resolveFetcher: typeof fetch = options.fetcher || ((input, init) => httpRequest(String(input), {
+      method: init?.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: typeof init?.body === 'string' ? init.body : undefined,
+      timeoutMs: brainRequestTimeoutMs,
+      signal: init?.signal || undefined,
+    }))
+    const resolver = new CapabilityResolver(toolExecutorUrl, resolveFetcher, catalog)
     const systemTools = new SystemToolClient(toolExecutorUrl, fetcher, brain)
     this.deps = {
       brain,

@@ -7,6 +7,7 @@ import {
   buildTranscript,
   CONVERSATION_EVENT_TYPES,
   friendlyMissionError,
+  missionReviewMessage,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from './missionEvents';
@@ -30,6 +31,20 @@ describe('friendlyMissionError', () => {
       'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Request timed out after 1860000ms',
     )).toBe('Mission agent request timed out after 31 minute(s). The planner did not finish generating a plan.');
   });
+  describe('missionReviewMessage', () => {
+    it('summarizes missing deliverables without dumping escaped task output', () => {
+      const message = missionReviewMessage({ gaps: [
+        'Task "Research" (task-1) has no execution result.',
+        'Task "Recovery" (task-2) is incomplete. Reason: \\nDraft\\nContent',
+        'Task "Recovery" (task-2) is missing expected artifact "brief.txt". No content.',
+        'Task "Retry" (task-3) is missing expected artifact "brief.txt". No content.',
+      ] });
+      expect(message).toContain('the agents could not complete brief.txt');
+      expect(message).not.toContain('\\n');
+      expect(message).not.toContain('Draft');
+      expect(message).not.toContain('task-2');
+    });
+  });
 
   it('explains when no eligible model provider is available', () => {
     expect(friendlyMissionError(
@@ -42,8 +57,27 @@ describe('friendlyMissionError', () => {
       'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Brain model routing made no progress after 2 retry requests.',
     )).toBe('Planning stopped because the Brain model router repeated a candidate without advancing. Check model-provider availability before retrying.');
   });
-});
+  it('never renders a structured tool manifest as an error message', () => {
+    const manifest = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputs: { query: 'string' },
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const message = friendlyMissionError(manifest);
+    expect(message).not.toContain('content-performance-seo');
+    expect(message).not.toContain('inputSchema');
+    expect(message).toBe('The Agent returned internal data instead of a readable result.');
+  });
 
+  it('removes an embedded JSON payload from a readable error', () => {
+    const message = friendlyMissionError('The task could not finish. {"id":"leaked","inputSchema":{}} Retry with a different approach.');
+    expect(message).toBe('The task could not finish. Retry with a different approach.');
+  });
+});
 describe('buildMissionEvents', () => {
   it('does not repeat a mission milestone that the mission already recorded', () => {
     const liveEvents: FeedEvent[] = [
@@ -223,6 +257,102 @@ describe('buildMissionEvents', () => {
     expect(events.find((event) => event.type === 'mission_needs_review')?.message)
       .toContain('The email was not sent.');
   });
+
+  it('posts the recorded review issue in the conversation for live and reloaded events', () => {
+    const review = normalize({
+      id: 'review', type: 'mission_needs_review', missionId: MISSION_ID, timestamp: 3,
+      data: { reviewStatus: 'awaiting_review', reason: 'Recovery made no progress.', gaps: ['The email was not sent.'] },
+    })!;
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [review],
+      detail: { status: 'awaiting_review', startedAt: 1, completedAt: 3 },
+    });
+    const transcript = buildTranscript(events.filter((event) => CONVERSATION_EVENT_TYPES.has(event.type)));
+    const reviewLine = transcript.flatMap((turn) => turn.lines).find((line) => line.type === 'mission_needs_review');
+    expect(reviewLine?.text).toContain('The email was not sent.');
+    expect(reviewLine?.text).toContain('Recovery made no progress.');
+    expect(reviewLine?.text).toContain('send guidance or select Resume');
+  });
+
+  it('explains legacy review events using current saved gaps', () => {
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [feedEvent({ id: 'legacy', type: 'mission_needs_review', timestamp: 3 })],
+      detail: { status: 'awaiting_review', output: { outputs: { gaps: ['The endpoint is not configured.'] } } },
+    });
+    expect(events.find((event) => event.type === 'mission_needs_review')?.message)
+      .toContain('The endpoint is not configured.');
+  });
+
+  it('keeps a new review explanation after each resume', () => {
+    const review = (id: string, timestamp: number, gap: string) => normalize({
+      id, type: 'mission_needs_review', missionId: MISSION_ID, timestamp,
+      data: { reviewStatus: 'awaiting_review', gaps: [gap] },
+    })!;
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [
+        review('first', 2, 'The endpoint is not configured.'),
+        feedEvent({ id: 'resume', type: 'mission_resumed', timestamp: 3 }),
+        review('second', 4, 'The request was rejected.'),
+      ],
+      detail: { status: 'awaiting_review', startedAt: 1, completedAt: 4 },
+    });
+    const advice = events.filter((event) => event.type === 'mission_needs_review').map((event) => event.message);
+    expect(advice).toHaveLength(2);
+    expect(advice[0]).toContain('endpoint');
+    expect(advice[1]).toContain('request was rejected');
+  });
+
+  it('keeps the review conversation after the mission completes', () => {
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [
+        normalize({ id: 'review', type: 'mission_needs_review', missionId: MISSION_ID, timestamp: 2,
+          data: { gaps: ['The endpoint is not configured.'] } })!,
+        feedEvent({ id: 'resume', type: 'mission_resumed', timestamp: 3 }),
+        feedEvent({ id: 'complete', type: 'mission_completed', timestamp: 4 }),
+      ],
+      detail: { status: 'completed', startedAt: 1, completedAt: 4 },
+    });
+    expect(events.map((event) => event.type)).toEqual(expect.arrayContaining(['mission_needs_review', 'mission_completed']));
+  });
+
+  it('explains an input request and warns before resuming an uncertain action', () => {
+    expect(normalize({
+      type: 'mission_needs_review', missionId: MISSION_ID,
+      data: { reviewStatus: 'awaiting_user_input', taskTitle: 'Configure email' },
+    })?.message).toContain('Answer the question to continue');
+    expect(normalize({
+      type: 'mission_needs_review', missionId: MISSION_ID,
+      data: { reviewStatus: 'awaiting_review', gaps: ['The send outcome is uncertain.'] },
+    })?.message).toContain('Verify the uncertain outcome before resuming');
+  });
+
+  it('lists a resolved user input once even when the resume re-emits it', () => {
+    const resolved = feedEvent({
+      id: 'resolved-1',
+      type: 'user_input_resolved',
+      timestamp: 5,
+      message: 'smtp_host: smtp.example.com',
+      metadata: { phaseId: 'phase-1', taskId: 'task-1', response: 'smtp_host: smtp.example.com' },
+    });
+    const liveEvents: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1 }),
+      resolved,
+      { ...resolved, id: 'resolved-2', timestamp: 6 },
+      { ...resolved, id: 'resolved-3', timestamp: 7, message: 'duplicate' },
+    ];
+
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents,
+      detail: { status: 'running', startedAt: 1 },
+    });
+
+    expect(events.filter((event) => event.type === 'user_input_resolved')).toHaveLength(1);
+  });
 });
 
 describe('mission conversation', () => {
@@ -293,6 +423,35 @@ describe('mission conversation', () => {
       data: { phaseId: 'phase-1', gaps: ['Delivery API unavailable'] },
     });
     expect(amended?.message).toContain('Delivery API unavailable');
+  });
+
+  it('never renders structured JSON dumps in the mission conversation', () => {
+    const manifest = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputs: { query: 'string' },
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const taskEvent = feedEvent({
+      id: 'json-task-output',
+      type: 'task_completed',
+      message: `Task completed: Research\n${manifest}`,
+      metadata: { taskTitle: 'Research', output: manifest },
+    });
+    const toolEvent = feedEvent({
+      id: 'json-tool-output',
+      type: 'tool',
+      message: `✅${manifest}`,
+    });
+
+    const transcript = buildTranscript([taskEvent, toolEvent]);
+    const rendered = transcript.flatMap((turn) => turn.lines.map((line) => line.text)).join('\n');
+    expect(rendered).not.toContain('content-performance-seo');
+    expect(rendered).not.toContain('inputSchema');
+    expect(rendered).not.toContain('"id"');
   });
 
   it('renders JSON-wrapped input requests as plain questions in the conversation', () => {
@@ -527,6 +686,78 @@ describe('mission conversation', () => {
     ];
 
     expect(summarizeModelUsage(liveEvents)).toEqual({ calls: 2, tokens: 350, estimatedCost: 0.03 });
+  });
+
+  it('does not announce resume, planning, and plan generated after a user reply', () => {
+    const plan = { phases: [{ id: 'phase-1', tasks: [{ id: 'task-1' }] }] };
+    const liveEvents: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1 }),
+      feedEvent({ id: 'e2', type: 'planner_started', timestamp: 2, message: 'Planning: ship it' }),
+      normalize({
+        id: 'e3', type: 'plan_generated', missionId: MISSION_ID, timestamp: 3,
+        data: { plan, agentRole: 'planner' },
+      })!,
+      normalize({
+        id: 'answer', type: 'user_input_resolved', missionId: MISSION_ID, timestamp: 4,
+        data: { phaseId: 'phase-1', taskId: 'task-1', response: 'smtp.example.com' },
+      })!,
+      feedEvent({ id: 'e4', type: 'mission_resumed', timestamp: 5, message: 'Mission resumed' }),
+      normalize({
+        id: 'e5', type: 'plan_generated', missionId: MISSION_ID, timestamp: 6,
+        data: { source: 'loaded', plan: { phases: [{ id: 'phase-1', tasks: [] }] } },
+      })!,
+      feedEvent({ id: 'e6', type: 'task_started', timestamp: 7, metadata: { phaseId: 'phase-1', taskId: 'task-1' } }),
+    ];
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents,
+      detail: { status: 'running', startedAt: 1 },
+    });
+
+    const conversation = events.filter((event) => CONVERSATION_EVENT_TYPES.has(String(event.type)));
+    expect(conversation.map((event) => event.type)).toEqual([
+      'mission_started',
+      'planner_started',
+      'plan_generated',
+      'user_input_resolved',
+      'task_started',
+    ]);
+    expect(events.some((event) => event.type === 'plan_generated' && event.metadata?.plan)).toBe(true);
+
+    const transcript = buildTranscript(conversation);
+    expect(transcript.flatMap((turn) => turn.lines).map((line) => line.type)).toEqual([
+      'mission_started',
+      'planner_started',
+      'plan_generated',
+      'user_input_resolved',
+      'task_started',
+    ]);
+    expect(transcript.at(-1)?.lines[0]?.type).toBe('task_started');
+  });
+
+  it('renders each resolved user reply once across resume and recovery', () => {
+    const resolved = feedEvent({
+      id: 'resolved-1',
+      type: 'user_input_resolved',
+      timestamp: 5,
+      metadata: { phaseId: 'phase-1', taskId: 'task-1', response: 'smtp_host: smtp.example.com' },
+    });
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [
+        feedEvent({ id: 'e1', type: 'mission_resumed', timestamp: 4 }),
+        resolved,
+        { ...resolved, id: 'resolved-2', timestamp: 5 },
+        { ...resolved, id: 'resolved-3', timestamp: 6 },
+      ],
+      detail: { status: 'running', startedAt: 1 },
+    });
+    const transcript = buildTranscript(events);
+
+    expect(transcript.some((turn) => turn.lines.some((line) => line.type === 'mission_resumed'))).toBe(false);
+    const userTurns = transcript.filter((turn) => turn.role === 'user');
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]?.lines[0]?.text).toBe('smtp_host: smtp.example.com');
   });
 });
 

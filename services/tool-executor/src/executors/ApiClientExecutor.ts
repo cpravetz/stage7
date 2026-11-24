@@ -56,13 +56,14 @@ export class ApiClientExecutor {
     const rawPath = typeof options.path === 'string' ? options.path.trim() : '';
 
     if (!rawPath && !options.lookupUrl) {
-      return { success: false, error: 'path is required', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      // Pre-flight validation: no request was sent, so the outcome is known.
+      return { success: false, error: "The 'path' argument is required (a relative path appended to the configured base URL).", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
 
     const rawBase = (credentials.api_base_url || process.env.API_CLIENT_BASE_URL || '').trim();
     if (!rawBase && !options.lookupUrl) {
       logger.warn({}, 'API client call rejected: no base URL configured');
-      return { success: false, error: NO_BASE_URL_ERROR, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error: NO_BASE_URL_ERROR, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
 
     // Reconciliation lookup (explicit URL only, to avoid SSRF surprises beyond configured base).
@@ -97,29 +98,29 @@ export class ApiClientExecutor {
 
     let base: URL;
     try { base = new URL(rawBase); } catch {
-      return { success: false, error: `Configured API base URL is not a valid absolute URL: ${rawBase}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error: `Configured API base URL is not a valid absolute URL: ${rawBase}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
 
-    if (base.username || base.password) return { success: false, error: 'Configured API base URL must not embed credentials; use auth options instead', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
-    if (base.protocol !== 'http:' && base.protocol !== 'https:') return { success: false, error: `Configured API base URL must use http or https, received '${base.protocol}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+    if (base.username || base.password) return { success: false, error: 'Configured API base URL must not embed credentials; use auth options instead', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') return { success: false, error: `Configured API base URL must use http or https, received '${base.protocol}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     if (rawPath.includes('://') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(rawPath) || rawPath.startsWith('//')) {
       logger.warn({ path: rawPath }, 'API client call rejected: absolute URL in path');
-      return { success: false, error: `path must be a relative path appended to the configured base URL, received '${rawPath}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error: `path must be a relative path appended to the configured base URL, received '${rawPath}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
 
     const method = (options.method || 'GET').toUpperCase() as ApiClientMethod;
-    if (!ALLOWED_METHODS.includes(method)) return { success: false, error: `Unsupported HTTP method '${options.method}'. Allowed: ${ALLOWED_METHODS.join(', ')}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+    if (!ALLOWED_METHODS.includes(method)) return { success: false, error: `Unsupported HTTP method '${options.method}'. Allowed: ${ALLOWED_METHODS.join(', ')}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
 
     const basePrefix = base.pathname.endsWith('/') ? base.pathname : `${base.pathname}/`;
     let target: URL;
     try { target = new URL(rawPath.replace(/^\/+/, ''), `${base.origin}${basePrefix}`); } catch {
-      return { success: false, error: `Could not build a request URL from path '${rawPath}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error: `Could not build a request URL from path '${rawPath}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
     if (target.origin !== base.origin) {
       logger.warn({ path: rawPath, origin: target.origin }, 'API client call rejected: origin escape attempt');
-      return { success: false, error: `Resolved URL origin '${target.origin}' does not match configured base origin '${base.origin}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error: `Resolved URL origin '${target.origin}' does not match configured base origin '${base.origin}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
-    if (target.username || target.password) return { success: false, error: 'Credentials embedded in the request URL are not allowed', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+    if (target.username || target.password) return { success: false, error: 'Credentials embedded in the request URL are not allowed', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
 
     if (options.query) {
       for (const [key, value] of Object.entries(options.query)) {
@@ -143,30 +144,30 @@ export class ApiClientExecutor {
       switch (authMode) {
         case 'bearer': {
           const token = credentials.api_token;
-          if (!token) return { success: false, error: "auth 'bearer' requires the 'api_token' credential", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+          if (!token) return { success: false, error: "auth 'bearer' requires the 'api_token' credential", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
           requestHeaders.Authorization = `Bearer ${token}`;
           break;
         }
         case 'basic': {
           const username = credentials.api_username;
           const password = credentials.api_password;
-          if (!username || !password) return { success: false, error: "auth 'basic' requires the 'api_username' and 'api_password' credentials", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+          if (!username || !password) return { success: false, error: "auth 'basic' requires the 'api_username' and 'api_password' credentials", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
           requestHeaders.Authorization = `Basic ${Buffer.from(`${username}:${password}`, 'utf-8').toString('base64')}`;
           break;
         }
         case 'apiKeyHeader': {
           const key = credentials.api_key;
           const headerName = credentials.api_key_header;
-          if (!key || !headerName) return { success: false, error: "auth 'apiKeyHeader' requires the 'api_key' and 'api_key_header' credentials", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+          if (!key || !headerName) return { success: false, error: "auth 'apiKeyHeader' requires the 'api_key' and 'api_key_header' credentials", durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
           requestHeaders[headerName] = key;
           break;
         }
         case 'none': break;
-        default: return { success: false, error: `Unsupported auth mode '${String(authMode)}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+        default: return { success: false, error: `Unsupported auth mode '${String(authMode)}'`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      return { success: false, error, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+      return { success: false, error, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
     }
 
     const timeoutMs = Math.min(Math.max(typeof options.timeoutMs === 'number' && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS, 1), MAX_TIMEOUT_MS);

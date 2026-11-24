@@ -12,6 +12,40 @@ function visibleTaskText(value: string): string {
   return value.replaceAll(INTERNAL_ACTION_REQUIREMENT, 'an actual registered tool');
 }
 
+/**
+ * Artifact ids are sometimes file-kind labels ("html_file", "css_file") rather than file
+ * names. Give the agent the concrete file each deliverable must become.
+ */
+const DELIVERABLE_FILE_ALIASES: Record<string, string> = {
+  html_file: 'index.html',
+  html: 'index.html',
+  css_file: 'styles.css',
+  css: 'styles.css',
+  javascript_file: 'script.js',
+  js_file: 'script.js',
+  javascript: 'script.js',
+};
+
+function describeDeliverables(expectedArtifacts: string[]): string {
+  return expectedArtifacts.map((name) => {
+    const file = DELIVERABLE_FILE_ALIASES[name.trim().toLocaleLowerCase()];
+    return file && file !== name ? `${name} (the complete ${file} file)` : name;
+  }).join(', ');
+}
+
+export function recoveryDeliverableInstructions(tasks: Task[], expectedArtifacts: string[]): string {
+  const names = new Set(expectedArtifacts.map((name) => name.trim().toLocaleLowerCase()));
+  const sources = tasks.filter((task) =>
+    !/-amendment-\d+|-mission-recovery-\d+/i.test(task.id)
+    && (task.expectedArtifacts || []).some((name) => names.has(name.trim().toLocaleLowerCase())),
+  );
+  return sources.length
+    ? `Original deliverable requirements:\n${sources.map((task) =>
+      `Task ${task.id}: ${task.description}\n${task.systemPrompt}`,
+    ).join('\n\n')}`
+    : '';
+}
+
 function taskInstructions(task: Task, plan: Plan): string {
   const taskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((candidate) => candidate.id)));
   return task.systemPrompt.replace(
@@ -35,12 +69,8 @@ function compactDependencySummaries(
   );
   const primary = summaries
     .filter((summary) => referencedTaskIds.has(summary.taskId))
-    .slice(0, MAX_DEPENDENCY_SUMMARIES / 2);
-  const recent = summaries
-    .filter((summary) => !primary.some((candidate) => candidate.taskId === summary.taskId))
-    .slice(-MAX_DEPENDENCY_SUMMARIES / 2);
-  const selected = [...primary, ...recent];
-  return selected.map((summary) => ({
+    .slice(0, MAX_DEPENDENCY_SUMMARIES);
+  return primary.map((summary) => ({
     taskId: summary.taskId,
     output: summary.output.slice(0, 500),
     artifactNames: summary.artifactNames.slice(0, 10),
@@ -66,27 +96,32 @@ export function buildTaskPrompt(
   missionGoal?: string,
 ): string {
   const expectedArtifacts = task.expectedArtifacts || [];
+  const recoveryRequirements = /-amendment-\d+|-mission-recovery-\d+/i.test(task.id)
+    ? recoveryDeliverableInstructions(plan.phases.flatMap((candidate) => candidate.tasks), expectedArtifacts)
+    : '';
   const artifactOutputContract = expectedArtifacts.length > 0
-    ? `Report verified results for each expected deliverable (${expectedArtifacts.join(', ')}). Include each deliverable's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, explain the specific blocker instead — do not fabricate results or claim actions that were not completed.`
+    ? `Produce each deliverable (${expectedArtifacts.join(', ')}) yourself. Put its complete content under a Markdown heading exactly "## <deliverable name>", not in JSON or a code fence. Write it down at once: do not first plan, research further, or describe what you will produce. The final response must be the deliverable content itself, not a tool action, plan, or progress report.`
     : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
   return (
+    (missionGoal ? `Original mission goal (authoritative scope): ${missionGoal}\n\nDo only work necessary for this goal. If the task or plan conflicts with it, follow the goal; do not substitute a different operation or medium.\n\n` : '') +
     `Task: ${visibleTaskText(task.title)}\n\n` +
     `Description: ${visibleTaskText(task.description)}\n\n` +
+    (recoveryRequirements ? `${visibleTaskText(recoveryRequirements)}\n\n` : '') +
     `Task Instructions: ${visibleTaskText(taskInstructions(task, plan))}\n\n` +
-    (missionGoal ? `Original mission goal: ${missionGoal}\n\n` : '') +
     (completedDependencies.length > 0
     ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(compactDependencySummaries(task, completedDependencies))}\n\n`
       : '') +
+    ((task.dependsOnTaskIds || []).length > 0
+      ? 'Use the recorded dependency results; never ask the user to retrieve or provide them. If a necessary dependency result is unavailable, recreate it from available context and evidence, or name its task ID as an internal blocker if it cannot be recovered.\n\n'
+      : '') +
     `Phase: ${phase.name} (${phase.goal})\n` +
     `Plan Summary: ${plan.summary}\n` +
-  `Expected deliverables: ${expectedArtifacts.join(', ')}\n` +
+    `Expected deliverables: ${expectedArtifacts.length > 0 ? describeDeliverables(expectedArtifacts) : 'none'}\n` +
 
     `Required Actions: ${JSON.stringify(visibleRequiredActions(task))}\n` +
     (task.requiresExternalAction
-      ? 'This task requires completing a real action outside the system. Check the live tool catalog, then invoke an actual registered tool that performs the requested operation and verify its result. If no suitable tool exists, use capability resolution to find or create one when permitted. Do not stop after listing tools, creating a tool, handing work off, drafting, or proposing an action. If required credentials or configuration are missing, request them through the secure tool configuration form and wait for the user to save the required values.\n'
+      ? 'This task requires completing a real action outside the system. Check the live tool catalog, then invoke an actual registered tool that performs the requested operation and verify its result. A tool created earlier in this mission is a normal registered tool: search for it and reuse it rather than creating a duplicate. If no tool exists for the operation, use capability resolution to find or create one when permitted; the catalog search, capability-resolution and capability-creation actions are always available even though they are not listed as tools. Do not stop after listing tools, creating a tool, handing work off, drafting, or proposing an action. Never ask the user for API keys, tokens, or other secrets in a free-text question: execute the registered tool so Tool Executor can present its secure credential request, and let it resolve credentials that are already stored. If explicit authorization is missing, ask the user for that specific permission and wait. Never ask the user to choose, install, or configure tools.\n'
       : '') +
-    'The original mission goal is authoritative: disregard unrelated examples, unrelated tasks, and references to removed tool-setup tasks. Stay strictly within the mission goal and this task; do not introduce unrelated domains, analysis, or documents you did not request. Extract the requested recipients, message and other values directly from the mission goal. Mission task outputs, artifacts, receipts, and logs are internal execution data: never ask the user to retrieve or provide them. Use the completed dependency results supplied here. If a required result from another task is missing, name its task ID as an internal blocker in your task result so the mission orchestrator can retrieve or rerun that task; continue any safe independent work. If a specific value is genuinely unavailable after exhausting mission context, tools, and configuration, the Agent will pause and ask for it. Never fabricate missing input or treat a recoverable missing input as mission failure.\n' +
-    'If you must ask to choose a tool, service, or configuration, include the concrete options/values in the question; never ask to select from a list that is not shown.\n' +
     `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps. Keep the final response in clear, concise language. Do not expose internal JSON, action receipts, validation errors, or implementation jargon unless the user specifically requested them.\n\n` +
     'Complete this task now and report the verified results. Do not return a plan, future-tense promises, placeholders, or substitute design/specification documents. If the work cannot be completed with the available tools or information, explain the specific blocker accurately.'
 

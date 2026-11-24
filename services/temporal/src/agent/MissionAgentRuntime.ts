@@ -14,13 +14,15 @@ import {
   MissionArtifactSchema,
   sanitizeAgentMessage,
   sanitizeAgentMessageList,
+  isAgentConversationPayload,
   describeRequestError,
   httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
-import { extractArtifacts } from './TaskResultParser';
+import { extractArtifacts, invalidExpectedArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
 import { missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
@@ -67,7 +69,7 @@ const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. Never request a fabricated receipt or evidence artifact to stand in for an action; actual tool results are recorded internally as system-action-receipts.json. If a required input from an earlier task is missing, make the follow-up retrieve it from that task's Agent or redo the source task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Keep the follow-up strictly within the stated mission goal and phase goal: do not introduce unrelated domains, analysis, or requirements the user did not request. Do not propose creating or redesigning design documents, specifications, plans, or substitute artifacts to recover from an execution or system failure; if an action failed or a system/tool error occurred, the gap must describe the failed outcome or blocker and the follow-up must focus on accomplishing the requested outcome or obtaining a concrete verification, with expectedArtifacts=[] unless the mission goal explicitly requires a deliverable file that is still missing. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. Never request a fabricated receipt or evidence artifact to stand in for an action; actual tool results are recorded internally as system-action-receipts.json. If a required input from an earlier task is missing, make the follow-up retrieve it from that task's Agent or redo the source task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Keep the follow-up strictly within the stated mission goal and phase goal: do not introduce unrelated domains, analysis, or requirements the user did not request. Do not propose creating or redesigning design documents, specifications, plans, or substitute artifacts to recover from an execution or system failure; if an action failed or a system/tool error occurred, the gap must describe the failed outcome or blocker and the follow-up must focus on accomplishing the requested outcome or obtaining a concrete verification, with expectedArtifacts=[] unless the mission goal explicitly requires a deliverable file that is still missing. Scope expectedArtifacts to only the concrete deliverables needed to close the cited gap in this step (prefer 1-3 artifacts, not a full downstream bundle); require only artifacts that can be produced from available prerequisite outputs. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 4,
@@ -76,7 +78,7 @@ const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 2_048,
   maxDelegations: 0,
 };
-const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the internal record of actual tool results and is not a user deliverable. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never ask an Agent to fabricate a receipt artifact to stand in for a missing tool result. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
+const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the internal record of actual tool results and is not a user deliverable. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. Later verified recovery evidence can satisfy an original requirement despite an earlier failed attempt; do not report an earlier failure as an outstanding gap when the same requirement has subsequently been verified. An uncertain side effect remains a blocker until reconciled, and a completed status alone is not proof. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never ask an Agent to fabricate a receipt artifact to stand in for a missing tool result. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
 const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 3,
@@ -371,9 +373,20 @@ export interface PromptTaskRequest {
 }
 
 class MissionAgentRuntimeApiError extends Error {
+  readonly failureCode?: string;
+
   constructor(readonly path: string, readonly status: number, details: string) {
     super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
     this.name = 'MissionAgentRuntimeApiError';
+    try {
+      const body: unknown = JSON.parse(details);
+      if (body && typeof body === 'object' && 'failureCode' in body
+        && typeof body.failureCode === 'string' && /^[A-Z_]+$/.test(body.failureCode)) {
+        this.failureCode = body.failureCode;
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
   }
 }
 
@@ -993,22 +1006,56 @@ export class MissionAgentRuntime {
     missionGoal: string,
     planSummary: string,
     completedTaskSummaries: CompletedTaskSummary[],
-  ): Promise<{ satisfied: boolean; gaps: string[] }> {
-    const routingSessionId = `${this.missionId}:completion-review`;
+  ): Promise<{ satisfied: boolean; gaps: string[]; verificationFailed?: boolean }> {
+    // Fresh routing session per review so repeated completion-review attempts
+    // rotate to new models instead of exhausting the per-session exclusion list.
+    const routingSessionId = `${this.missionId}:completion-review:${Date.now()}:${randomBytes(4).toString('hex')}`;
     const agentId = await this.getOrCreateAgent(
       'mission-evaluator',
       MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT,
     );
+    const isUnexecutedProposal = (output: string): boolean => {
+      try {
+        const value: unknown = JSON.parse(output.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+        return !!value && typeof value === 'object' && 'action' in value && value.action === 'tool_use'
+          && 'toolId' in value && typeof value.toolId === 'string'
+          && 'parameters' in value && !!value.parameters && typeof value.parameters === 'object'
+          && !Array.isArray(value.parameters);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        return false;
+      }
+    };
+    const removableFailures = completedTaskSummaries.filter((summary) =>
+      /-mission-recovery-\d+(?:-\d+)*$/i.test(summary.taskId)
+      && (summary.status === 'failed' || summary.status === 'incomplete'
+        || (summary.status === 'completed' && isUnexecutedProposal(summary.output)))
+      && !(summary.artifacts || []).length
+      && !(summary.artifactNames || []).length
+      && !(summary.requiredActions || []).length
+      && !(summary.expectedArtifacts || []).length
+      && !summary.requiresExternalAction
+      && !/\b(?:unknown outcome|outcome unknown|outcome uncertain|uncertain)\b|outcome.?unknown/i.test(summary.output),
+    );
+    const omittedFailures = new Set(removableFailures.slice(0, -6));
     const reviewContext = JSON.stringify({
       missionGoal,
       planSummary,
-      completedTaskSummaries: completedTaskSummaries.map((summary) => ({
+      omittedHistoricalRecoveryFailures: omittedFailures.size,
+      completedTaskSummaries: completedTaskSummaries.filter((summary) => !omittedFailures.has(summary)).map((summary) => ({
         ...summary,
         requiredActions: (summary.requiredActions || []).filter((action) => action.toolId !== '__external_action__'),
         requiresExternalAction: summary.requiresExternalAction
           || (summary.requiredActions || []).some((action) => action.toolId === '__external_action__'),
       })),
     });
+    if (Buffer.byteLength(JSON.stringify(reviewContext), 'utf8') > 120_000) {
+      return {
+        satisfied: false,
+        gaps: ['Mission completion review requires too much recorded evidence for a safe review; the mission needs human review.'],
+        verificationFailed: true,
+      };
+    }
     let previousResponse = '';
     let validationIssue = '';
 
@@ -1138,6 +1185,7 @@ export class MissionAgentRuntime {
     return {
       satisfied: false,
       gaps: [fallbackGap],
+      verificationFailed: true,
     };
   }
 
@@ -1284,12 +1332,15 @@ export class MissionAgentRuntime {
     const continuationPrompt = continuation
       ? [
         `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
-        `The user's response or permission decision is: ${continuation.response}`,
+        ...(continuation.pendingInteraction.question
+          ? [`The question you previously asked was: ${continuation.pendingInteraction.question}`]
+          : []),
+        `The user's response to that interruption is: ${continuation.response}`,
         continuation.pendingInteraction.actionReceipts?.length
           ? `Steps completed before the interruption (do not repeat actions that already succeeded or may have had side effects): ${JSON.stringify(continuation.pendingInteraction.actionReceipts)}`
 
           : '',
-        'Continue the same task from this evidence. Do not repeat completed actions.',
+        'Interpret the response against the question above. Do not repeat or rephrase the same question. Use the response, mission context, and reasonable assumptions to continue; ask a follow-up only for a specific essential fact that remains unresolved.',
       ].filter(Boolean).join('\n')
       : '';
     const taskPrompt = [
@@ -1298,7 +1349,7 @@ export class MissionAgentRuntime {
         ? [`Subsequent user messages (in order; use these as mission context and do not ask again for values already supplied): ${JSON.stringify(userMessages)}`]
         : []),
       ...(missingDependencies.length > 0
-        ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure. Ask the responsible agent/task to provide or recreate the missing artifact or result, or locate it if it exists under a different name; report an internal blocker only if it cannot be recovered after that coordination.`]
+        ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure and do not ask the user for another task's output. Recreate the missing input yourself from the context and available evidence, or redo the source task's work with a different approach. Report a specific internal blocker only if it cannot be recovered.`]
         : []),
       ...(retryGuidance ? [`Retry guidance for remaining work:\n${retryGuidance}`] : []),
       ...(continuationPrompt ? [continuationPrompt] : []),
@@ -1306,7 +1357,7 @@ export class MissionAgentRuntime {
     const result = await this.executePromptTask(agentId, {
       taskId: continuation
         ? `${this.missionId}:${phase.id}:${task.id}:resume-${continuation.pendingInteraction.resumeCount + 1}`
-        : `${this.missionId}:${phase.id}:${task.id}`,
+        : `${this.missionId}:${phase.id}:${task.id}${userMessages?.length ? `:user-${Date.now()}` : ''}`,
       type: task.agentRole,
       prompt: taskPrompt,
       phaseId: phase.id,
@@ -1314,7 +1365,14 @@ export class MissionAgentRuntime {
       requiredActions: task.requiredActions || [],
       requiresExternalAction: task.requiresExternalAction === true,
       context: {
+        ...(missionGoal ? { missionGoal, taskObjective: `${task.title}\n${task.description}` } : {}),
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
+        ...(continuation?.pendingInteraction.question
+          ? {
+              priorUserQuestion: continuation.pendingInteraction.question,
+              priorUserResponse: continuation.response,
+            }
+          : {}),
         ...(continuation?.pendingInteraction.actionReceipts
           ? { priorActionReceipts: continuation.pendingInteraction.actionReceipts }
           : {}),
@@ -1328,8 +1386,18 @@ export class MissionAgentRuntime {
       { ...plan, phases: [{ ...phase, tasks: [task] }] },
       [{ phaseId: phase.id, status: 'completed', tasks: [{ taskId: task.id, status: 'completed', artifacts: result.artifacts, output: result.output }] }],
     );
-    return evidenceGaps.length > 0
-      ? { ...result, incompleteReason: [result.incompleteReason, ...evidenceGaps].filter(Boolean).join(' ') }
+    // A structured payload (tool manifest, plan, receipt dump) is internal
+    // transport, not a task result. Treat it as an incomplete result so the
+    // orchestrator retries the task with different guidance instead of
+    // recording internal data as the deliverable or showing it to the user.
+    const structuredOutput = typeof result.output === 'string'
+      && isAgentConversationPayload(result.output);
+    const structuredGap = structuredOutput
+      ? `Task "${task.title}" (${task.id}) returned internal structured data instead of a user-facing result.`
+      : '';
+    const incompleteReason = [result.incompleteReason, ...evidenceGaps, structuredGap].filter(Boolean).join(' ');
+    return incompleteReason
+      ? { ...result, incompleteReason }
       : result;
   }
 
@@ -1392,6 +1460,7 @@ export class MissionAgentRuntime {
           || !(error instanceof MissionAgentRuntimeApiError)
           || error.path !== executePath
           || error.status < 500
+          || (error.failureCode !== undefined && error.failureCode !== 'TRANSIENT_SERVICE_ERROR')
         ) {
           throw error;
         }
@@ -1438,6 +1507,53 @@ export class MissionAgentRuntime {
     const expectedArtifacts = request.expectedArtifacts || [];
     const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
     this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
+    // Validate that produced artifacts carry substantive content, not just
+    // headings/comments/placeholders. If validation fails, ask the Brain to
+    // remediate and re-validate; the task only completes when every expected
+    // artifact is substantively present.
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      const invalid = invalidExpectedArtifacts(artifacts, expectedArtifacts);
+      if (invalid.length === 0) break;
+      const remediated = await this.remediateArtifactContent(
+        agentId,
+        submitted.taskId,
+        request,
+        artifacts,
+        invalid,
+      );
+      if (!remediated) break;
+      for (const artifact of remediated) {
+        const index = artifacts.findIndex((existing) => existing.name === artifact.name);
+        if (index >= 0) artifacts.splice(index, 1, artifact);
+        else artifacts.push(artifact);
+      }
+    }
+    // Final validation: if any expected artifact is still invalid, fail the
+    // task rather than declaring it complete without satisfactory deliverables.
+    const stillInvalid = invalidExpectedArtifacts(artifacts, expectedArtifacts);
+    if (stillInvalid.length > 0) {
+      throw new Error(
+        `Task "${submitted.taskId}" cannot be declared complete without satisfactory deliverables: artifact(s) have no substantive content after remediation: ${stillInvalid.join(', ')}.`,
+      );
+    }
+    // Acceptance review: verify each produced artifact against the task's
+    // declared intent before the task is marked complete. An artifact is only
+    // 'accepted' when the reviewer confirms it fulfills the task purpose; an
+    // artifact that merely exists (or was remediated for substance) is not
+    // sufficient. Tasks that depend on this task's artifacts must wait until
+    // those artifacts have been accepted.
+    const acceptance = await this.reviewArtifactAcceptance(
+      agentId,
+      submitted.taskId,
+      request,
+      artifacts,
+      expectedArtifacts,
+    );
+    if (acceptance && acceptance.rejected.length > 0) {
+      throw new Error(
+        `Task "${submitted.taskId}" artifacts were not accepted: ${acceptance.rejected.join(', ')}. Reason: ${acceptance.reason || 'not specified'}.`,
+      );
+    }
     const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
     const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
     if (reasoning && this.broadcast) {
@@ -1471,6 +1587,101 @@ export class MissionAgentRuntime {
     output: string,
   ): TaskExecutionResult['interruption'] | undefined {
     return parseTaskInterruption(output);
+  }
+
+  /**
+   * Ask the Brain to regenerate substantive content for artifacts that were
+   * produced but failed content validation (e.g. only headings/comments).
+   * Returns the remediated artifacts or null when no Brain client is
+   * available or remediation was not possible.
+   */
+  private async remediateArtifactContent(
+    agentId: string,
+    taskId: string,
+    request: PromptTaskRequest,
+    existing: MissionArtifact[],
+    invalidNames: string[],
+  ): Promise<MissionArtifact[] | null> {
+    if (!this.brainClient || invalidNames.length === 0) return null;
+    const prompt = [
+      `The following artifacts were produced but lack substantive content: ${invalidNames.join(', ')}.`,
+      'Regenerate each artifact with real, non-empty content that fulfills the task intent.',
+      'Return a JSON array of artifacts with { name, type, content, purpose, isDeliverable }.',
+      'Do not return headings, comments, or placeholders only.',
+    ].join('\n');
+    const schema = z.array(MissionArtifactSchema);
+    try {
+      const result = await this.brainClient.complete({
+        prompt,
+        systemPrompt: 'You are an artifact remediation assistant. Produce substantive content only.',
+        schema,
+        requirements: {
+          routingSessionId: `${this.missionId}:task:${request.phaseId || ''}:${taskId}`,
+          missionId: this.missionId,
+        },
+        mode: 'verify',
+      });
+      return result.value;
+    } catch (err) {
+      logger.warn(
+        { taskId, err: err instanceof Error ? err.message : String(err) },
+        'Brain artifact remediation failed; keeping existing artifacts',
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Ask the Brain to regenerate substantive content for artifacts that were
+   * produced but failed content validation (e.g. only headings/comments).
+   * Returns the remediated artifacts or null when no Brain client is
+   * available or remediation was not possible.
+   */
+  private async reviewArtifactAcceptance(
+    agentId: string,
+    taskId: string,
+    request: PromptTaskRequest,
+    artifacts: MissionArtifact[],
+    expectedArtifacts: string[],
+  ): Promise<{ accepted: string[]; rejected: string[]; reason?: string } | null> {
+    if (!this.brainClient || expectedArtifacts.length === 0) return null;
+    const reviewArtifacts = artifacts.filter((artifact) =>
+      expectedArtifacts.includes(artifact.name),
+    );
+    if (reviewArtifacts.length === 0) return { accepted: [], rejected: [] };
+    const prompt = [
+      `You are reviewing artifacts produced by task "${taskId}".`,
+      `Task intent: ${request.prompt.slice(0, 2_000)}`,
+      'For each artifact below, determine whether it fulfills the task intent and is acceptable as a completed deliverable.',
+      'Return a JSON object: {"accepted":["artifact-name-1"],"rejected":["artifact-name-2"],"reason":"explanation if any rejected"}',
+      'An artifact is rejected if it does not fulfill the task intent, is incomplete, or is a placeholder/boilerplate.',
+      'Artifacts to review:',
+      ...reviewArtifacts.map((artifact) => `- ${artifact.name} (${artifact.type}): ${typeof artifact.content === 'string' ? artifact.content.slice(0, 20_000) : artifact.url || '(no content)'}${typeof artifact.content === 'string' && artifact.content.length > 20_000 ? '\n[Content truncated for review; do not conclude that requirements are missing from the unseen portion.]' : ''}`),
+    ].join('\n');
+    const schema = z.object({
+      accepted: z.array(z.string()),
+      rejected: z.array(z.string()),
+      reason: z.string().optional(),
+    });
+    try {
+      const result = await this.brainClient.complete({
+        prompt,
+        systemPrompt: 'You are an artifact acceptance reviewer. Judge each artifact against the task intent.',
+        schema,
+        requirements: {
+          routingSessionId: `${this.missionId}:artifact-acceptance:${request.phaseId || ''}:${taskId}`,
+          missionId: this.missionId,
+        },
+        mode: 'review',
+      });
+      return result.value;
+    } catch (err) {
+      logger.warn(
+        { taskId, err: err instanceof Error ? err.message : String(err) },
+        'Artifact acceptance review failed; treating artifacts as accepted',
+      );
+      return null;
+    }
   }
 
   private async markTaskCompleted(taskId: string, result: unknown): Promise<void> {

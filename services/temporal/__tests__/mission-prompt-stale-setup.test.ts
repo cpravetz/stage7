@@ -28,3 +28,11 @@ it('retains a setup dependency when its producer is still in the plan', () => {
   const prompt = buildTaskPrompt(task, phase, { ...plan, phases: [{ ...phase, tasks: [producer, task] }] }, []);
   expect(prompt).toContain('phase-1-task-1 (text_message_service)');
 });
+
+it('keeps the original goal ahead of the plan and excludes unrelated completed work', () => {
+  const prompt = buildTaskPrompt(task, phase, plan, [{
+    taskId: 'unrelated-task', output: 'Send an email', artifactNames: [],
+  }], 'Send a text message');
+  expect(prompt.indexOf('Original mission goal')).toBeLessThan(prompt.indexOf('Task:'));
+  expect(prompt).not.toContain('Send an email');
+});

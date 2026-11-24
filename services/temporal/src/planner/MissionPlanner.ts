@@ -12,15 +12,37 @@ import { randomUUID } from 'crypto';
 import { parsePlanJson } from './planJson';
 import { canonicalMissionAgentRole } from '../agent/AgentRuntimeConfig';
 
-const MAX_PRIOR_RESPONSE_CHARS = 12_000;
-const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
 const MAX_TRANSIENT_BRAIN_RETRIES = 3;
+/** Consecutive empty completions tolerated before the planner gives up. */
+const MAX_CONSECUTIVE_EMPTY_PLANNER_COMPLETIONS = 3;
+/** Amendment task ids minted by phase recovery; the planner must never mint them. */
+const RESERVED_AMENDMENT_PREFIX = '-amendment-';
+
+export type PlannerLocus =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'phase'; phaseId: string }
+  | { kind: 'plan' };
+
+/** A single, structured plan-validation issue tied to the part of the plan that must change. */
+export interface PlannerIssue {
+  locus: PlannerLocus;
+  path: PropertyKey[];
+  message: string;
+}
 
 interface PlannerFieldRepair {
   path: PropertyKey[];
   expectedType: string;
   receivedType: string;
   currentValue: unknown;
+}
+
+/** The deterministic result of classifying a set of schema issues: mechanical coercions that
+ *  need no Brain round trip, plus the narrowest single-field repair to ask the Brain for when a
+ *  value cannot be coerced locally. */
+interface FieldIssueClassification {
+  coercions: Array<{ path: PropertyKey[]; replacement: unknown }>;
+  fieldRepair?: PlannerFieldRepair;
 }
 
 function getValueAtPath(value: unknown, path: PropertyKey[]): unknown {
@@ -45,21 +67,86 @@ function setValueAtPath(value: unknown, path: PropertyKey[], replacement: unknow
   (current as Record<PropertyKey, unknown>)[path[path.length - 1] as PropertyKey] = replacement;
 }
 
-function findPlannerFieldRepair(issues: Array<{ path: PropertyKey[]; message: string }>, plan: unknown) {
-    for (const issue of issues) {
-        // Zod reports a wrong type as "Expected X, received Y" or, since v4,
-        // "Invalid input: expected X, received Y"; both describe a single field
-        // that can be repaired by asking for a replacement value.
-        const mismatch = issue.message.match(/expected\s+(.+?),\s+received\s+(.+)$/i);
-        if (!mismatch || issue.path.length < 2) continue;
-    return {
-      path: issue.path,
-      expectedType: mismatch[1] as string,
-      receivedType: mismatch[2] as string,
-      currentValue: getValueAtPath(plan, issue.path),
-    } satisfies PlannerFieldRepair;
+function valueType(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+/**
+ * Zod v4 reports a wrong type as an issue with `code === 'invalid_type'` and an `expected`
+ * field (`received` was dropped in v4; the actual value is read from the plan). Returns the
+ * expected type string when the issue is a repairable type mismatch, else undefined.
+ */
+function invalidTypeExpected(issue: { code?: string; expected?: unknown }): string | undefined {
+  return issue.code === 'invalid_type' && typeof issue.expected === 'string' ? issue.expected : undefined;
+}
+
+const COERCION_FAILED = Symbol('coercion-failed');
+
+/** Mechanical coercion of a single value to the type the schema expected, or COERCION_FAILED. */
+function coerceValue(expectedType: string, currentValue: unknown): unknown | typeof COERCION_FAILED {
+  const expected = expectedType.toLowerCase();
+  if (expected === 'string' && currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
+    const obj = currentValue as Record<string, unknown>;
+    for (const key of ['name', 'title', 'id', 'value', 'text', 'content', 'summary']) {
+      if (typeof obj[key] === 'string' && (obj[key] as string).trim().length > 0) return obj[key];
+    }
+    return COERCION_FAILED;
   }
-  return undefined;
+  if (expected.startsWith('array') && currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
+    return [currentValue];
+  }
+  if (expected === 'string' && (typeof currentValue === 'number' || typeof currentValue === 'boolean')) {
+    return String(currentValue);
+  }
+  if (expected === 'string' && (currentValue === null || currentValue === undefined)) {
+    return '';
+  }
+  return COERCION_FAILED;
+}
+
+/**
+ * Single classifier for planner schema issues (replaces the old findPlannerFieldRepair /
+ * tryLocalFieldFix pair). It returns every mechanical coercion that can be applied without the
+ * Brain, plus the narrowest single-field repair to ask for when a value cannot be coerced.
+ *
+ * Coercions cover: object -> string (via a common string property), single object -> array,
+ * number/boolean -> string, null/undefined -> ''. Nested graded values (a numeric path element
+ * such as a deliverable name) are never guessed from an object, except the expectedArtifacts
+ * object -> filename extraction, which is safe and avoids a wasteful round trip.
+ */
+function classifyFieldIssues(
+  issues: Array<{ code?: string; expected?: unknown; path: PropertyKey[] }>,
+  plan: unknown,
+): FieldIssueClassification {
+  const coercions: Array<{ path: PropertyKey[]; replacement: unknown }> = [];
+  let fieldRepair: PlannerFieldRepair | undefined;
+  for (const issue of issues) {
+    const expectedType = invalidTypeExpected(issue);
+    if (!expectedType || issue.path.length < 2) continue;
+    const currentValue = getValueAtPath(plan, issue.path);
+    const receivedType = valueType(currentValue);
+    const isArtifactElement =
+      issue.path.length >= 3 &&
+      issue.path[issue.path.length - 2] === 'expectedArtifacts' &&
+      typeof issue.path[issue.path.length - 1] === 'number';
+    const hasNumericSegment = issue.path.some((part) => typeof part === 'number');
+
+    const replacement = coerceValue(expectedType, currentValue);
+    if (replacement !== COERCION_FAILED) {
+      // Nested element values are graded deliverables and must not be guessed, except the
+      // expectedArtifacts object -> filename extraction which reads an explicit name field.
+      if (!hasNumericSegment || isArtifactElement) {
+        coercions.push({ path: issue.path, replacement });
+        continue;
+      }
+    }
+    // Not coercible here: remember the first one as the narrow Brain field-repair target.
+    fieldRepair ??= { path: issue.path, expectedType, receivedType, currentValue };
+  }
+  return { coercions, fieldRepair };
 }
 
 function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
@@ -68,59 +155,11 @@ function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
   ).join('');
   const serializedValue = JSON.stringify(repair.currentValue);
   const currentValue = serializedValue === undefined ? 'undefined' : serializedValue.slice(0, 2_000);
-  const objectShape = repair.expectedType === 'object' && repair.path[repair.path.length - 2] === 'requiredActions'
-    ? ' The object must have a string "toolId" and an "outcome" of "success", "failure", or "denied".'
+  const isArtifactElement = repair.path.length >= 3 && repair.path[repair.path.length - 2] === 'expectedArtifacts' && typeof repair.path[repair.path.length - 1] === 'number';
+  const hint = isArtifactElement
+    ? ' The value must be a plain filename string (for example "plan_summary.md"), not an object. If the given object has a name/filename/path field, return just that string.'
     : '';
-  return `I need a ${repair.expectedType} for ${path}, but you gave me a ${repair.receivedType}: ${currentValue}.${objectShape} Return only the replacement value as valid JSON.`;
-}
-
-/**
- * Attempts a local mechanical fix for a planner field type mismatch without
- * involving the Brain. Covers the common classes of planner mistakes:
- *  - expected string, received object → extract a common string property
- *  - expected array, received object → wrap in an array
- *  - expected string, received number/boolean → coerce to string
- * Returns undefined when no local fix applies, in which case the narrow
- * Brain field-repair question is the correct fallback.
- */
-function tryLocalFieldFix(
-  issues: Array<{ path: PropertyKey[]; message: string }>,
-  plan: unknown,
-): { path: PropertyKey[]; replacement: unknown } | undefined {
-  for (const issue of issues) {
-    const mismatch = issue.message.match(/expected\s+(.+?),\s+received\s+(.+)$/i);
-    if (!mismatch || issue.path.length < 2) continue;
-
-    const expectedType = mismatch[1].trim().toLowerCase();
-    const receivedType = mismatch[2].trim().toLowerCase();
-    const currentValue = getValueAtPath(plan, issue.path);
-
-    // expected string, received object: extract a common string property
-    if (expectedType === 'string' && receivedType === 'object' && currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
-      const obj = currentValue as Record<string, unknown>;
-      for (const key of ['name', 'title', 'id', 'value', 'text', 'content', 'summary']) {
-        if (typeof obj[key] === 'string' && obj[key].trim().length > 0) {
-          return { path: issue.path, replacement: obj[key] };
-        }
-      }
-    }
-
-    // expected array, received single object: wrap in an array
-    if (expectedType.startsWith('array') && receivedType === 'object' && currentValue && !Array.isArray(currentValue)) {
-      return { path: issue.path, replacement: [currentValue] };
-    }
-
-    // expected string, received number or boolean: coerce to string
-    if (expectedType === 'string' && (receivedType === 'number' || receivedType === 'boolean') && currentValue !== undefined && currentValue !== null) {
-      return { path: issue.path, replacement: String(currentValue) };
-    }
-
-    // expected string, received null or undefined: use an empty string
-    if (expectedType === 'string' && (receivedType === 'null' || receivedType === 'undefined') && currentValue == null) {
-      return { path: issue.path, replacement: '' };
-    }
-  }
-  return undefined;
+  return `Give me a ${repair.expectedType} for ${path}, but you gave me a ${repair.receivedType}: ${currentValue}.${hint} Return only the replacement value as valid JSON.`;
 }
 
 /**
@@ -147,22 +186,23 @@ export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent 
 
 Requirements:
 1. The planner must not pause for clarification: set requiresClarification=false and clarificationQuestions=[]. Do not invent missing values. Execution Agents may ask one focused question for an exact required value only after authorized alternatives are exhausted.
-2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. When a goal requires both producing an output and taking a separate action with it, separate those tasks and make the action depend on the output task. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
-3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
-4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
-5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
-6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
-7. Mark requiresApproval=true only where a human decision is needed before work continues.
-8. Describe only WHAT outcome must be achieved, its constraints, dependencies, deliverables, and evidence of completion. Never choose, name, create, configure, or prescribe tools, integrations, providers, APIs, code, or execution methods. Do not create tool/service setup tasks unless the user explicitly requests a reusable tool/service as a deliverable. The Agent and runtime decide HOW to achieve each task, including capability discovery, repair, replacement, or an alternate approach. Always leave requiredActions=[]; action evidence is decided by the runtime, not the plan.
-9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent planning documents, design documents, specifications, source-code files, executables, IDs, statuses, receipts, or other artifacts merely to describe work, plan an approach, or prove an action. If the mission goal does not explicitly ask for a document or file, do not create any expectedArtifacts. For action-only or communication tasks (for example sending a message, email, or SMS), use expectedArtifacts=[] and report the exact verified result in task output. Do not claim an action succeeded without evidence. system-action-receipts.json is internal runtime evidence and must never be listed as an expected artifact.
-10. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
-11. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
-12. Plan only work that is necessary to accomplish the stated mission goal. Do not expand scope with unrelated domains, research, analysis, or capabilities not requested by the user. If a task or action fails, recovery must focus on completing the requested outcome or reporting a concrete blocker; never reframe a failure as a need to produce a design or planning document unless the user explicitly requested that document.
+2. The planner must never ask the user questions or use the __ASK_USER__ marker. The planner's only output is a complete JSON plan. If information is missing, make reasonable assumptions and proceed.
+3. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. When a goal requires both producing an output and taking a separate action with it, separate those tasks and make the action depend on the output task. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
+4. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
+5. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
+6. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
+7. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
+8. Mark requiresApproval=true only where a human decision is needed before work continues.
+9. Describe only WHAT outcome must be achieved, its constraints, dependencies, deliverables, and evidence of completion. Never choose, name, create, configure, or prescribe tools, integrations, providers, APIs, code, or execution methods. Do not create tool/service setup tasks unless the user explicitly requests a reusable tool/service as a deliverable. The Agent and runtime decide HOW to achieve each task, including capability discovery, repair, replacement, or an alternate approach. Always leave requiredActions=[]; action evidence is decided by the runtime, not the plan.
+10. Treat expectedArtifacts as user-requested deliverable files only. Do not invent planning documents, design documents, specifications, source-code files, executables, IDs, statuses, receipts, or other artifacts merely to describe work, plan an approach, or prove an action. If the mission goal does not explicitly ask for a document or file, do not create any expectedArtifacts. For action-only or communication tasks (for example sending a message, email, or SMS), use expectedArtifacts=[] and report the exact verified result in task output. Do not claim an action succeeded without evidence. system-action-receipts.json is internal runtime evidence and must never be listed as an expected artifact. Keep expectedArtifacts minimal and phase-appropriate: include only deliverables this task must produce now from its available inputs/dependencies, not a downstream bundle for later phases.
+11. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
+12. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
+13. Plan only work that is necessary to accomplish the stated mission goal. Do not expand scope with unrelated domains, research, analysis, or capabilities not requested by the user. If a task or action fails, recovery must focus on completing the requested outcome or reporting a concrete blocker; never reframe a failure as a need to produce a design or planning document unless the user explicitly requested that document.
 
 Return one complete JSON object matching this structure:
 {"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
 Do not include prose, markdown fences, or any text outside the JSON object.`;
-const PLANNER_REFINEMENT_SYSTEM_PROMPT = 'You are editing an existing mission plan. Apply only the listed corrections, preserve all other content, and return the complete corrected plan as one JSON object with no prose or Markdown fences.';
+const PLANNER_REMEDIATION_SYSTEM_PROMPT = 'You are correcting one part of an existing mission plan. Apply only the listed corrections, preserve everything else, return only the corrected JSON value described, no prose or Markdown fences. Do not ask questions or use the __ASK_USER__ marker.';
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
     ...DEFAULT_AGENT_EXECUTION_POLICY,
     maxBrainCalls: 1,
@@ -334,33 +374,6 @@ export function missionTaskActionIssues(
     }
     return issues;
 }
-function missionTaskRecoveryIssues(task: any, tasksById: any, taskPath: any): string[] {
-    const recoveryIntent = task.systemPrompt
-        .split(/[.!?;\n,]+|\b(?:and|but|while|then)\b/i)
-        .some((segment: any) => {
-        const match = /\b(?:recover|recovery|repair|retry|correct)\b|\b(?:following|after|upon|once|when)\b[^.!?;\n]{0,80}\b(?:failure|error)\b/i.exec(segment);
-        return Boolean(match) && !isNegatedActionAt(segment, match ? (match.index ?? 0) : 0);
-    });
-    if (!recoveryIntent)
-        return [];
-    const issues = [];
-    for (const action of (task.requiredActions || []).filter((candidate: any) => candidate.toolId !== '__delegate' && candidate.toolId !== '__external_action__')) {
-        const toolId = action.toolId.toLowerCase();
-        const outcomes = new Set((task.requiredActions || [])
-            .filter((candidate: any) => candidate.toolId.toLowerCase() === toolId)
-            .map((candidate: any) => candidate.outcome));
-        if (outcomes.has('failure') && outcomes.has('success'))
-            continue;
-        const priorFailureDependency = ((task.dependsOnTaskIds || [])).some((dependencyId: any) => {
-            var _a;
-            return (((_a = tasksById.get(dependencyId)) === null || _a === void 0 ? void 0 : _a.requiredActions) || []).some((candidate: any) => candidate.toolId.toLowerCase() === toolId && candidate.outcome === 'failure');
-        });
-        if (outcomes.has('success') && priorFailureDependency)
-            continue;
-        issues.push(`${taskPath} requires recovery from a tool error for "${action.toolId}" but must include failure and success receipts in the task or depend on a task that records the failure`);
-    }
-    return issues;
-}
 export function missionTaskDependencyIssues(
     task: Task,
     allTaskIds: Set<string>,
@@ -391,7 +404,8 @@ export function missionTaskDependencyIssues(
 }
 
 function repairDeclaredDependencyInstructions(plan: Plan): number {
-    const tasks = plan.phases.flatMap((phase) => phase.tasks);
+    if (!Array.isArray(plan.phases)) return 0;
+    const tasks = plan.phases.flatMap((phase) => phase.tasks || []);
     const tasksById = new Map(tasks.map((task) => [task.id.toLowerCase(), task]));
     const allTaskIds = new Set(tasks.map((task) => task.id.toLowerCase()));
     const producerArtifactsByTaskId = new Map(
@@ -465,7 +479,7 @@ function isCapabilitySetupTask(task: Task): boolean {
     const createsCapability = /\b(?:create|develop|build|implement|acquire|configure|install|set up)\b[^.!?\n]{0,120}(?:service|tool|plugin|connector|integration|sdk|api)\b/i.test(instructions);
     const declaresCapabilityArtifact = (task.expectedArtifacts || []).some((artifact) =>
         /\b(?:service|tool|plugin|connector|integration|instance|executable|binary|source|sdk|api)\b/i.test(
-            artifact.replace(/[_-]+/g, ' '),
+            String(artifact).replace(/[_-]+/g, ' '),
         ),
     );
     return createsCapability && declaresCapabilityArtifact;
@@ -499,246 +513,171 @@ function removeCapabilityReferences(text: string): string {
 function isInternalActionArtifact(artifact: string): boolean {
     return /(?:^|[-_ ])(?:action[-_ ]?)?(?:receipt|confirmation|execution[-_ ]?(?:outcome|result)|send[-_ ]status)(?:$|[-_ ])/i.test(artifact);
 }
-function requestedOperationVerb(missionGoal: string): string | undefined {
-    return /\b(send|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file|email)\b/i
-        .exec(missionGoal)?.[1]?.toLocaleLowerCase();
+/**
+ * Conservatively folds intermediate capability/tool setup tasks into the operational task that
+ * depends on them, so the plan describes the requested outcome rather than implementation steps.
+ *
+ * Only the unambiguous case is mutated: a capability setup task that an operational task depends
+ * on is removed and the operational task is rewritten to drop capability/tool references. This
+ * never collapses a multi-task plan into a single task. Any other detected setup task (one that
+ * no operational task depends on) is left untouched and reported via `unhandledSetupTaskIds` so
+ * validate() can raise a task-locus issue for targeted Brain remediation.
+ */
+function normalizeCapabilitySetupTasks(
+  plan: Plan,
+  missionGoal: string,
+): { removedCount: number; unhandledSetupTaskIds: string[] } {
+  if (explicitlyRequestsReusableCapability(missionGoal)) return { removedCount: 0, unhandledSetupTaskIds: [] };
+  if (!Array.isArray(plan.phases)) return { removedCount: 0, unhandledSetupTaskIds: [] };
+
+  const tasks = plan.phases.flatMap((phase) => phase.tasks || []);
+  const setupTaskIds = new Set(tasks.filter(isCapabilitySetupTask).map((task) => task.id));
+  if (setupTaskIds.size === 0) return { removedCount: 0, unhandledSetupTaskIds: [] };
+
+  const outcomeInstruction = 'Complete the requested outcome rather than stopping after planning or preparing it, and verify the actual result.';
+  const operationalTasks = tasks.filter((task) =>
+    !setupTaskIds.has(task.id)
+    && (task.dependsOnTaskIds || []).some((dependencyId) => setupTaskIds.has(dependencyId))
+    && /\b(?:send|email|text|sms|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file)\b/i.test(
+      `${task.title} ${task.description} ${task.systemPrompt}`,
+    ),
+  );
+  const removedSetupTaskIds = new Set(
+    operationalTasks.flatMap((task) => (task.dependsOnTaskIds || []).filter((dependencyId) => setupTaskIds.has(dependencyId))),
+  );
+  const unhandledSetupTaskIds = [...setupTaskIds].filter((id) => !removedSetupTaskIds.has(id));
+  if (removedSetupTaskIds.size === 0) return { removedCount: 0, unhandledSetupTaskIds };
+
+  for (const task of operationalTasks) {
+    task.dependsOnTaskIds = (task.dependsOnTaskIds || []).filter((dependencyId) => !removedSetupTaskIds.has(dependencyId));
+    task.title = removeCapabilityReferences(removeCapabilityPrerequisite(task.title));
+    task.description = removeCapabilityReferences(removeCapabilityPrerequisite(task.description));
+    task.systemPrompt = `${removeCapabilityReferences(removeCapabilityPrerequisite(task.systemPrompt))} ${outcomeInstruction}`.trim();
+    task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) => !isInternalActionArtifact(artifact));
+  }
+
+  for (const phase of plan.phases) {
+    phase.tasks = phase.tasks.filter((task) => !removedSetupTaskIds.has(task.id));
+  }
+  plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
+  for (const phase of plan.phases) {
+    phase.name = removeCapabilityReferences(phase.name);
+    phase.goal = removeCapabilityReferences(phase.goal);
+  }
+  if (/\b(?:create|build|develop|acquire|install)\b.{0,100}\b(?:tool|service|plugin|connector|integration)\b/i.test(plan.summary)) {
+    plan.summary = plan.phases.flatMap((phase) => phase.tasks.map((task) => task.title)).join('; ');
+  }
+  logger.info(
+    { removedTaskIds: [...removedSetupTaskIds], updatedTaskIds: operationalTasks.map((task) => task.id) },
+    'Removed intermediate setup tasks so the plan describes requested outcomes rather than implementation steps',
+  );
+  return { removedCount: removedSetupTaskIds.size, unhandledSetupTaskIds };
 }
-const LEADING_PLANNING_VERB = /^(?:design|plan|generate|draft|write|compose|prepare|produce|create)\b/i;
-const PLANNING_ARTIFACT_WORDS = /\b(?:content|copy|draft|artifact|delivery|service|tool|plugin|connector|integration)\b/gi;
-const CHANNEL_KEYWORDS = ['text message', 'sms', 'email', 'text', 'message', 'notification'];
-function channelKey(subject: string): string {
-    const lower = subject.toLowerCase();
-    for (const keyword of CHANNEL_KEYWORDS) {
-        if (lower.includes(keyword)) return keyword;
-    }
-    return lower;
-}
-function deriveActionSubject(task: Task): string | undefined {
-    const title = task.title.trim();
-    if (!LEADING_PLANNING_VERB.test(title)) return undefined;
-    const subject = title
-        .replace(LEADING_PLANNING_VERB, '')
-        .replace(PLANNING_ARTIFACT_WORDS, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return subject || undefined;
-}
-function preparationTaskSubject(task: Task): string | undefined {
-    if (!/^(?:generate|draft|write|compose|prepare|produce|create)\b/i.test(task.title.trim())) return undefined;
-    const subject = task.title
-        .trim()
-        .replace(/^(?:generate|draft|write|compose|prepare|produce|create)\s+/i, '')
-        .replace(/\b(?:content|copy|draft|artifact)\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return subject || undefined;
-}
-function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number {
-    if (explicitlyRequestsReusableCapability(missionGoal)) return 0;
+/**
+ * Structural validation that returns structured, locus-tagged issues. This is the Brain-facing
+ * structural set only: duplicate ids, unknown/later-phase dependencies, cycles, human agent
+ * roles, the reserved amendment prefix, empty phases/tasks, the internal
+ * system-action-receipts.json artifact, and detected-but-unhandled capability setup tasks.
+ *
+ * The prose dependency complaints (systemPrompt must name the producer, consumes-but-not-declared)
+ * are intentionally excluded: the deterministic fixer repairs both directions before validation,
+ * and missionTaskDependencyIssues stays exported for other callers (PhaseReview, runtime).
+ */
+function structuralIssues(plan: any, missionPrompt: string): PlannerIssue[] {
+    const issues: PlannerIssue[] = [];
+    const phases: any[] = Array.isArray(plan?.phases) ? plan.phases : [];
 
-    const tasks = plan.phases.flatMap((phase) => phase.tasks);
-    const setupTaskIds = new Set(tasks.filter(isCapabilitySetupTask).map((task) => task.id));
+    const phaseIds = new Set<string>();
+    const taskIds = new Map<string, string>();
+    const taskPhaseIndices = new Map<string, number>();
 
-    const outcomeInstruction = 'Complete the requested outcome rather than stopping after planning or preparing it, and verify the actual result.';
-    const operationalTasks = tasks.filter((task) =>
-        !setupTaskIds.has(task.id)
-        && (task.dependsOnTaskIds || []).some((dependencyId) => setupTaskIds.has(dependencyId))
-        && /\b(?:send|email|text|sms|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file)\b/i.test(
-            `${task.title} ${task.description} ${task.systemPrompt}`,
-        ),
-    );
-    if (operationalTasks.length === 0) {
-        const operationVerb = requestedOperationVerb(missionGoal);
-        if (!operationVerb) return 0;
-
-        const candidates = tasks.filter((task) =>
-            !setupTaskIds.has(task.id) && LEADING_PLANNING_VERB.test(task.title.trim()),
-        );
-        if (candidates.length === 0) {
-            for (const taskId of setupTaskIds) {
-                const setupTask = tasks.find((task) => task.id === taskId);
-                if (setupTask && LEADING_PLANNING_VERB.test(setupTask.title.trim()))
-                    candidates.push(setupTask);
-            }
+    for (const [phaseIndex, phase] of phases.entries()) {
+        const phaseId = String((phase as any)?.id ?? '');
+        const phaseLocus: PlannerLocus = { kind: 'phase', phaseId };
+        if (phaseIds.has(phaseId)) {
+            issues.push({ locus: phaseLocus, path: ['phases', phaseIndex, 'id'], message: `phases[${phaseIndex}].id duplicates "${phaseId}"` });
         }
-        const groups: Array<{ subject: string; task: Task }> = [];
-        const seenSubjects = new Set<string>();
-        for (const task of candidates) {
-            const subject = deriveActionSubject(task);
-            if (!subject) continue;
-            const key = channelKey(subject);
-            if (seenSubjects.has(key)) continue;
-            seenSubjects.add(key);
-            groups.push({ subject, task });
+        phaseIds.add(phaseId);
+        const phaseTasks: any[] = Array.isArray((phase as any)?.tasks) ? (phase as any).tasks : [];
+        if (phaseTasks.length === 0) {
+            issues.push({ locus: phaseLocus, path: ['phases', phaseIndex, 'tasks'], message: `phases[${phaseIndex}].tasks must contain at least one task` });
         }
-        if (groups.length === 0) return 0;
-
-        const verbCapitalized = operationVerb.charAt(0).toLocaleUpperCase() + operationVerb.slice(1);
-        for (const { subject, task } of groups) {
-            const displaySubject = subject.charAt(0).toLocaleUpperCase() + subject.slice(1);
-            task.title = `${verbCapitalized} ${subject}`;
-            task.description = `Perform the ${subject} operation requested by the mission goal and verify its actual result.`;
-            task.agentRole = `${displaySubject} Action Agent`;
-            task.systemPrompt = [
-                `Mission goal: ${missionGoal}`,
-                `Perform the ${subject} operation requested by the mission goal. ${outcomeInstruction}`,
-            ].join(' ');
-            task.dependsOnTaskIds = [];
-            task.expectedArtifacts = [];
-            task.requiredActions = [];
-            task.artifacts = [];
-            task.status = 'pending';
-        }
-
-        const keptTaskIds = new Set(groups.map((group) => group.task.id));
-        for (const phase of plan.phases) {
-            phase.tasks = phase.tasks.filter((task) => keptTaskIds.has(task.id));
-        }
-        plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
-        for (const phase of plan.phases) {
-            phase.name = removeCapabilityReferences(phase.name);
-            phase.goal = removeCapabilityReferences(phase.goal);
-        }
-        plan.summary = groups.map((group) => `${verbCapitalized} ${group.subject}`).join('; ');
-        logger.info(
-            {
-                removedTaskIds: [...setupTaskIds].filter((id) => !keptTaskIds.has(id)),
-                updatedTaskIds: groups.map((group) => group.task.id),
-                subjects: groups.map((group) => group.subject),
-            },
-            'Normalized intermediate setup tasks into requested outcome tasks',
-        );
-        return setupTaskIds.size + candidates.length - groups.length;
-    }
-
-    const removedSetupTaskIds = new Set(
-        operationalTasks.flatMap((task) => (task.dependsOnTaskIds || []).filter((dependencyId) => setupTaskIds.has(dependencyId))),
-    );
-    if (removedSetupTaskIds.size === 0) return 0;
-
-    for (const task of operationalTasks) {
-        task.dependsOnTaskIds = (task.dependsOnTaskIds || []).filter((dependencyId) => !removedSetupTaskIds.has(dependencyId));
-        task.title = removeCapabilityReferences(removeCapabilityPrerequisite(task.title));
-        task.description = removeCapabilityReferences(removeCapabilityPrerequisite(task.description));
-        task.systemPrompt = `${removeCapabilityReferences(removeCapabilityPrerequisite(task.systemPrompt))} ${outcomeInstruction}`.trim();
-        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) => !isInternalActionArtifact(artifact));
-    }
-
-    for (const phase of plan.phases) {
-        phase.tasks = phase.tasks.filter((task) => !removedSetupTaskIds.has(task.id));
-    }
-    plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
-    for (const phase of plan.phases) {
-        phase.name = removeCapabilityReferences(phase.name);
-        phase.goal = removeCapabilityReferences(phase.goal);
-    }
-    if (/\b(?:create|build|develop|acquire|install)\b.{0,100}\b(?:tool|service|plugin|connector|integration)\b/i.test(plan.summary)) {
-        plan.summary = plan.phases.flatMap((phase) => phase.tasks.map((task) => task.title)).join('; ');
-    }
-    logger.info(
-        { removedTaskIds: [...removedSetupTaskIds], updatedTaskIds: operationalTasks.map((task) => task.id) },
-        'Removed intermediate setup tasks so the plan describes requested outcomes rather than implementation steps',
-    );
-    return removedSetupTaskIds.size;
-}
-function planStandardIssues(plan: any): string[] {
-    const issues = [];
-    if (plan.requiresClarification) {
-        if (plan.clarificationQuestions.length < 1 || plan.clarificationQuestions.length > 4) {
-            issues.push('clarificationQuestions must contain 1-4 focused questions when requiresClarification is true');
-        }
-        return issues;
-    }
-    if ((plan as any).phases.length === 0) {
-        issues.push('phases must contain at least one phase when clarification is not required');
-    }
-    const phaseIds = new Set();
-    const taskIds = new Map();
-    const taskPhaseIndices = new Map();
-    const allTasks = (plan as any).phases.flatMap((phase: any) => phase.tasks as Task[]);
-    const allTaskIds = new Set(allTasks.map((task: Task) => task.id));
-    const tasksById = new Map(allTasks.map((task: any) => [task.id, task]));
-    const producerArtifactsByTaskId = new Map<string, string[]>(
-        allTasks.map((task: any) => [
-            (task.id as string).toLowerCase(),
-            ((task.expectedArtifacts || []) as string[]).map((artifact: string) => String(artifact)),
-        ]),
-    );
-    const normalizedTaskIds = new Set([...allTaskIds].map((taskId) => (taskId as string).toLowerCase()));
-    for (const [phaseIndex, phase] of (plan as any).phases.entries() as [number, any][]) { const ph: any = phase;
-        if (phaseIds.has((ph as any).id))
-            issues.push(`phases[${phaseIndex}].id duplicates "${ph.id}"`);
-        phaseIds.add((ph as any).id);
-        if ((ph as any).tasks.length === 0) {
-            issues.push(`phases[${phaseIndex}].tasks must contain at least one task`);
-        }
-        for (const [taskIndex, task] of Array.from((((ph as any).tasks) as any[]).entries()) as [number, any][]) {  
-            const taskPath = `task "${task.id}" (phase ${phaseIndex + 1}, task ${taskIndex + 1})`;
-            if (!Array.isArray(task.requiredActions)) {
-                issues.push(`${taskPath}.requiredActions must be provided; use [] when no specific step record is required`);
-
-            }
-            if (Array.isArray(task.expectedArtifacts) && task.expectedArtifacts.some(
-                (artifact: unknown) => typeof artifact === 'string'
-                    && artifact.trim().toLocaleLowerCase() === 'system-action-receipts.json',
+        for (const [taskIndex, task] of phaseTasks.entries()) {
+            const taskId = String((task as any)?.id ?? '');
+            const taskLocus: PlannerLocus = { kind: 'task', taskId };
+            const taskPath = `task "${taskId}" (phase ${phaseIndex + 1}, task ${taskIndex + 1})`;
+            if (Array.isArray((task as any).expectedArtifacts) && (task as any).expectedArtifacts.some(
+                (artifact: unknown) => typeof artifact === 'string' && artifact.trim().toLocaleLowerCase() === 'system-action-receipts.json',
             )) {
-                issues.push(`${taskPath}.expectedArtifacts must not include system-action-receipts.json; that file is internal system data`);
-
+                issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'expectedArtifacts'], message: `${taskPath}.expectedArtifacts must not include system-action-receipts.json; that file is internal system data` });
             }
-            if (isHumanAgentRole(task.agentRole)) {
-                issues.push(`${taskPath}.agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`);
+            if (isHumanAgentRole(String((task as any).agentRole ?? ''))) {
+                issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'agentRole'], message: `${taskPath}.agentRole "${(task as any).agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification` });
             }
-            if (!Array.isArray(task.dependsOnTaskIds)) {
-                issues.push(`${taskPath}.dependsOnTaskIds must be provided; use [] for independent tasks`);
+            if (typeof taskId === 'string' && taskId.startsWith(`${phaseId}${RESERVED_AMENDMENT_PREFIX}`)) {
+                issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'id'], message: `${taskPath}.id uses the reserved amendment prefix` });
             }
-            issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath, producerArtifactsByTaskId));
-            if (task.id.startsWith(`${ph.id}-amendment-`)) {
-                issues.push(`${taskPath}.id uses the reserved amendment prefix`);
-            }
-            const firstTaskPath = taskIds.get(task.id);
+            const firstTaskPath = taskIds.get(taskId);
             if (firstTaskPath) {
-                issues.push(`${taskPath} duplicates "${task.id}" from ${firstTaskPath}; task ids must be globally unique across all phases`);
+                issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'id'], message: `${taskPath} duplicates "${taskId}" from ${firstTaskPath}; task ids must be globally unique across all phases` });
             }
             else {
-                taskIds.set(task.id, taskPath);
-                taskPhaseIndices.set(task.id, phaseIndex);
+                taskIds.set(taskId, taskPath);
+                taskPhaseIndices.set(taskId, phaseIndex);
             }
         }
     }
-    for (const [phaseIndex, ph] of Array.from((plan as any).phases.entries()) as [number, any][]) { 
-        const phaseTaskIds = new Set((ph as any).tasks.map((task: any) => task.id));
+
+    for (const [phaseIndex, phase] of phases.entries()) {
+        const phaseTasks: any[] = Array.isArray((phase as any)?.tasks) ? (phase as any).tasks : [];
+        const phaseTaskIds = new Set(phaseTasks.map((task: any) => String(task?.id ?? '')));
         const dependenciesByTask = new Map<string, string[]>();
-        for (const [taskIndex, task] of Array.from((((ph as any).tasks) as any[]).entries()) as [number, any][]) {  
-            const dependencies = (task.dependsOnTaskIds || []);
-            dependenciesByTask.set(task.id, dependencies.filter((dependencyId: any) => phaseTaskIds.has(dependencyId)));
+        for (const [taskIndex, task] of phaseTasks.entries()) {
+            const taskLocus: PlannerLocus = { kind: 'task', taskId: String((task as any)?.id ?? '') };
+            const dependencies: string[] = Array.isArray((task as any).dependsOnTaskIds) ? (task as any).dependsOnTaskIds : [];
+            dependenciesByTask.set(String((task as any).id), dependencies.filter((dependencyId) => phaseTaskIds.has(dependencyId)));
             for (const dependencyId of dependencies) {
                 const dependencyPhaseIndex = taskPhaseIndices.get(dependencyId);
-                if (dependencyId === task.id) {
-                    issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] cannot depend on itself`);
-                }
-                else if (dependencyPhaseIndex === undefined) {
-                    issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] depends on unknown task "${dependencyId}"`);
+                if (dependencyPhaseIndex === undefined) {
+                    issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'dependsOnTaskIds'], message: `phases[${phaseIndex}].tasks[${taskIndex}] depends on unknown task "${dependencyId}"` });
                 }
                 else if (dependencyPhaseIndex > phaseIndex) {
-                    issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] depends on a task in a later phase`);
+                    issues.push({ locus: taskLocus, path: ['phases', phaseIndex, 'tasks', taskIndex, 'dependsOnTaskIds'], message: `phases[${phaseIndex}].tasks[${taskIndex}] depends on a task in a later phase` });
                 }
             }
         }
-        const completed = new Set();
+        const completed = new Set<string>();
         let advanced = true;
         while (advanced) {
             advanced = false;
             for (const [taskId, dependencies] of dependenciesByTask) {
-                if (!completed.has(taskId) && dependencies.every((dependencyId: any) => completed.has(dependencyId))) {
+                if (!completed.has(taskId) && dependencies.every((dependencyId) => completed.has(dependencyId))) {
                     completed.add(taskId);
                     advanced = true;
                 }
             }
         }
         if (completed.size < phaseTaskIds.size) {
-            issues.push(`phases[${phaseIndex}].tasks dependencies contain a cycle`);
+            for (const taskId of phaseTaskIds) {
+                if (!completed.has(taskId)) {
+                    const taskIndex = phaseTasks.findIndex((task: any) => String(task?.id) === taskId);
+                    issues.push({ locus: { kind: 'task', taskId }, path: ['phases', phaseIndex, 'tasks', taskIndex, 'dependsOnTaskIds'], message: `task "${taskId}" participates in a dependency cycle; correct its dependsOnTaskIds to break the cycle` });
+                }
+            }
         }
     }
+
+    for (const task of phases.flatMap((phase: any) => (Array.isArray(phase?.tasks) ? phase.tasks : []))) {
+        if (isCapabilitySetupTask(task) && !explicitlyRequestsReusableCapability(missionPrompt)) {
+            const taskIndex = phases.flatMap((phase: any) => phase?.tasks ?? []).indexOf(task);
+            issues.push({
+                locus: { kind: 'task', taskId: String(task?.id ?? '') },
+                path: ['phases', taskIndex, 'id'],
+                message: `task "${task?.id}" appears to be an internal tool/service setup task rather than a user-requested deliverable; restate it as the requested outcome or remove it`,
+            });
+        }
+    }
+
     return issues;
 }
 function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string[] {
@@ -819,9 +758,292 @@ export interface PlannerProgress {
   status: 'retrying' | 'rejected';
   reason: string;
   transient: boolean;
+  /** When present, names the part of the plan a remediation attempt is about. */
+  locus?: string;
 }
 
 export type PlannerProgressReporter = (progress: PlannerProgress) => Promise<void>;
+
+function allTasks(plan: any): Task[] {
+  const phases: any[] = Array.isArray(plan?.phases) ? plan.phases : [];
+  return phases.flatMap((phase: any) => (Array.isArray(phase?.tasks) ? phase.tasks : []));
+}
+
+function mintUniqueId(phaseId: string, usedIds: Set<string>): string {
+  let counter = 1;
+  let candidate = `${phaseId}-task-${counter}`;
+  while (usedIds.has(candidate)) {
+    counter += 1;
+    candidate = `${phaseId}-task-${counter}`;
+  }
+  return candidate;
+}
+
+/**
+ * Renames duplicate task ids to unique ids and rewrites dependsOnTaskIds references to match.
+ * The first occurrence of an id is kept; later duplicates get a fresh `<phaseId>-task-<n>` id
+ * (never the reserved amendment prefix). References are rewritten only within the duplicate's own
+ * phase, and only when the kept occurrence lives in a different phase (so a consumer in the
+ * duplicate's phase cannot have meant the kept task); otherwise the reference is genuinely
+ * ambiguous and is left for validation to surface.
+ */
+function renameDuplicateTaskIds(plan: Plan): number {
+  const phases: any[] = Array.isArray((plan as any).phases) ? (plan as any).phases : [];
+  const firstOccurrence = new Map<string, { phaseIndex: number; taskIndex: number }>();
+  const usedIds = new Set<string>();
+  for (const [phaseIndex, phase] of phases.entries()) {
+    for (const [taskIndex, task] of (phase.tasks || []).entries()) {
+      const id = String(task.id);
+      if (!firstOccurrence.has(id)) {
+        firstOccurrence.set(id, { phaseIndex, taskIndex });
+        usedIds.add(id);
+      }
+    }
+  }
+  let renamed = 0;
+  for (const [phaseIndex, phase] of phases.entries()) {
+    for (const [taskIndex, task] of (phase.tasks || []).entries()) {
+      const id = String(task.id);
+      const first = firstOccurrence.get(id)!;
+      if (first.phaseIndex === phaseIndex && first.taskIndex === taskIndex) continue;
+      const oldId = task.id;
+      const newId = mintUniqueId(String(phase.id), usedIds);
+      task.id = newId;
+      usedIds.add(newId);
+      // Rewrite same-phase references when the kept occurrence is in another phase.
+      if (first.phaseIndex !== phaseIndex) {
+        for (const sibling of phase.tasks || []) {
+          if (sibling.id === newId) continue;
+          if (Array.isArray(sibling.dependsOnTaskIds) && sibling.dependsOnTaskIds.includes(oldId)) {
+            sibling.dependsOnTaskIds = sibling.dependsOnTaskIds.map((dep: string) => (dep === oldId ? newId : dep));
+          }
+        }
+      }
+      logger.info({ missionId: undefined, oldId, newId, phaseId: phase.id }, 'Renamed duplicate planner task id');
+      renamed += 1;
+    }
+  }
+  return renamed;
+}
+
+/** Drops self-dependencies, dependencies on unknown task ids, and dependencies on later phases. */
+function dropInvalidDependencies(plan: Plan): void {
+  const phases: any[] = Array.isArray((plan as any).phases) ? (plan as any).phases : [];
+  const allIds = new Set<string>();
+  const taskPhaseIndex = new Map<string, number>();
+  phases.forEach((phase: any, phaseIndex: number) => {
+    for (const task of phase.tasks || []) {
+      const id = String(task.id);
+      allIds.add(id);
+      taskPhaseIndex.set(id, phaseIndex);
+    }
+  });
+  phases.forEach((phase: any, phaseIndex: number) => {
+    for (const task of phase.tasks || []) {
+      const dependencies: string[] = Array.isArray(task.dependsOnTaskIds) ? task.dependsOnTaskIds : [];
+      task.dependsOnTaskIds = dependencies.filter((dependencyId) => {
+        if (dependencyId === task.id) return false;
+        if (!allIds.has(dependencyId)) return false;
+        const dependencyPhaseIndex = taskPhaseIndex.get(dependencyId);
+        if (dependencyPhaseIndex !== undefined && dependencyPhaseIndex > phaseIndex) return false;
+        return true;
+      });
+    }
+  });
+}
+
+const DELIVERY_ARTIFACT_PATTERN = /\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i;
+
+/** The finish rules: force a plan into the shape the runtime expects before it ships. */
+function applyFinishRules(plan: Plan, missionPrompt: string): void {
+  plan.requiresClarification = false;
+  plan.clarificationQuestions = [];
+  // A plan with no phases array at all is missing required structure: leave it for validation
+  // (and remediation) rather than inventing a default phase here. Only an empty array triggers
+  // the single safe default phase below, once every other phase field is already valid.
+  if (!Array.isArray(plan.phases)) return;
+  if (plan.phases.length === 0) {
+    plan.summary = (typeof plan.summary === 'string' ? plan.summary.trim() : '') || missionPrompt;
+    plan.phases = [{
+      id: 'phase-1',
+      name: 'Complete requested outcome',
+      goal: missionPrompt,
+      requiresApproval: false,
+      status: 'pending',
+      tasks: [{
+        id: 'phase-1-task-1',
+        title: 'Complete the requested outcome',
+        description: missionPrompt,
+        agentRole: 'mission-executor',
+        systemPrompt: `Achieve the requested outcome: ${missionPrompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
+        dependsOnTaskIds: [],
+        expectedArtifacts: [],
+        requiredActions: [],
+        status: 'pending',
+        artifacts: [],
+      }],
+    }];
+  }
+  const filterDeliveryArtifacts = !DELIVERY_ARTIFACT_PATTERN.test(missionPrompt);
+  for (const phase of plan.phases) {
+    phase.requiresApproval = false;
+    phase.approvalQuestion = undefined;
+    for (const task of phase.tasks) {
+      if (filterDeliveryArtifacts) {
+        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
+          !DELIVERY_ARTIFACT_PATTERN.test(String(artifact).replace(/[_-]+/g, ' ')),
+        );
+      }
+      task.requiredActions = [];
+    }
+  }
+}
+
+/**
+ * Everything that never needs the Brain, run to a fixpoint BEFORE validation so validation sees
+ * exactly what will ship: sanitization + defaults, mechanical type coercions, duplicate-id
+ * renaming with reference rewriting, dropping invalid dependencies, repairing declared dependency
+ * instructions, conservative capability-setup normalization, and the finish rules.
+ */
+export function applyDeterministicFixes(input: unknown, missionPrompt: string): Plan {
+  const sanitized = sanitizePlan(input);
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
+    return sanitized as Plan;
+  }
+  const plan = sanitized as any;
+  // Do NOT default a missing phases array to []: a plan with no phases is structurally incomplete
+  // and must be rejected and remediated (e.g. the Brain omitted the whole plan), not silently
+  // "fixed" into an empty plan. Empty arrays are still handled by the finish rules below.
+  applyPlannerDefaults(plan);
+
+  // Coercion fixpoint: apply mechanical type coercions until the schema is satisfied or no
+  // further coercion applies. The no-change guard guarantees termination of this pure pass.
+  for (let guard = 0; guard < 1000; guard += 1) {
+    const parsed = PlanSchema.safeParse(plan);
+    if (parsed.success) break;
+    const { coercions } = classifyFieldIssues(parsed.error.issues as any, plan);
+    if (coercions.length === 0) break;
+    const before = JSON.stringify(plan);
+    for (const coercion of coercions) {
+      try {
+        setValueAtPath(plan, coercion.path, coercion.replacement);
+      } catch {
+        // A coercion whose path no longer resolves is skipped; the next parse re-checks.
+      }
+    }
+    if (JSON.stringify(plan) === before) break;
+  }
+
+  // repairDeclaredDependencyInstructions expects string prompts; guarantee that invariant.
+  for (const task of allTasks(plan)) {
+    if (typeof task.systemPrompt !== 'string') (task as any).systemPrompt = '';
+  }
+
+  renameDuplicateTaskIds(plan as Plan);
+  dropInvalidDependencies(plan as Plan);
+  const dependencyRepairs = repairDeclaredDependencyInstructions(plan as Plan);
+  if (dependencyRepairs > 0) {
+    logger.info({ dependencyRepairs }, 'Repaired declared task dependencies locally');
+  }
+  normalizeCapabilitySetupTasks(plan as Plan, missionPrompt);
+  applyFinishRules(plan as Plan, missionPrompt);
+  return plan as Plan;
+}
+
+function locusForPath(plan: any, path: PropertyKey[]): PlannerLocus {
+  if (Array.isArray(path) && path[0] === 'phases') {
+    const phaseIndex = typeof path[1] === 'number' ? path[1] : undefined;
+    const phase = phaseIndex !== undefined ? plan?.phases?.[phaseIndex] : undefined;
+    const tasksIndex = path.indexOf('tasks');
+    if (tasksIndex >= 0 && typeof path[tasksIndex + 1] === 'number' && phase) {
+      const task = phase.tasks?.[path[tasksIndex + 1] as number];
+      return { kind: 'task', taskId: String(task?.id ?? '') };
+    }
+    if (phase) return { kind: 'phase', phaseId: String(phase.id ?? '') };
+  }
+  return { kind: 'plan' };
+}
+
+/**
+ * The single pure validation function: PlanSchema issues (formatted with the existing wording)
+ * plus the structural checks. Each issue is tagged with the locus that must change.
+ */
+export function validate(plan: unknown, missionPrompt: string): PlannerIssue[] {
+  const issues: PlannerIssue[] = [];
+  const parsed = PlanSchema.safeParse(plan);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      issues.push({
+        locus: locusForPath(plan, issue.path as PropertyKey[]),
+        path: issue.path as PropertyKey[],
+        message: formatSchemaIssues([issue as any])[0]!,
+      });
+    }
+  }
+  issues.push(...structuralIssues(plan, missionPrompt));
+  return issues;
+}
+
+/**
+ * Tracks consecutive remediation failures per locus so a stuck locus (one whose "fix" leaves the
+ * same issue in place) changes what we ask the Brain and is visible in progress logs. It never
+ * caps, skips, or fails a repair: termination stays Brain exhaustion only.
+ */
+export class LocusFailureTracker {
+  private readonly failures = new Map<string, { count: number; lastSummary: string }>();
+
+  static key(locus: PlannerLocus): string {
+    if (locus.kind === 'task') return `task:${locus.taskId}`;
+    if (locus.kind === 'phase') return `phase:${locus.phaseId}`;
+    return 'plan';
+  }
+
+  get(locus: PlannerLocus): { count: number; lastSummary: string } {
+    return this.failures.get(LocusFailureTracker.key(locus)) ?? { count: 0, lastSummary: '' };
+  }
+
+  recordFailure(locus: PlannerLocus, summary: string): void {
+    const key = LocusFailureTracker.key(locus);
+    const current = this.failures.get(key);
+    this.failures.set(key, { count: (current?.count ?? 0) + 1, lastSummary: summary });
+  }
+
+  recordSuccess(locus: PlannerLocus): void {
+    this.failures.delete(LocusFailureTracker.key(locus));
+  }
+
+  stuck(): Array<{ key: string; count: number; lastSummary: string }> {
+    return [...this.failures.entries()]
+      .filter(([, value]) => value.count > 0)
+      .map(([key, value]) => ({ key, count: value.count, lastSummary: value.lastSummary }));
+  }
+}
+
+function truncateForLog(value: unknown, max = 240): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** Truncates long string fields inside a payload (never the whole JSON) so a huge field cannot
+ *  bloat a narrow Brain request. */
+function truncateLongStrings(value: unknown, max = 4000): unknown {
+  if (typeof value === 'string') return value.length > max ? value.slice(0, max) : value;
+  if (Array.isArray(value)) return value.map((entry) => truncateLongStrings(entry, max));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = truncateLongStrings(entry, max);
+    }
+    return out;
+  }
+  return value;
+}
+
+function locusLabel(locus: PlannerLocus): string {
+  if (locus.kind === 'task') return `task ${locus.taskId}`;
+  if (locus.kind === 'phase') return `phase ${locus.phaseId}`;
+  return 'plan';
+}
 
 export async function generateValidPlan(
   prompt: string,
@@ -831,209 +1053,323 @@ export async function generateValidPlan(
   reportValidation?: PlannerValidationReporter,
   reportProgress?: PlannerProgressReporter,
 ): Promise<Plan> {
-    let lastError = '';
-    let previousResponse = '';
-    let jsonRepairRequested = false;
-    let pendingFieldRepair: PlannerFieldRepair | undefined;
-    let fieldRepairBase: unknown;
-    let transientBrainRetries = 0;
-    const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
-    let attempt = 0;
+  // Repair state: a monotonically increasing Brain-call counter for routing/progress, the
+  // transient-failure retry budget, and the consecutive-empty-completion limit. There is
+  // deliberately NO repair-attempt ceiling: repair ends only when the Brain signals exhaustion.
+  let attempt = 0;
+  const nextAttempt = () => {
+    attempt += 1;
+    return attempt;
+  };
+  let transientBrainRetries = 0;
+  let consecutiveEmptyCompletions = 0;
+  let lastError = '';
+  const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
+  const tracker = new LocusFailureTracker();
+
+  /** Records an empty completion against the shared limit; returns true when it is exceeded. */
+  const noteEmptyCompletion = (): boolean => {
+    consecutiveEmptyCompletions += 1;
+    lastError = 'Planner returned a completion without content';
+    return consecutiveEmptyCompletions > MAX_CONSECUTIVE_EMPTY_PLANNER_COMPLETIONS;
+  };
+  const emptyCompletionError = () =>
+    new Error(
+      `Unable to generate a valid mission plan: Brain returned ${consecutiveEmptyCompletions} consecutive empty completions. Last plan validation issue: ${lastError}`,
+    );
+
+  /**
+   * A single Brain completion call with the shared transient-failure handling and the terminal
+   * Brain-exhaustion / routing-stalled handling. Returns the raw string content (which may be
+   * empty); callers decide whether an empty or malformed reply is re-asked.
+   */
+  const callBrain = async (requestPrompt: string, systemPrompt: string): Promise<string> => {
+    let requestAttempt = 0;
     while (true) {
-        attempt++;
-        const isJsonRepair = jsonRepairRequested;
-        jsonRepairRequested = false;
-        const activeFieldRepair = pendingFieldRepair;
-        const isFieldRepair = Boolean(activeFieldRepair);
-        const hasPlanToRefine = !isJsonRepair && !isFieldRepair && Boolean(lastError && previousResponse);
-        const repairPrompt = isJsonRepair
-            ? [
-                'Fix only the JSON syntax in the planner response below. Do not replan, add, omit, or change any plan content.',
-                'Return exactly one corrected JSON object, with no prose or Markdown fences.',
-                `JSON parsing issue: ${lastError}`,
-                'Problematic planner response:',
-                previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
-            ].join('\n')
-            : activeFieldRepair
-                ? plannerFieldRepairPrompt(activeFieldRepair)
-            : !hasPlanToRefine
-                ? ''
-                : [
-                `Make only these ${Math.min(lastError.split('\n').length, MAX_REFINEMENT_ISSUES_PER_REQUEST)} correction(s) to the plan below:`,
-                ...lastError.split('\n').slice(0, MAX_REFINEMENT_ISSUES_PER_REQUEST),
-                'Preserve all other plan content. Return the complete corrected plan as one JSON object, with no prose or Markdown fences.',
-                'Plan:',
-                previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
-            ].join('\n');
-        let content;
-        try {
-            content = await complete({
-                prompt: isJsonRepair
-                    ? repairPrompt
-                    : isFieldRepair
-                        ? repairPrompt
-                    : hasPlanToRefine
-                        ? repairPrompt
-                        : `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`,
-                systemPrompt: isJsonRepair
-                    ? 'You repair JSON syntax. Preserve all values and keys exactly; only correct formatting and syntax. Return one valid JSON object and nothing else.'
-                    : isFieldRepair
-                        ? 'Return only one JSON value of the requested type. Do not return or describe the plan.'
-                    : hasPlanToRefine
-                        ? PLANNER_REFINEMENT_SYSTEM_PROMPT
-                        : PLANNER_SYSTEM_PROMPT,
-                maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
-                temperature: 0.3,
-                missionId,
-                routingSessionId,
-                attempt,
-            });
+      requestAttempt = nextAttempt();
+      let content: string;
+      try {
+        content = await complete({
+          prompt: requestPrompt,
+          systemPrompt,
+          maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
+          temperature: 0.3,
+          missionId,
+          routingSessionId,
+          attempt: requestAttempt,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
+          throw new Error(
+            `Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`,
+            { cause: error },
+          );
         }
-        catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-                throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`);
-            }
-            if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
-                throw new Error(
-                    `Unable to generate a valid mission plan because Brain routing did not complete within the current planner task. No new planner task was started, to avoid repeating the same failed routing strategy. Brain: ${message}`,
-                );
-            }
-            if (isTransientBrainFailure(message)) {
-                transientBrainRetries++;
-                if (transientBrainRetries > MAX_TRANSIENT_BRAIN_RETRIES) {
-                    throw new Error(
-                        `Unable to generate a valid mission plan after ${MAX_TRANSIENT_BRAIN_RETRIES} transient Brain retries. Last error: ${message}`,
-                    );
-                }
-                logger.warn({ missionId, attempt, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
-                await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
-                continue;
-            }
-            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
+        if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
+          throw new Error(
+            `Unable to generate a valid mission plan because Brain routing did not complete within the current planner task. No new planner task was started, to avoid repeating the same failed routing strategy. Brain: ${message}`,
+            { cause: error },
+          );
         }
-        previousResponse = content;
-        if (typeof content !== 'string' || content.trim().length === 0) {
-            // A completion without content is not a plan. It has to count
-            // against the repair ceiling, otherwise a provider that keeps
-            // returning nothing retries forever without ever failing.
-            lastError = 'Planner returned a completion without content';
-            await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
-            logger.warn({ missionId, attempt, reason: lastError }, 'Planner completion was empty; requesting the plan again');
-            await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true });
-            continue;
+        if (isTransientBrainFailure(message)) {
+          transientBrainRetries += 1;
+          if (transientBrainRetries > MAX_TRANSIENT_BRAIN_RETRIES) {
+            throw new Error(
+              `Unable to generate a valid mission plan after ${MAX_TRANSIENT_BRAIN_RETRIES} transient Brain retries. Last error: ${message}`,
+              { cause: error },
+            );
+          }
+          logger.warn({ missionId, attempt: requestAttempt, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
+          await reportProgress?.({ attempt: requestAttempt, status: 'retrying', reason: message, transient: true });
+          continue;
         }
-        try {
-            if (activeFieldRepair) {
-                let replacement: unknown;
-                try {
-                    replacement = parsePlanJson(content).value;
-                } catch (error) {
-                    throw new Error(
-                        `Planner field repair for ${activeFieldRepair.path.map(String).join('.')} did not return a JSON value: ${error instanceof Error ? error.message : String(error)}`,
-                    );
-                }
-                setValueAtPath(fieldRepairBase, activeFieldRepair.path, replacement);
-                content = JSON.stringify(fieldRepairBase);
-                previousResponse = content;
-                pendingFieldRepair = undefined;
-                fieldRepairBase = undefined;
-            }
-            const parsedPlan = parsePlanJson(content);
-            if (parsedPlan.repaired) {
-                logger.info({ missionId, attempt, repairs: parsedPlan.repairs }, 'Repaired structurally invalid planner JSON');
-            }
-            const sanitized = applyPlannerDefaults(sanitizePlan(parsedPlan.value));
-            const parsed = PlanSchema.safeParse(sanitized);
-            if (!parsed.success) {
-                lastError = formatSchemaIssues(parsed.error.issues).join('\n');
-
-                // Try local transformations before involving the Brain. Many
-                // planner mistakes are mechanical (object instead of string,
-                // single value instead of array) and can be fixed without
-                // another model call.
-                const localFix = tryLocalFieldFix(parsed.error.issues, sanitized);
-                if (localFix) {
-                    setValueAtPath(sanitized, localFix.path, localFix.replacement);
-                    content = JSON.stringify(sanitized);
-                    previousResponse = content;
-                    logger.info({ missionId, attempt, path: localFix.path.join('.'), replacement: localFix.replacement }, 'Applied local field transformation; revalidating');
-                    await reportProgress?.({ attempt, status: 'retrying', reason: `Local fix: ${localFix.path.join('.')}`, transient: true });
-                    continue;
-                }
-
-                pendingFieldRepair = findPlannerFieldRepair(parsed.error.issues, sanitized);
-                fieldRepairBase = pendingFieldRepair ? sanitized : undefined;
-                throw new Error(lastError);
-            }
-            pendingFieldRepair = undefined;
-            fieldRepairBase = undefined;
-            const plan = parsed.data;
-            previousResponse = JSON.stringify(plan);
-            const dependencyRepairs = repairDeclaredDependencyInstructions(plan);
-            if (dependencyRepairs > 0) {
-                logger.info({ missionId, attempt, dependencyRepairs }, 'Repaired declared task dependencies locally');
-            }
-            normalizeCapabilitySetupTasks(plan, prompt);
-            plan.requiresClarification = false;
-            plan.clarificationQuestions = [];
-            if (plan.phases.length === 0) {
-                plan.summary = plan.summary.trim() || prompt;
-                plan.phases = [{
-                    id: 'phase-1',
-                    name: 'Complete requested outcome',
-                    goal: prompt,
-                    requiresApproval: false,
-                    status: 'pending',
-                    tasks: [{
-                        id: 'phase-1-task-1',
-                        title: 'Complete the requested outcome',
-                        description: prompt,
-                        agentRole: 'mission-executor',
-                        systemPrompt: `Achieve the requested outcome: ${prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
-                        dependsOnTaskIds: [],
-                        expectedArtifacts: [],
-                        requiredActions: [],
-                        status: 'pending',
-                        artifacts: [],
-                    }],
-                }];
-            }
-            for (const phase of plan.phases) {
-                phase.requiresApproval = false;
-                phase.approvalQuestion = undefined;
-                for (const task of phase.tasks) {
-                    if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(prompt)) {
-                        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
-                            !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
-                                artifact.replace(/[_-]+/g, ' '),
-                            ),
-                        );
-                    }
-                    task.requiredActions = [];
-                }
-            }
-            const standardsIssues = planStandardIssues(plan);
-            if (standardsIssues.length) {
-                lastError = standardsIssues.join('\n');
-                throw new Error(lastError);
-            }
-            logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: (plan as any).phases.length, attempt }, 'Plan generated');
-            return plan;
-        }
-        catch (error) {
-            lastError = error instanceof Error ? error.message : String(error);
-            await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
-            if (lastError.startsWith('Planner response did not contain')) {
-                jsonRepairRequested = true;
-                logger.warn({ missionId, attempt, reason: lastError }, 'Planner JSON is malformed; requesting a JSON-only repair');
-                await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false });
-                continue;
-            }
-            logger.warn({ missionId, attempt, reason: lastError }, 'Planner response rejected; requesting a corrected plan');
-            await reportProgress?.({ attempt, status: 'rejected', reason: lastError, transient: false });
-        }
+        throw new Error(`Planner Agent request failed on attempt ${requestAttempt}: ${message}`, { cause: error });
+      }
+      return typeof content === 'string' ? content : '';
     }
+  };
+
+  /** The one and only full-plan Brain call (initial generation). */
+  const requestFullPlan = async (): Promise<Plan> => {
+    const fullPrompt = `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`;
+    while (true) {
+      const content = await callBrain(fullPrompt, PLANNER_SYSTEM_PROMPT);
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        const exceeded = noteEmptyCompletion();
+        await reportValidation?.(lastError);
+        if (exceeded) throw emptyCompletionError();
+        logger.warn({ missionId, attempt }, 'Planner completion was empty; requesting the plan again');
+        await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true });
+        continue;
+      }
+      consecutiveEmptyCompletions = 0;
+      let parsed: ReturnType<typeof parsePlanJson>;
+      try {
+        parsed = parsePlanJson(content);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        await reportValidation?.(lastError);
+        logger.warn({ missionId, attempt, reason: lastError }, 'Planner response was not parseable plan JSON; requesting the plan again');
+        await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false });
+        continue;
+      }
+      if (parsed.repaired) {
+        logger.info({ missionId, attempt, repairs: parsed.repairs }, 'Repaired structurally invalid planner JSON');
+      }
+      if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
+        lastError = 'Planner response did not contain a JSON plan object';
+        await reportValidation?.(lastError);
+        await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false });
+        continue;
+      }
+      return parsed.value as Plan;
+    }
+  };
+
+  /**
+   * One focused remediation round: for each locus (or a single narrow field repair) make one
+   * Brain request that returns only the corrected value, validate the reply, and splice it in.
+   * Independent task/phase groups run concurrently; results are spliced sequentially by id.
+   */
+  const remediate = async (plan: Plan, issues: PlannerIssue[]): Promise<{ plan: Plan; summary: string }> => {
+    const schema = PlanSchema.safeParse(plan);
+    // Narrowest form: exactly one scalar field at fault.
+    if (issues.length === 1 && !schema.success) {
+      const { fieldRepair } = classifyFieldIssues(schema.error.issues as any, plan);
+      if (fieldRepair) {
+        const pathLabel = fieldRepair.path.map(String).join('.');
+        const failures = tracker.get({ kind: 'plan' });
+        const summary = await requestNarrowReplacement(
+          () => plannerFieldRepairPrompt(fieldRepair),
+          (value) => {
+            setValueAtPath(plan, fieldRepair.path, value);
+            return plan;
+          },
+          pathLabel,
+          failures,
+        );
+        return { plan, summary };
+      }
+    }
+
+    const grouped = new Map<string, { locus: PlannerLocus; issues: PlannerIssue[] }>();
+    for (const issue of issues) {
+      const key = LocusFailureTracker.key(issue.locus);
+      const existing = grouped.get(key);
+      if (existing) existing.issues.push(issue);
+      else grouped.set(key, { locus: issue.locus, issues: [issue] });
+    }
+
+    const buildTaskPrompt = (locus: { kind: 'task'; taskId: string }, locusIssues: PlannerIssue[]) => {
+      const task = allTasks(plan).find((candidate) => candidate.id === locus.taskId);
+      const others = allTasks(plan)
+        .filter((candidate) => candidate.id !== locus.taskId)
+        .map((candidate) => `${candidate.id} (phase task) — ${candidate.title}`)
+        .join('\n');
+      return [
+        `Correct only this task so it is valid. Return only the corrected task object as JSON with the same id "${locus.taskId}", no prose or Markdown fences.`,
+        `Issues to fix:\n${locusIssues.map((issue) => `- ${issue.message}`).join('\n')}`,
+        `Other tasks you may depend on (id — title):\n${others || '(none)'}`,
+        `Current task:\n${JSON.stringify(truncateLongStrings(task))}`,
+      ].join('\n');
+    };
+
+    const buildPhasePrompt = (locus: { kind: 'phase'; phaseId: string }, locusIssues: PlannerIssue[]) => {
+      const phase = (plan.phases as any[]).find((candidate) => candidate.id === locus.phaseId);
+      const { tasks: _tasks, ...phaseFields } = phase ?? {};
+      return [
+        `Correct only this phase's own fields (not its tasks). Return only the corrected phase fields as a JSON object, no prose or Markdown fences.`,
+        `Issues to fix:\n${locusIssues.map((issue) => `- ${issue.message}`).join('\n')}`,
+        `Current phase fields:\n${JSON.stringify(truncateLongStrings(phaseFields))}`,
+      ].join('\n');
+    };
+
+    // A plan-level locus can mean either a small field fix (summary/duration/cost) or a plan that
+    // is missing required structure (e.g. no phases). The narrow field prompt cannot restore
+    // structure, so fall back to requesting a complete corrected plan in that case.
+    const planLocusNeedsFullPlan = (locusIssues: PlannerIssue[]) =>
+      locusIssues.some((issue) => issue.path[0] === 'phases' || issue.path[0] === 'tasks')
+      || !Array.isArray((plan as any).phases);
+
+    const buildPlanPrompt = (locusIssues: PlannerIssue[]) =>
+      planLocusNeedsFullPlan(locusIssues)
+        ? [
+            `The plan is missing required structure. Return the complete corrected plan as one JSON object with summary, estimatedDuration, estimatedCost, requiresClarification, clarificationQuestions, and a non-empty phases array, no prose or Markdown fences.`,
+            `Issues to fix:\n${locusIssues.map((issue) => `- ${issue.message}`).join('\n')}`,
+            `Current plan:\n${JSON.stringify(truncateLongStrings(plan))}`,
+          ].join('\n')
+        : [
+            `Correct only the plan-level fields (summary, estimatedDuration, estimatedCost). Return only a small JSON object with the corrected fields, no prose or Markdown fences.`,
+            `Issues to fix:\n${locusIssues.map((issue) => `- ${issue.message}`).join('\n')}`,
+            `Current values:\n${JSON.stringify({ summary: (plan as any).summary, estimatedDuration: (plan as any).estimatedDuration, estimatedCost: (plan as any).estimatedCost })}`,
+          ].join('\n');
+
+    const groups = [...grouped.values()];
+    const results = await Promise.all(groups.map(async (group) => {
+      const failures = tracker.get(group.locus);
+      if (group.locus.kind === 'task') {
+        const summary = await requestNarrowReplacement(
+          () => buildTaskPrompt(group.locus as { kind: 'task'; taskId: string }, group.issues),
+          (value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+            const candidate = value as Task;
+            if (candidate.id !== (group.locus as { kind: 'task'; taskId: string }).taskId) return undefined;
+            const targetPhase = (plan.phases as any[]).find((phase) => phase.tasks.some((task: Task) => task.id === candidate.id));
+            if (!targetPhase) return undefined;
+            targetPhase.tasks = targetPhase.tasks.map((task: Task) => (task.id === candidate.id ? candidate : task));
+            return plan;
+          },
+          locusLabel(group.locus),
+          failures,
+        );
+        return { locus: group.locus, summary };
+      }
+      if (group.locus.kind === 'phase') {
+        const summary = await requestNarrowReplacement(
+          () => buildPhasePrompt(group.locus as { kind: 'phase'; phaseId: string }, group.issues),
+          (value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+            const phase = (plan.phases as any[]).find((candidate) => candidate.id === (group.locus as { kind: 'phase'; phaseId: string }).phaseId);
+            if (!phase) return undefined;
+            const { tasks: _ignored, ...fields } = value as any;
+            Object.assign(phase, fields);
+            return plan;
+          },
+          locusLabel(group.locus),
+          failures,
+        );
+        return { locus: group.locus, summary };
+      }
+      const summary = await requestNarrowReplacement(
+        () => buildPlanPrompt(group.issues),
+        (value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+          Object.assign(plan, value);
+          return plan;
+        },
+        locusLabel(group.locus),
+        failures,
+      );
+      return { locus: group.locus, summary };
+    }));
+
+    const summary = results.map((result) => result.summary).join('; ');
+    return { plan, summary };
+  };
+
+  /**
+   * Re-asks one narrow request until the Brain returns a parseable value the apply step accepts,
+   * counting empty replies against the shared limit. On a reply that leaves the same issue in
+   * place, the next ask for this locus includes the previous failed answer and a demand for a
+   * materially different fix. There is no cap.
+   */
+  const requestNarrowReplacement = async (
+    buildPrompt: () => string,
+    apply: (value: unknown) => Plan | undefined,
+    locusName: string,
+    priorFailure: { count: number; lastSummary: string },
+  ): Promise<string> => {
+    const locus: PlannerLocus = locusName.startsWith('task ')
+      ? { kind: 'task', taskId: locusName.slice('task '.length) }
+      : locusName.startsWith('phase ')
+        ? { kind: 'phase', phaseId: locusName.slice('phase '.length) }
+        : { kind: 'plan' };
+    let lastAnswerSummary = '';
+    while (true) {
+      const basePrompt = buildPrompt();
+      const variation = priorFailure.count > 0
+        ? `\n\nA previous attempt to fix ${locusName} did not resolve the issue. Previous answer summary: ${truncateForLog(priorFailure.lastSummary)}. Produce a materially different fix.`
+        : '';
+      const content = await callBrain(`${basePrompt}${variation}`, PLANNER_REMEDIATION_SYSTEM_PROMPT);
+      if (typeof content !== 'string' || content.trim().length === 0) {
+        const exceeded = noteEmptyCompletion();
+        await reportValidation?.(lastError);
+        if (exceeded) throw emptyCompletionError();
+        await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true, locus: locusName });
+        continue;
+      }
+      consecutiveEmptyCompletions = 0;
+      let parsed: ReturnType<typeof parsePlanJson>;
+      try {
+        parsed = parsePlanJson(content);
+      } catch (error) {
+        lastError = `Planner remediation for ${locusName} did not return JSON: ${error instanceof Error ? error.message : String(error)}`;
+        await reportValidation?.(lastError);
+        await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false, locus: locusName });
+        continue;
+      }
+      const applied = apply(parsed.value);
+      if (applied === undefined) {
+        lastError = `Planner remediation for ${locusName} returned an unusable value; re-asking`;
+        await reportValidation?.(lastError);
+        await reportProgress?.({ attempt, status: 'rejected', reason: lastError, transient: false, locus: locusName });
+        continue;
+      }
+      // Did this answer actually change anything for this locus?
+      tracker.recordSuccess(locus);
+      lastAnswerSummary = truncateForLog(parsed.value);
+      logger.info({ missionId, attempt, locus: locusName }, 'Applied planner remediation');
+      return lastAnswerSummary;
+    }
+  };
+
+  const plan = applyDeterministicFixes(await requestFullPlan(), prompt);
+  logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: Array.isArray((plan as any).phases) ? (plan as any).phases.length : 0, attempt }, 'Plan generated');
+  let currentPlan = plan;
+  while (true) {
+    const fixed = applyDeterministicFixes(currentPlan, prompt);
+    currentPlan = fixed;
+    const issues = validate(currentPlan, prompt);
+    if (issues.length === 0) {
+      return PlanSchema.parse(currentPlan);
+    }
+    await reportValidation?.(issues.map((issue) => issue.message).join('\n'));
+    logger.warn({ missionId, attempt, issueCount: issues.length }, 'Planner plan needs remediation');
+    await reportProgress?.({ attempt, status: 'rejected', reason: issues.map((issue) => issue.message).join('\n'), transient: false });
+    const result = await remediate(currentPlan, issues);
+    currentPlan = result.plan;
+  }
 }
 export class MissionPlanner {
   constructor(private readonly complete: PlannerCompletion) {}

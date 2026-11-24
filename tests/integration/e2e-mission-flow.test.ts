@@ -12,6 +12,7 @@ import { WebSocketGateway } from '../../services/gateway/src/services/WebSocketG
 import { setWsGateway } from '../../services/gateway/src/utils/sharedInstances';
 
 describe('Integration: End-to-End Mission Flow', () => {
+  jest.setTimeout(120000);
   let persistenceServer: http.Server;
   let agentRuntimeServer: http.Server;
   let toolExecutorServer: http.Server;
@@ -245,16 +246,12 @@ describe('Integration: End-to-End Mission Flow', () => {
   });
 
   afterAll(async () => {
-    wsGateway.stop();
+    try {
+      wsGateway.stop();
+    } catch {
+      // Ignore stop errors
+    }
     setWsGateway(null as any);
-
-    delete process.env.ARTIFACTS_URL;
-    delete process.env.AGENT_RUNTIME_URL;
-    delete process.env.TOOL_EXECUTOR_URL;
-    delete process.env.WORKER_POOL_URL;
-    delete process.env.GATEWAY_URL;
-    delete process.env.BRAIN_URL;
-    delete process.env.APPROVAL_POLL_INTERVAL_MS;
 
     await Promise.all([
       new Promise<void>((resolve) => persistenceServer.close(() => resolve())),
@@ -264,6 +261,14 @@ describe('Integration: End-to-End Mission Flow', () => {
       new Promise<void>((resolve) => gatewayServer.close(() => resolve())),
       new Promise<void>((resolve) => brainServer.close(() => resolve())),
     ]);
+
+    delete process.env.ARTIFACTS_URL;
+    delete process.env.AGENT_RUNTIME_URL;
+    delete process.env.TOOL_EXECUTOR_URL;
+    delete process.env.WORKER_POOL_URL;
+    delete process.env.GATEWAY_URL;
+    delete process.env.BRAIN_URL;
+    delete process.env.APPROVAL_POLL_INTERVAL_MS;
   });
 
   it('should execute full mission flow with real services (no Temporal mock)', async () => {

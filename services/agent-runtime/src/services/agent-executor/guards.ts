@@ -1,5 +1,9 @@
-import { asksUserToManageTools } from './askUser'
-import { ASK_USER_NAME, CREATE_TOOL_ACTION, DELEGATE_ACTION } from './constants'
+import {
+  asksUserToRepeatQuestion,
+  hasTriedToolAfterResolution,
+  REPEATED_QUESTION_GUIDANCE,
+} from './askUser'
+import { CREATE_TOOL_ACTION, DELEGATE_ACTION, isAskUserTool } from './constants'
 import { recoverFromRepeatedAction } from './capabilityRecovery'
 import { enrichReceipt } from './receipts'
 import { NEXT_TURN, STOP_LOOP, type ActionTurn, type RunContext, type TurnEnd } from './RunContext'
@@ -14,13 +18,25 @@ export type ActionGuard = (rc: RunContext, turn: ActionTurn) => Promise<TurnEnd 
 const BLOCKER_SUFFIX = 'The phase reviewer should use this blocker to regroup the task.'
 
 /** The agent must find missing capabilities itself, not delegate that work to the user. */
-const refuseToolManagementQuestion: ActionGuard = async ({ state }, { action }) => {
+const refuseToolManagementQuestion: ActionGuard = async ({ state, spec }, { action }) => {
+  const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
   if (
-    (action.tool === ASK_USER_NAME || action.tool === 'ask_user')
+    isAskUserTool(action.tool)
     && typeof action.args.question === 'string'
-    && asksUserToManageTools(action.args.question)
+    && asksUserToRepeatQuestion(action.args.question, spec.taskContext.priorUserQuestion)
   ) {
-    state.tell('Do not ask the user to manage or select tools. Inspect the catalog and resolve missing capabilities yourself; ask only for specific information or a necessary decision.')
+    const previousResponse = typeof spec.taskContext.priorUserResponse === 'string'
+      ? `\nThe user's response was: ${spec.taskContext.priorUserResponse}`
+      : ''
+    // The user already answered this question. Do not loop by returning NEXT_TURN
+    // (which hands the Brain another turn to ask again). Stop the loop with a
+    // clear finalOutput so the orchestrator can proceed without re-asking.
+    if (previousResponse) {
+      state.finalOutput = `The user already answered this question: "${spec.taskContext.priorUserResponse}". Do not ask again; proceed with the authorized action or report the blocker.`
+      await state.save()
+      return STOP_LOOP
+    }
+    state.tell(`${REPEATED_QUESTION_GUIDANCE}\nThe question already asked was: ${spec.taskContext.priorUserQuestion}${previousResponse}`)
     await state.save()
     return NEXT_TURN
   }
@@ -46,6 +62,7 @@ const refuseRepeatOfCompletedAction: ActionGuard = async ({ state, spec, deps, c
   ) && state.actionReceipts.some(
     (receipt) => receipt.toolId === action.tool && receipt.outcome === 'success',
   )
+  if (!alreadySatisfied) return undefined
   if (!alreadySatisfied) return undefined
 
   const reason = `Agent response validation failed: action "${action.tool}" already has a successful persisted receipt; the repeated action was not executed.`
@@ -78,6 +95,28 @@ const reuseResultFromBeforeInterruption: ActionGuard = async ({ state }, { finge
   state.tell(`This exact action already has a persisted result from before the mission interruption and was not repeated. Previous result: ${previousReceipt?.content || 'result unavailable'}. Continue using that result or explain the blocker.`)
   state.lastAction = ''
   state.repeatedActionCount = 0
+  await state.save()
+  return NEXT_TURN
+}
+
+/** A tool that already prompted the user for credentials without success must not be retried. */
+const refuseRetryOfCredentialRequestedTool: ActionGuard = async ({ state, deps, context }, { action, reply, tools }) => {
+  const selectedToolId = findTool(tools, action.tool)?.id || action.tool
+  const earlierCredentialRequest = [...state.actionReceipts].reverse().find(
+    (receipt) => (receipt.toolId === action.tool || receipt.toolId === selectedToolId)
+      && receipt.outcome === 'question_asked',
+  )
+  if (!earlierCredentialRequest) return undefined
+
+  const reason = `Tool '${selectedToolId}' already prompted the user for credentials and the mission resumed without those credentials. Do not retry it; choose a different capability, resolve a replacement tool, or explain the blocker.`
+  await deps.brain.reportComplaint(reply.completion.requestId, reason, context.missionId)
+  state.actionReceipts.push(enrichReceipt({
+    toolId: action.tool,
+    isError: true,
+    content: reason,
+    outcome: 'denied',
+  }))
+  state.tell(`${reason} The prior credential request did not produce usable credentials. Use another tool or report the exact blocker.`)
   await state.save()
   return NEXT_TURN
 }
@@ -136,5 +175,6 @@ export const ACTION_GUARDS: readonly ActionGuard[] = [
   detectNoProgress,
   reuseResultFromBeforeInterruption,
   refuseToolThatFailedAfterResolution,
+  refuseRetryOfCredentialRequestedTool,
   enforceActionBudget,
 ]

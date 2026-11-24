@@ -220,7 +220,7 @@ router.put('/:missionId/tasks/:taskId', asyncHandler(async (req, res) => {
 
 router.get('/:missionId/events', asyncHandler(async (req, res) => {
   const missionId = req.params.missionId as string;
-  let events = await service.listMissionEvents(missionId);
+  let events = await service.listMissionEvents(missionId, { omitAmendmentPlan: true });
   const storedKeys = new Set(events.map((e: any) => `${e.type}|${e.data?.phaseId || ''}|${e.data?.taskId || ''}`));
   const state = await service.getMissionState(missionId);
   if (events.length === 0) {
@@ -274,8 +274,8 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
         || /^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(artifact.content)
       );
     const phaseId = typeof artifact.phaseId === 'string' ? artifact.phaseId : context.phaseId;
-    const artifactLineageId = expected && phaseId && !isBlocker
-      ? `mission:${encodeURIComponent(missionId)}:phase:${encodeURIComponent(phaseId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
+    const artifactLineageId = !isBlocker
+      ? `mission:${encodeURIComponent(missionId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
       : undefined;
     const legacyLineageId = `mission:${encodeURIComponent(missionId)}:${encodeURIComponent(name.trim().toLocaleLowerCase())}`;
     const needsCanonicalLineage = artifactLineageId
@@ -457,7 +457,7 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
   const phases = (plan as {
     phases?: Array<{ id: string; name?: string; status?: string; tasks?: Array<{ id: string; title?: string; expectedArtifacts?: string[] }> }>;
   } | undefined)?.phases || [];
-  const missionEvents = await service.listMissionEvents(missionId);
+  const missionEvents = await service.listMissionEvents(missionId, { type: 'task_completed' });
   for (const event of missionEvents) {
     if (event.type !== 'task_completed' || !Array.isArray(event.data?.artifacts)) continue;
     const phaseId = typeof event.data.phaseId === 'string' ? event.data.phaseId : undefined;
@@ -628,7 +628,7 @@ router.delete('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res)
   }
 
   if (!deleted) {
-    const missionEvents = await service.listMissionEvents(missionId);
+    const missionEvents = await service.listMissionEvents(missionId, { type: 'task_completed' });
     for (const event of missionEvents) {
       if (event.type === 'task_completed' && Array.isArray(event.data?.artifacts)) {
         const initialLength = event.data.artifacts.length;
@@ -850,7 +850,14 @@ function deriveEventsFromMissionState(state: any): Array<{ type: string; timesta
 }
 
 router.post('/:missionId/events', asyncHandler(async (req, res) => {
-  const event = await service.appendMissionEvent(req.params.missionId as string, req.body);
+  const incoming = req.body;
+  if (incoming?.type === 'phase_plan_amended' && incoming.data && typeof incoming.data === 'object' && !Array.isArray(incoming.data)) {
+    const { plan, ...data } = incoming.data;
+    const event = await service.appendMissionEvent(req.params.missionId as string, { ...incoming, data });
+    res.status(201).json(plan === undefined ? event : { ...event, data: { ...event.data, plan } });
+    return;
+  }
+  const event = await service.appendMissionEvent(req.params.missionId as string, incoming);
   res.status(201).json(event);
 }));
 

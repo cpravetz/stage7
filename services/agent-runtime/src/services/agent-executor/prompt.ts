@@ -23,7 +23,10 @@ export function renderBrainTranscript(history: ChatMessage[]): string {
 export interface SystemPromptInput {
   /** The agent definition's own system prompt. */
   base: string
+  /** The top-ranked tool descriptors to include in the prompt catalog. */
   tools: ToolDescriptor[]
+  /** Total number of visible tools (may exceed tools.length when pre-filtered). */
+  totalToolCount?: number
   requiredActions: RequiredAction[]
   requiresExternalAction: boolean
   delegationDepth: number
@@ -39,6 +42,7 @@ export interface SystemPromptInput {
 export function buildSystemPrompt({
   base,
   tools,
+  totalToolCount,
   requiredActions,
   requiresExternalAction,
   delegationDepth,
@@ -52,20 +56,35 @@ export function buildSystemPrompt({
 }: SystemPromptInput): string {
   const catalog = describeTools(tools)
   const canTakeAction = remainingActions > 0
+  const isTruncated = totalToolCount !== undefined && totalToolCount > tools.length
   const delegation = canTakeAction && delegationDepth < maxDelegationDepth && remainingDelegations > 0
     ? `You may delegate a bounded subtask with {"tool":"${DELEGATE_ACTION}","args":{"goal":"...","role":"...","systemPrompt":"..."}}. One delegation runs the child to completion and returns its completed result. Put the full subtask in that one request; do not delegate to discover an Agent ID or make a follow-up delegation just to retrieve its result.`
     : 'You may not delegate further in this execution.'
+  const catalogNote = isTruncated
+    ? `Showing the ${tools.length} most relevant tools out of ${totalToolCount} available. Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to find additional tools not listed here. A catalog search returning nothing for the operation is the answer: it is evidence the capability is missing, not a retry prompt. Do not search again with reworded queries; call ${CREATE_TOOL_ACTION} to create the capability.`
+    : `Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to search the catalog if no listed tool matches. A catalog search returning nothing for the operation is the answer: it is evidence the capability is missing, not a retry prompt. Do not search again with reworded queries; call ${CREATE_TOOL_ACTION} to create the capability.`
+  // The built-in pseudo-tools are handled by the executor and never appear in the
+  // tool catalog, so a model told only "the catalog is authoritative" can conclude
+  // the system has no tool-creation path at all and stall. State the control
+  // actions explicitly and explain what a catalog miss means.
+  const controlActionsNote = canTakeAction
+    ? [
+      `These control actions are always available and are NOT listed in the tool catalog: "${LIST_TOOLS_ACTION}" (search the catalog), "${CREATE_TOOL_ACTION}" (create and register a capability the catalog lacks), and "${DELEGATE_ACTION}" (delegate a subtask). Their absence from the catalog does not mean they are unsupported.`,
+      `Prefer an existing tool that performs the exact operation. Call ${CREATE_TOOL_ACTION} when the catalog genuinely lacks the capability — for example the very first time a kind of operation is needed. Once a tool for it is registered, REUSE that tool on later tasks instead of creating another one; a capability that already exists is not a reason to create a duplicate.`,
+    ]
+    : [];
   const actionInstructions = canTakeAction
     ? [
       'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
-      `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
-      `First inspect the current visible tool catalog with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. If a matching tool is listed, invoke it with the requested values and verify its result; do not stop after discovery or treat a catalog listing as completion.`,
+      `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'ranked by relevance to your task'}): ${JSON.stringify(catalog)}`,
+      catalogNote,
       'Prepare arguments from each tool’s inputSchema, configSchema and outputSchema. Tool configuration and stored credentials are supplied by the system, not by you: call the matching tool with the task inputs and the system will resolve configured secrets or request missing ones securely. Never request, invent or echo secret values. For inputs marked "x-stage7-secret": true, pass only an already-supplied vault:// reference, and never show a vault:// reference to the user.',
       'When a user identifies existing Vault secrets by name, preserve those names when requesting capability resolution and distinguish secret names from plaintext. Include other supplied configuration values in the capability requirements. Do not ask for values already supplied, and do not assume a tool supports a provider merely because its name is similar.',
       toolPolicy.mode === 'allowlist'
         ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
-        : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
+        : `If no available tool can satisfy a concrete capability need, proactively call ${CREATE_TOOL_ACTION} to create one: {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
       'Select a tool only when its description and schemas show it performs the exact requested operation and can verify the outcome. Name similarity is not enough: drafting, queuing, storing, or recording a request is not a substitute for sending, publishing, submitting, or otherwise carrying out the requested action.',
+      'Never pass a requested operation to a general-purpose tool that does not implement it (for example putting an SMS request into a file-write or search tool). A tool whose schema has no field for the operation cannot perform it; treat that as the capability being absent and call ' + CREATE_TOOL_ACTION + ' instead.',
     ]
     : [
       'No tool, tool-generation, or delegation actions are available in this execution. Do not invent, quote, or describe tool actions; return only the requested reasoning result or structured response.',
@@ -74,21 +93,25 @@ export function buildSystemPrompt({
   return [
     base || 'You are an autonomous mission agent. Complete the assigned task and report what you did.',
     'You are a mission-scoped Agent, not the persistent domain Assistant. Use Brain and system tools as needed.',
+    'The original mission goal is the scope of all tasks, actions, delegations, and capability requests. Use only steps necessary for that goal; never substitute a different operation or medium because it appears in a plan, tool catalog, or previous result. Preserve the requested operation and its constraints when describing a missing capability.',
     `Execution policy caps: ${policy.maxBrainCalls} Brain calls, ${policy.maxActions} tool/delegation actions, ${policy.maxCompletionTokens} total generated completion tokens, ${policy.maxCompletionTokensPerCall} tokens per completion, and ${policy.maxDelegations} delegated subtasks.`,
-    `Remaining budget: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
+    `Remaining this execution: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
     ...(requiredActions.length > 0
       ? [`Required completed steps before finishing: ${JSON.stringify(requiredActions)}. Complete each required step and verify its actual result. For an expected denial, make the request even if it is not listed among available tools.`]
 
       : []),
     ...(requiresExternalAction
-      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Use a registered tool whose schemas show it performs the requested operation, execute it with the task’s actual values, and rely on the returned result.']
+      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Find the best existing tool in the catalog and execute it. If NO listed tool can perform this exact operation, you may call ' + CREATE_TOOL_ACTION + ' to create one — but only after searching the catalog. Never claim success without the operation completing.']
       : []),
     ...actionInstructions,
+    ...controlActionsNote,
     delegation,
     'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-    'Preserve every user-supplied literal (recipient, identifier, message, amount) exactly. Act autonomously: take values from the mission, inspect the live catalog with ' + LIST_TOOLS_ACTION + ', try suitable tools, and use capability resolution to create a tool when none exists, before asking for help. Never invent user turns, never write action receipts yourself (the system records them), and do not repeat actions with uncertain side effects.',
-    'Ask only as a last resort, for one specific value that you cannot obtain from the mission, configuration, or tools. Output a single line: ' + ASK_USER_MARKER + ' <one plain-text question naming the exact value, the tool or service that needs it, and why>. The Agent runtime will pause execution and present this question to the user. A missing runtime module is not a credential. Mark secret values with [secret:<key>].',
+    'Create the assigned deliverables yourself using the mission context and available tools. Do not ask the user to write, create, or produce an artifact assigned to an agent. When asked for a recommendation or choice, compare candidates against the mission goals, constraints, and user context, then choose the strongest fit; if preferences are unstated, select a defensible default and state your assumptions. When a tool is named as failing or possibly unsuitable, inspect its live catalog entry, schemas, and recorded action results/errors; diagnose the evidence and try a suitable alternative or capability resolution when permitted. Never ask the user to diagnose a tool or decide whether to switch. Ask for input only when an essential fact cannot reasonably be inferred or explicit authorization is required.',
+    'Preserve every user-supplied literal (recipient, identifier, message, amount) exactly. Act autonomously: take values from the mission, inspect the live catalog with ' + LIST_TOOLS_ACTION + ', try suitable tools, and use capability resolution to create a tool when none exists, before asking for help. If a tool needs configuration values from the user, ensure it is registered with the tool executor (so it appears on /tools with a complete manifest and configSchema) before asking — asking before registration leaves the user no way to find and configure the tool. Never invent user turns, never write action receipts yourself (the system records them), and do not repeat actions with uncertain side effects.',
+    'Ask only as a last resort, for exactly one specific non-secret fact, decision, or permission you cannot obtain from the mission, configuration, or tools. Output a single line: ' + ASK_USER_MARKER + ' <one plain-text question naming the exact missing information and why it is required>. Do not output vague questions such as "I need more information" or "Please provide the missing value" without naming what is missing. Never ask for API keys, tokens, passwords, or other secrets in a free-text question: create and register the tool, then execute it so Tool Executor can present a secure credential request for that specific tool. A missing runtime module is not a credential.',
     'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
     'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
+    'Your final answer must be plain prose or the requested deliverable content. Never return a tool manifest, plan, task object, action receipt, or any raw JSON object as your final answer: those are internal data, and a JSON reply is treated as an incomplete task.',
   ].join('\n\n')
 }

@@ -43,6 +43,17 @@ export interface ModelPerformanceOutcome {
 
 const RESPONSE_TIME_BASELINE_MS = 30_000;
 const RESPONSE_TIME_SCORE_RANGE = 80;
+/** Below this many calls, a complaint rate is not yet statistically meaningful. */
+const MIN_REQUESTS_FOR_COMPLAINT_RANKING = 20;
+/**
+ * Complaint rate past which a model's answers are mostly unusable. Observed
+ * directly: `mistral:7b` answered 9,989 of 10,344 calls with content the caller
+ * rejected as invalid (96.6%) yet kept winning routing, because its HTTP calls
+ * "succeeded" and the complaint penalty was too small to outweigh that.
+ */
+const UNUSABLE_COMPLAINT_RATE = 0.4;
+/** Larger than any accumulated positive signal, so an unusable model is a last resort. */
+const UNUSABLE_MODEL_PENALTY = 1_000;
 
 function modelSpecializationPenalty(model: ModelDefinition, task: string): number {
   const id = model.id.toLowerCase();
@@ -312,6 +323,14 @@ export class ModelRouter {
       }
       const complaintRate = Math.max(0, Math.min(1, metrics.complaintRate || 0));
       if (complaintRate > 0) score -= complaintRate * (optimizeFor === 'accuracy' ? 600 : 300);
+      // A model that returns an unusable answer most of the time costs the caller
+      // a full round of retries, so a routing score that still favours it is not
+      // "balanced" — it is broken. Past this threshold the answer quality, not
+      // cost or latency, is what matters, so take the model out of contention.
+      if (metrics.totalRequests >= MIN_REQUESTS_FOR_COMPLAINT_RANKING
+        && complaintRate >= UNUSABLE_COMPLAINT_RATE) {
+        score -= UNUSABLE_MODEL_PENALTY;
+      }
     } else if (optimizeFor === 'accuracy' && model.capabilities.includes('reasoning')) {
       score += 10;
     }

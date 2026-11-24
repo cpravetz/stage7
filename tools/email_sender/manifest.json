@@ -1,0 +1,44 @@
+{
+  "id": "email_sender",
+  "name": "Email Sender",
+  "description": "Send emails via SMTP using nodemailer. Requires the `smtp_host`, `smtp_user`, and `smtp_pass` credentials (smtp_port and from_address are optional, defaulting via SMTP_PORT/SMTP_FROM env vars). No message queueing or scheduling support; sends immediately.",
+  "type": "native",
+  "manifest": {
+    "executor": "email",
+    "codeFile": "email.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "smtp_host": { "type": "string", "description": "SMTP server hostname", "vaultSecretId": "tool:email_sender:smtp_host", "label": "SMTP host" },
+        "smtp_port": { "type": "integer", "description": "SMTP server port (default 587)", "default": 587 },
+        "smtp_user": { "type": "string", "description": "SMTP username/email", "vaultSecretId": "tool:email_sender:smtp_user", "label": "SMTP username/email" },
+        "smtp_pass": { "type": "string", "description": "SMTP password", "vaultSecretId": "tool:email_sender:smtp_pass", "label": "SMTP password", "sensitive": true },
+        "from_address": { "type": "string", "description": "Default sender email address" },
+        "secure": { "type": "boolean", "description": "Use SSL/TLS (true for port 465)", "default": false }
+      },
+      "required": ["smtp_host", "smtp_user", "smtp_pass"]
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "to": { "type": ["string", "array"], "items": { "type": "string" }, "description": "Recipient email address(es), as a string or array of strings" },
+      "subject": { "type": "string", "description": "Email subject line (required)" },
+      "text": { "type": "string", "description": "Plain text body" },
+      "html": { "type": "string", "description": "HTML body" },
+      "from": { "type": "string", "description": "Sender address (defaults to smtp_user or from_address)" },
+      "attachments": { "type": "array", "items": { "object": { "properties": { "filename": { "type": "string" }, "content": { "type": "string" }, "path": { "type": "string" } }, "required": ["filename"] }, "description": "File attachments" } }
+    },
+    "required": ["to", "subject"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean", "description": "Whether the email was sent" },
+      "messageId": { "type": "string", "description": "Message ID assigned by the SMTP server" },
+      "error": { "type": "string", "description": "Error message, if sending failed" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

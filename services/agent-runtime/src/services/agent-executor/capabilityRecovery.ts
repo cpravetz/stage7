@@ -3,6 +3,7 @@ import { keyForSignature } from './fingerprint'
 import { receiptFromResult } from './receipts'
 import { NEXT_TURN, STOP_LOOP, returnWith, type ActionTurn, type RunContext, type TurnEnd } from './RunContext'
 import { findTool } from './toolCatalog'
+import { classifyFailure, FAILURE_CODES } from './toolFailures'
 import type { AgentActionReceipt, ToolDescriptor, ToolResult } from './types'
 
 /** How many characters of the mission goal are quoted when describing a missing capability. */
@@ -87,6 +88,8 @@ export async function recoverFromRepeatedAction(rc: RunContext, turn: ActionTurn
 
   if (
     previousFailure
+    && previousFailure.outcomeKnown !== false
+    && classifyFailure(previousFailure.content).code !== FAILURE_CODES.OUTCOME_UNKNOWN
     && !capabilityResolutionAttempted
     && toolPolicy.mode !== 'allowlist'
     && state.toolCalls < policy.maxActions
@@ -110,6 +113,12 @@ export async function recoverFromRepeatedAction(rc: RunContext, turn: ActionTurn
     if (isHandoffToUser(resolution)) {
       await state.save()
       return returnWith(state.result(resolution.content, { reasoning: reply.reasoning }))
+    }
+    if (resolution.isError && resolution.outcomeKnown === false) {
+      state.incompleteReason = `Tool resolution outcome is uncertain; reconcile it before retrying. ${resolution.content}`
+      state.finalOutput = state.incompleteReason
+      await state.save()
+      return returnWith(state.result(state.finalOutput, { incompleteReason: state.incompleteReason, reasoning: reply.reasoning }))
     }
     if (!resolution.isError && resolution.resolvedToolId) {
       state.fallbackToolIds.set(resolution.resolvedToolId, failedToolId)
@@ -163,11 +172,11 @@ export type FailureRecovery =
 export async function recoverFromToolFailure(
   rc: RunContext,
   turn: ActionTurn,
-  failure: { missingModule: string | undefined; repeatedToolFailure: boolean; unavailableRequestedTool: boolean; failedTool: ToolDescriptor | undefined },
+  failure: { missingModule: string | undefined; repeatedToolFailure: boolean; unavailableRequestedTool: boolean; configurationFailure: boolean; failedTool: ToolDescriptor | undefined },
 ): Promise<FailureRecovery | undefined> {
   const { state, toolPolicy, policy } = rc
   const { action } = turn
-  const { missingModule, repeatedToolFailure, unavailableRequestedTool, failedTool } = failure
+  const { missingModule, repeatedToolFailure, unavailableRequestedTool, configurationFailure, failedTool } = failure
   const failedToolId = failedTool?.id || action.tool
   const capabilityResolutionAttempted = state.actionReceipts.some(
     (receipt) => receipt.toolId === CREATE_TOOL_ACTION && receipt.fallbackForToolId === failedToolId,
@@ -175,7 +184,8 @@ export async function recoverFromToolFailure(
   const needsCapabilityResolution = Boolean(
     (missingModule && failedTool)
     || unavailableRequestedTool
-    || repeatedToolFailure,
+    || repeatedToolFailure
+    || (configurationFailure && failedTool),
   )
   if (
     !needsCapabilityResolution
@@ -190,9 +200,12 @@ export async function recoverFromToolFailure(
     ? `${failedTool.name} ${failedTool.description}`
     : action.tool.replace(/[_-]+/g, ' ')
   const taskGoal = taskGoalOf(rc)
-  const capabilitySource = failedTool
-    ? `${taskGoal} ${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
-    : taskGoal || capabilityDescription
+  const taskObjective = typeof rc.spec.taskContext.taskObjective === 'string'
+    ? rc.spec.taskContext.taskObjective.trim().slice(0, MAX_GOAL_CHARS)
+    : ''
+  const capabilitySource = taskObjective || (failedTool
+    ? `${taskGoal} ${capabilityDescription}`.slice(0, 1_500)
+    : taskGoal || capabilityDescription)
   const capability = capabilitySource
     .match(/[a-z0-9]+/gi)
     ?.join(' ')
@@ -202,9 +215,10 @@ export async function recoverFromToolFailure(
     description: [
       `Resolve the capability "${capability}".`,
       failedTool
-        ? `The available tool "${failedTool.name}" (${failedTool.id}) failed${missingModule ? ` because runtime package "${missingModule}" is unavailable` : repeatedToolFailure ? ' repeatedly without progress' : ''}.`
+        ? `The available tool "${failedTool.name}" (${failedTool.id}) failed${missingModule ? ` because runtime package "${missingModule}" is unavailable` : configurationFailure ? ' because required configuration is missing' : repeatedToolFailure ? ' repeatedly without progress' : ''}.`
         : 'A guessed tool identifier was not registered; derive the capability from the task goal rather than that identifier.',
-      taskGoal ? `Task goal: "${taskGoal}".` : '',
+      taskGoal ? `Original mission goal (authoritative scope): "${taskGoal}".` : '',
+      taskObjective ? `Assigned task: "${taskObjective}".` : '',
       'Check registered and approved integrations first; create a compatible implementation only if none is suitable. The replacement must perform the exact task operation, not a similarly named draft, queue, or storage operation.',
       'Do not install unavailable runtime packages or claim success without verified execution.',
     ].filter(Boolean).join(' '),

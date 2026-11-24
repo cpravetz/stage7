@@ -1,0 +1,50 @@
+{
+  "id": "get_weather",
+  "name": "Get Weather",
+  "description": "Retrieve current weather information for a specified location using Open-Meteo (no API key required). Supports optional units (metric/imperial) and forecast days (1-7).",
+  "type": "native",
+  "manifest": {
+    "executor": "weather",
+    "codeFile": "weather.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "location": { "type": "string", "description": "City name, address, or coordinates (e.g., \"San Francisco\" or \"37.7749,-122.4194\")" },
+      "units": { "type": "string", "enum": ["metric", "imperial"], "description": "Temperature units (default: metric)" },
+      "forecastDays": { "type": "integer", "minimum": 1, "maximum": 7, "description": "Number of forecast days to include (default: current only)" }
+    },
+    "required": ["location"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "weather": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "string" },
+          "latitude": { "type": "number" },
+          "longitude": { "type": "number" },
+          "temperature": { "type": "number" },
+          "apparentTemperature": { "type": "number" },
+          "humidity": { "type": "number" },
+          "precipitation": { "type": "number" },
+          "windSpeed": { "type": "number" },
+          "condition": { "type": "string" },
+          "isDay": { "type": "boolean" },
+          "observedAt": { "type": "string" },
+          "units": { "type": "string" }
+        }
+      },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

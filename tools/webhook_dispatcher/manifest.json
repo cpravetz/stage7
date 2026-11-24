@@ -1,0 +1,43 @@
+{
+  "id": "webhook_dispatcher",
+  "name": "Webhook Dispatcher",
+  "description": "Send HTTP webhooks with retry, signing, and event tracking. No operator credentials required; the target URL is provided per call. Supports configurable HTTP methods, headers, JSON bodies, and retry with backoff.",
+  "type": "native",
+  "manifest": {
+    "executor": "webhook",
+    "codeFile": "webhook.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "secret": { "type": "string", "title": "Secret", "description": "Webhook secret for signing", "sensitive": true, "required": false, "envVar": "WEBHOOK_SECRET", "label": "Webhook Secret" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string", "description": "Target webhook URL (required)" },
+      "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"], "description": "HTTP method (default POST)" },
+      "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Additional HTTP request headers" },
+      "body": { "description": "Request body, sent as JSON" },
+      "secret": { "type": "string", "description": "Secret token added as the X-Webhook-Secret header (sensitive)", "sensitive": true },
+      "event": { "type": "string", "description": "Event name added as the X-Webhook-Event header" },
+      "retries": { "type": "integer", "minimum": 1, "description": "Number of delivery attempts (default 3)" },
+      "timeoutMs": { "type": "integer", "minimum": 1, "description": "Per-attempt timeout in milliseconds (default 10000)" }
+    },
+    "required": ["url"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean", "description": "Whether delivery succeeded" },
+      "statusCode": { "type": "integer", "description": "HTTP status code of the response" },
+      "response": { "description": "Response body, parsed as JSON if possible" },
+      "error": { "type": "string", "description": "Error message, if delivery failed after retries" },
+      "durationMs": { "type": "integer", "description": "Total execution time in milliseconds" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

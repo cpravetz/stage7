@@ -79,13 +79,56 @@ describe('mission resume progress', () => {
 import {
   recoveryProgressSignature,
   hasRecoveryProgress,
+  hasEvidenceRecoveryProgress,
+  recoveryEvidenceState,
   missionExecutionEvidenceGaps,
+  phaseRequirementEvidenceGaps,
+  classifyMissionCompletionGaps,
+  recoveryTaskDependencies,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
   type MissionPhaseEvidence,
 } from '../src/types/workflow';
 
 describe('progress-aware recovery (Tasks 3/7)', () => {
+  it('counts relevant evidence, not changing gap wording or unrelated artifacts, as recovery progress', () => {
+    const before = recoveryProgressSignature({ gaps: ['First wording'], artifactNames: [] });
+    const evidence = recoveryEvidenceState([{
+      taskId: 'task-1', status: 'completed',
+      artifacts: [{ name: 'unrelated.txt', type: 'text', content: 'text' }],
+    }], ['required.txt']);
+    const unchanged = recoveryProgressSignature({ gaps: ['Different wording'], ...evidence });
+    expect(hasEvidenceRecoveryProgress(before, unchanged)).toBe(false);
+    const resolved = recoveryEvidenceState([{
+      taskId: 'task-1', status: 'completed',
+      artifacts: [{ name: 'required.txt', type: 'text', content: 'result' }],
+    }], ['required.txt']);
+    expect(hasEvidenceRecoveryProgress(unchanged, recoveryProgressSignature({ gaps: ['Different wording'], ...resolved }))).toBe(true);
+  });
+
+  it('requires phase artifacts to exist even if a reviewer claims success', () => {
+    const plan: Plan = {
+      summary: 'Create a tool', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Create', goal: 'Create a tool', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Create', description: 'Create the tool', agentRole: 'worker',
+          systemPrompt: 'Create', expectedArtifacts: ['tool.json'], status: 'completed', artifacts: [],
+        }],
+      }],
+    };
+    const output: MissionPhaseEvidence = {
+      phaseId: 'phase-1', status: 'in_progress',
+      tasks: [{ taskId: 'task-1', status: 'completed', artifacts: [], output: 'Done' }],
+    };
+    expect(phaseRequirementEvidenceGaps(plan, 'phase-1', output)).toEqual([
+      expect.stringContaining('missing expected artifact "tool.json"'),
+    ]);
+    output.tasks[0].artifacts = [{ name: 'tool.json', type: 'text', content: '{"created":true}' }];
+    expect(phaseRequirementEvidenceGaps(plan, 'phase-1', output)).toEqual([]);
+  });
+
   it('detects no-progress when gaps and evidence state are unchanged, and progress when state changes', () => {
     const base = {
       gaps: ['Task "Send" (task-1) did not complete the required step "sms".'],
@@ -158,8 +201,199 @@ describe('progress-aware recovery (Tasks 3/7)', () => {
     ]));
   });
 
-  it('does not treat incomplete prerequisites as completed dependencies', () => {
-    const resume = getMissionResumeProgress({
+  it('bounds recovery dependencies while keeping original and recent completed evidence', () => {
+    const makeTask = (id: string, status: 'completed' | 'failed') => ({
+      id, title: id, description: id, agentRole: 'worker', systemPrompt: id,
+      status, artifacts: [],
+    });
+    const tasks = [
+      makeTask('source', 'completed'),
+      makeTask('failed-source', 'failed'),
+      ...Array.from({ length: 700 }, (_, i) => makeTask(`phase-1-mission-recovery-${i + 1}`, 'completed')),
+    ];
+    const selected = recoveryTaskDependencies(tasks, tasks.map((task) => ({ taskId: task.id })), ['source']);
+    expect(selected).toHaveLength(7);
+    expect(selected).toContain('source');
+    expect(selected).not.toContain('failed-source');
+    expect(selected).not.toContain('phase-1-mission-recovery-1');
+    expect(selected).toContain('phase-1-mission-recovery-700');
+  });
+
+  it('ignores superseded recovery failures but retains unresolved and uncertain outcomes', () => {
+    const makeTask = (id: string, status: 'completed' | 'failed') => ({
+      id, title: id, description: id, agentRole: 'worker', systemPrompt: id,
+      status, artifacts: [],
+    });
+    const original = makeTask('task-1', 'completed');
+    const failed = makeTask('phase-1-mission-recovery-1', 'failed');
+    const recovered = makeTask('phase-1-mission-recovery-2', 'completed');
+    const plan: Plan = {
+      summary: 'Work', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{ id: 'phase-1', name: 'Work', goal: 'Work', requiresApproval: false,
+        status: 'completed', tasks: [original, failed, recovered] }],
+    };
+    const phases: MissionPhaseEvidence[] = [{
+      phaseId: 'phase-1', status: 'completed', tasks: [
+        { taskId: original.id, status: 'completed', artifacts: [] },
+        { taskId: failed.id, status: 'failed', artifacts: [], output: 'Tool unavailable' },
+        { taskId: recovered.id, status: 'completed', artifacts: [] },
+      ],
+    }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual([]);
+    phases[0].tasks[1].output = 'Outcome unknown';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].output = 'Tool unavailable';
+    phases[0].tasks[1].artifacts = [{
+      name: 'system-action-receipts.json', type: 'evidence',
+      content: JSON.stringify([{ toolId: 'send', outcome: 'failure', outcomeKnown: false }]),
+    }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].artifacts = [{ name: 'system-action-receipts.json', type: 'evidence', content: '{' }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].artifacts = [];
+    plan.phases[0].tasks[1].expectedArtifacts = ['required-report'];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining('required-report'),
+    ]));
+    plan.phases[0].tasks[1].expectedArtifacts = [];
+    phases[0].tasks[2].status = 'failed';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+  });
+
+  it('uses the plan-recorded outcome when a phase result entry was lost', () => {
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Research', description: 'Research', agentRole: 'worker',
+          systemPrompt: 'Research', expectedArtifacts: ['research.md'], status: 'completed',
+          output: 'Research complete.',
+          artifacts: [{ name: 'research.md', type: 'text', content: '# Findings\nReal findings.' }],
+        }],
+      }],
+    };
+    // The in-memory phase evidence lost the task entry, but the plan still
+    // records that it finished and what it produced. That is a data/state
+    // problem, not evidence that the task never ran.
+    expect(missionExecutionEvidenceGaps(plan, [{ phaseId: 'phase-1', status: 'in_progress', tasks: [] }]))
+      .toEqual([]);
+  });
+
+  it('credits a completed recovery artifact for a missing original result without masking missing actions', () => {
+    const original = {
+      id: 'task-1', title: 'Research', description: 'Research', agentRole: 'worker',
+      systemPrompt: 'Research', expectedArtifacts: ['research.md'], status: 'pending' as const, artifacts: [],
+    };
+    const recovery = {
+      ...original, id: 'phase-1-mission-recovery-1', title: 'Recovery',
+      status: 'completed' as const,
+      artifacts: [{ name: 'research.md', type: 'text', content: 'Findings.' }],
+    };
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{ id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false,
+        status: 'completed', tasks: [original, recovery] }],
+    };
+    const phases: MissionPhaseEvidence[] = [{ phaseId: 'phase-1', status: 'completed',
+      tasks: [{ taskId: recovery.id, status: 'completed', artifacts: recovery.artifacts }] }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual([]);
+    phases[0].tasks[0].status = 'incomplete';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining('has no execution result'),
+    ]));
+    phases[0].tasks[0].status = 'completed';
+    plan.phases[0].tasks[0].requiresExternalAction = true;
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining('has no execution result'),
+    ]));
+    plan.phases[0].tasks[0].requiresExternalAction = false;
+    original.expectedArtifacts = ['different.md'];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining('has no execution result'),
+    ]));
+  });
+
+  it('only supersedes a failed amendment when later recovery targets it and its outcome is known', () => {
+    const amendment = {
+      id: 'phase-1-amendment-1', title: 'Fix gap', description: 'Fix', agentRole: 'worker',
+      systemPrompt: 'Fix', expectedArtifacts: [], status: 'incomplete' as const, artifacts: [],
+    };
+    const recovery = { ...amendment, id: 'phase-1-mission-recovery-1', status: 'completed' as const,
+      systemPrompt: 'Resolve phase-1-amendment-1' };
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{ id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false,
+        status: 'completed', tasks: [amendment, recovery] }],
+    };
+    const phases: MissionPhaseEvidence[] = [{ phaseId: 'phase-1', status: 'completed', tasks: [
+      { taskId: amendment.id, status: 'incomplete', artifacts: [], output: 'Could not finish.' },
+      { taskId: recovery.id, status: 'completed', artifacts: [] },
+    ] }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual([]);
+    phases[0].tasks[0].output = 'Outcome unknown';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(amendment.id),
+    ]));
+    phases[0].tasks[0].output = 'Could not finish.';
+    recovery.systemPrompt = 'Resolve another gap';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(amendment.id),
+    ]));
+  });
+
+  it('never reports a structured payload as a task failure reason', () => {
+    const structured = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Research', description: 'Research', agentRole: 'worker',
+          systemPrompt: 'Research', expectedArtifacts: [], status: 'incomplete',
+          output: structured, artifacts: [],
+        }],
+      }],
+    };
+    const gaps = missionExecutionEvidenceGaps(plan, [{
+      phaseId: 'phase-1', status: 'in_progress',
+      tasks: [{ taskId: 'task-1', status: 'incomplete', artifacts: [], output: structured }],
+    }]);
+    expect(gaps.join(' ')).not.toContain('content-performance-seo');
+    expect(gaps.join(' ')).not.toContain('inputSchema');
+    expect(gaps).toEqual(expect.arrayContaining([expect.stringContaining('is incomplete, not completed')]));
+  });
+
+  it('classifies data/state gaps as a resumable review, never mission failure', () => {
+    expect(classifyMissionCompletionGaps('Research', [
+      'Task "Research" (task-1) has no execution result in phase "Research".',
+    ])).toMatchObject({ status: 'awaiting_review' });
+    expect(classifyMissionCompletionGaps('Research', [
+      'Task "Research" (task-1) is missing expected artifact "research.md". No non-empty deliverable content or file reference was recorded.',
+    ])).toMatchObject({ status: 'awaiting_review' });
+  });
+
+  it('does not treat incomplete prerequisites as completed dependencies', () => {    const resume = getMissionResumeProgress({
       summary: 'x', estimatedDuration: 's', estimatedCost: 'l', requiresClarification: false,
       clarificationQuestions: [], clarificationAnswers: [],
       phases: [{

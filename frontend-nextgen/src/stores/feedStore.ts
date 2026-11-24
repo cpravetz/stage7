@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { agentDisplayName, friendlyMissionError, missionAgentRoleLabel, missionGapText, sanitizeAgentMessage } from '../utils/missionEvents';
+import { agentDisplayName, friendlyMissionError, missionAgentRoleLabel, missionGapText, missionReviewMessage, sanitizeAgentMessage } from '../utils/missionEvents';
 
 export type FeedEventType =
   | 'log'
@@ -200,12 +200,16 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'task_completed':
         message = `Task completed: ${(data.taskTitle as string) || (data.taskId as string) || ''}`.trim();
         break;
-      case 'task_incomplete':
-        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
+      case 'task_incomplete': {
+        const reason = friendlyMissionError((data.error as string) || '');
+        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''}${reason ? ` — ${reason}` : ''}`.trim();
         break;
-      case 'task_failed':
-        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
+      }
+      case 'task_failed': {
+        const reason = friendlyMissionError((data.error as string) || '');
+        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''}${reason ? ` — ${reason}` : ''}`.trim();
         break;
+      }
       case 'user':
       case 'user_message':
         message = (data.content as string) || (data.message as string) || '';
@@ -232,6 +236,13 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `Mission failed: ${friendlyMissionError((r.error as string) || (data.error as string) || '')}`.trim();
         break;
       case 'mission_incomplete': {
+        if (data.recoverable === true) {
+          const reason = typeof data.reason === 'string' && data.reason.trim()
+            ? data.reason.trim()
+            : 'A temporary service problem interrupted the work.';
+          message = `Mission paused on a recoverable problem: ${reason} The mission keeps its saved progress and can continue without losing completed work.`;
+          break;
+        }
         const reason = typeof data.reason === 'string'
           ? data.reason
           : Array.isArray(data.gaps)
@@ -242,6 +253,9 @@ export function normalize(raw: unknown): FeedEvent | null {
           : 'Mission incomplete';
         break;
       }
+      case 'mission_needs_review':
+        message = missionReviewMessage(data);
+        break;
       case 'agent_delegation': {
         const to = typeof data.to === 'string' ? data.to : typeof data.agentId === 'string' ? data.agentId : '';
         const content = typeof data.content === 'string' ? data.content : typeof data.message === 'string' ? data.message : '';
@@ -279,8 +293,11 @@ export function normalize(raw: unknown): FeedEvent | null {
     }
   }
 
+  // Monologue events ARE reasoning — they must never be sanitized or replaced
+  // with fallback text. The Agents view ReasoningBox depends on the thought
+  // field flowing through intact. Only conversational agent messages and task
+  // outcome messages are sanitized.
   const isAgentAuthoredMessage = type === 'assistant'
-    || type === 'monologue'
     || type === 'agent_delegation'
     || type === 'agent_acknowledgement'
     || type === 'agent_response'
@@ -332,33 +349,19 @@ const USER_RESPONSE_TYPES = new Set(['user', 'user_message', 'user_input_resolve
  * pending interaction (phaseId/taskId) — the backend may synthesize the
  * response text for credential or permission resolutions.
  *
- * Optimistic placeholders are also dropped when the mission lifecycle advances
- * (started/resumed), because a resume means the pending interaction was
- * consumed even if the backend does not echo a matching user response event
- * (e.g. clarification answers).
+ * Optimistic placeholders are only dropped when a matching persisted response
+ * arrives. Mission lifecycle events (started/resumed) do not automatically
+ * remove the user's response — the backend must echo the persisted copy.
  */
 function reconcileOptimisticPlaceholders(events: FeedEvent[]): FeedEvent[] {
   const persistedResponses = events.filter(
     (e) => e.metadata?.optimistic !== true && USER_RESPONSE_TYPES.has(String(e.type)),
   );
-  const lifecycleAdvanced = events.some((e) =>
-    e.metadata?.optimistic !== true
-    && (e.type === 'mission_started' || e.type === 'mission_resumed')
-    && Boolean(e.missionId),
-  );
-  if (persistedResponses.length === 0 && !lifecycleAdvanced) return events;
+  if (persistedResponses.length === 0) return events;
   const interactionKey = (e: FeedEvent) =>
     `${e.metadata?.phaseId ?? ''}|${e.metadata?.taskId ?? ''}`;
   return events.filter((e) => {
     if (e.metadata?.optimistic !== true) return true;
-    if (lifecycleAdvanced && e.missionId) {
-      const advanced = events.some((p) =>
-        p.metadata?.optimistic !== true
-        && (p.type === 'mission_started' || p.type === 'mission_resumed')
-        && p.missionId === e.missionId,
-      );
-      if (advanced) return false;
-    }
     return !persistedResponses.some((persisted) => {
       if (persisted.type !== e.type || persisted.missionId !== e.missionId) return false;
       if (persisted.message === e.message) return true;

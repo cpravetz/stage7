@@ -1,0 +1,42 @@
+{
+  "id": "api_client",
+  "name": "API Client",
+  "description": "Make generic REST API calls to external services. Requires the `api_base_url` credential (or API_CLIENT_BASE_URL env var) to be configured. Supports all HTTP methods, query parameters, custom headers, authentication (bearer, basic, API key), and configurable timeouts.",
+  "type": "native",
+  "manifest": {
+    "executor": "api_client",
+    "codeFile": "api_client.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "apiKey": { "type": "string", "title": "API Key", "description": "API key for authentication", "sensitive": true, "required": false, "envVar": "API_CLIENT_API_KEY", "label": "API Key" },
+        "token": { "type": "string", "title": "Token", "description": "Authentication token", "sensitive": true, "required": false, "envVar": "API_CLIENT_TOKEN", "label": "Token" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string" },
+      "method": { "type": "string", "default": "GET" },
+      "headers": { "type": "object" },
+      "body": { "type": "object" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["url"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "status": { "type": "integer" },
+      "data": { "type": "object" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

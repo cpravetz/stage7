@@ -10,7 +10,7 @@ import {
   DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS,
   MAX_BRAIN_REQUEST_BYTES,
 } from './constants'
-import { renderBrainTranscript } from './prompt'
+import { compactBrainRequest } from './requestCompaction'
 import type { BrainErrorResponse, BrainResponse, ChatMessage } from './types'
 
 export function brainRequestTimeoutFromEnvironment(): number {
@@ -41,40 +41,30 @@ export class BrainClient {
     maxTokens: number,
     routingSessionId?: string,
   ): Promise<BrainResponse> {
-    const buildRequestBody = (candidateHistory: ChatMessage[]) =>
-      JSON.stringify({
-        prompt: renderBrainTranscript(candidateHistory),
-        systemPrompt,
-        options: { optimizeFor: 'accuracy' },
-        maxTokens,
-        temperature: 0.3,
-        missionId,
-        entityId: typeof definition.metadata?.entityId === 'string'
-          ? definition.metadata.entityId
-          : missionId,
-        assistantId: typeof definition.metadata?.assistantId === 'string'
-          ? definition.metadata.assistantId
-          : undefined,
-        tenantId: definition.tenantId,
-        ...(routingSessionId ? { routingSessionId } : {}),
-      })
-    // Compact the conversation history until the serialized Brain request fits the
-    // service limit. Keep the first user prompt and the most recent turns; drop the
-    // oldest middle turns first so the Agent always retains its latest context.
-    let compactedHistory = history
-    let requestBody = buildRequestBody(compactedHistory)
-    while (Buffer.byteLength(requestBody) > MAX_BRAIN_REQUEST_BYTES && compactedHistory.length > 2) {
-      const latestHistoryCount = Math.max(1, Math.floor((compactedHistory.length - 1) / 2))
-      const nextHistory = [compactedHistory[0]!, ...compactedHistory.slice(-latestHistoryCount)]
-      if (nextHistory.length >= compactedHistory.length) break
-      compactedHistory = nextHistory
-      requestBody = buildRequestBody(compactedHistory)
+    const base = {
+      options: { optimizeFor: 'accuracy' },
+      maxTokens,
+      temperature: 0.3,
+      missionId,
+      entityId: typeof definition.metadata?.entityId === 'string'
+        ? definition.metadata.entityId
+        : missionId,
+      assistantId: typeof definition.metadata?.assistantId === 'string'
+        ? definition.metadata.assistantId
+        : undefined,
+      tenantId: definition.tenantId,
+      ...(routingSessionId ? { routingSessionId } : {}),
     }
+    const compacted = compactBrainRequest({
+      systemPrompt,
+      history,
+      base,
+      maxBytes: MAX_BRAIN_REQUEST_BYTES,
+    })
+    const requestBody = compacted.requestBody
     const requestBytes = Buffer.byteLength(requestBody)
     if (requestBytes > MAX_BRAIN_REQUEST_BYTES) {
-      throw new Error(
-        `Brain request for Agent ${definition.id} remains ${requestBytes} bytes after history compaction, exceeding the ${MAX_BRAIN_REQUEST_BYTES}-byte service limit; reduce the task context or tool output.`,
-      )
+      throw new Error(`Brain request for Agent ${definition.id} could not be compacted under ${MAX_BRAIN_REQUEST_BYTES} bytes (actual ${requestBytes})`)
     }
 
     const controller = new AbortController()

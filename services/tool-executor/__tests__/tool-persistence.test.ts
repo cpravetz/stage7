@@ -4,7 +4,13 @@ import path from 'path';
 import { Tool } from '../src/types';
 import { ToolStore } from '../src/services/ToolStore';
 import { ToolRegistry } from '../src/services/ToolRegistry';
-import { nativeTools } from '../src/data/nativeTools';
+import { ToolManifestLoader } from '../src/services/ToolManifestLoader';
+
+const NATIVE_TOOLS: Tool[] = new ToolManifestLoader([
+  path.resolve(__dirname, '../../../tools'),
+])
+  .loadAll()
+  .map(({ tool }) => tool);
 
 const ORIGINAL_STORE_DIR = process.env.TOOL_STORE_DIR;
 let tempDir: string;
@@ -225,7 +231,7 @@ describe('startup hydration semantics (src/index.ts)', () => {
   }
 
   function seedDefaults(registry: ToolRegistry): void {
-    for (const tool of nativeTools) {
+    for (const tool of NATIVE_TOOLS) {
       if (!registry.get(tool.id)) registry.registerDefault(tool);
     }
   }
@@ -266,7 +272,7 @@ describe('startup hydration semantics (src/index.ts)', () => {
     const registry = new ToolRegistry(store);
     seedDefaults(registry);
     expect(() => hydrate(registry, store)).not.toThrow();
-    expect(registry.list().length).toBe(nativeTools.length);
+    expect(registry.list().length).toBe(NATIVE_TOOLS.length);
   });
 
   it('a tool registered at runtime on boot 1 is restored on boot 2 (survives restart)', () => {

@@ -1,0 +1,51 @@
+{
+  "id": "database_query",
+  "name": "Database Query",
+  "description": "Execute SQL queries against SQLite, PostgreSQL, or MySQL databases. Requires a `connectionString` credential (e.g. postgresql://user:pass@host:5432/db) or individual `host`, `port`, `database`, `username`, `password` credentials for postgres/mysql. SQLite uses a local file path or \":memory:\" and needs no credentials.",
+  "type": "native",
+  "manifest": {
+    "executor": "database",
+    "codeFile": "database.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "title": "Host", "description": "Database host", "required": false, "configKey": "db.host", "label": "Host" },
+        "port": { "type": "integer", "title": "Port", "description": "Database port", "required": false, "configKey": "db.port", "label": "Port" },
+        "database": { "type": "string", "title": "Database", "description": "Database name", "required": false, "configKey": "db.database", "label": "Database" },
+        "username": { "type": "string", "title": "Username", "description": "Database username", "required": false, "configKey": "db.username", "label": "Username" },
+        "password": { "type": "string", "title": "Password", "description": "Database password", "sensitive": true, "required": false, "configKey": "db.password", "label": "Password" },
+        "connectionString": { "type": "string", "title": "Connection String", "description": "Full database connection string", "required": false, "configKey": "db.connectionString", "label": "Connection String" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "engine": { "type": "string", "enum": ["sqlite", "postgres", "mysql"], "description": "Database engine type (required)" },
+      "connectionString": { "type": "string", "description": "Full connection string (e.g. postgresql://user:pass@host:5432/db). If omitted, one is built from host/port/database/username/password or credentials" },
+      "host": { "type": "string", "description": "Database host (used to build a connection string when connectionString is omitted)" },
+      "port": { "type": "integer", "description": "Database port (defaults to 5432 for postgres, 3306 for mysql)" },
+      "database": { "type": "string", "description": "Database/schema name" },
+      "username": { "type": "string", "description": "Database username" },
+      "password": { "type": "string", "description": "Database password (sensitive)", "sensitive": true },
+      "query": { "type": "string", "description": "SQL query to execute (required)" },
+      "params": { "description": "Positional query parameters for $1, $2, ... placeholders" },
+      "timeoutMs": { "type": "integer", "minimum": 1, "description": "Query timeout in milliseconds (default 30000)" }
+    },
+    "required": ["engine", "query"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean", "description": "Whether the query succeeded" },
+      "rows": { "type": "array", "description": "Result rows" },
+      "columns": { "type": "array", "description": "Column names" },
+      "rowCount": { "type": "integer", "description": "Number of rows returned" },
+      "error": { "type": "string", "description": "Error message, if the query failed" },
+      "durationMs": { "type": "integer", "description": "Execution time in milliseconds" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

@@ -34,7 +34,12 @@ export class CapabilityResolver {
           description,
           requirements,
           excludeToolIds,
-          context: { missionId: context.missionId, agentId },
+          context: {
+            missionId: context.missionId,
+            agentId,
+            ...(context.missionGoal ? { missionGoal: context.missionGoal } : {}),
+            ...(context.taskObjective ? { taskObjective: context.taskObjective } : {}),
+          },
         }),
       })
       const result = await response.json() as PluginGenerationResponse & {
@@ -71,7 +76,13 @@ export class CapabilityResolver {
         resolvedToolId: registered.id,
       }
     } catch (error) {
-      return { isError: true, content: error instanceof Error ? error.message : String(error) }
+      const detail = error instanceof Error ? error.message : String(error)
+      return {
+        isError: true,
+        outcome: 'failure',
+        outcomeKnown: false,
+        content: `Tool resolution outcome is uncertain after a lost response: ${detail}. Check the tool catalog and the original operation before retrying.`,
+      }
     }
   }
 }

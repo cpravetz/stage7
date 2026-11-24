@@ -1,0 +1,41 @@
+{
+  "id": "data_analysis",
+  "name": "Data Analysis",
+  "description": "Analyze datasets with statistical summaries, trend detection, correlation, and distribution histograms. Accepts a dataset as CSV text, a JSON string, or an array of record objects. No operator credentials required.",
+  "type": "native",
+  "manifest": {
+    "executor": "data_analysis",
+    "codeFile": "data_analysis.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "dataset": { "description": "Dataset as CSV text, a JSON string (array of objects, or an object with a rows/data/records/items array), or an array of record objects" },
+      "analysisType": { "type": "string", "enum": ["summary", "trend", "correlation", "distribution"], "description": "Type of analysis to run (default summary)" },
+      "xColumn": { "type": "string", "description": "Independent variable column for trend analysis (defaults to first date/numeric column)" },
+      "yColumn": { "type": "string", "description": "Dependent variable column for trend analysis (defaults to first numeric column)" },
+      "targetColumn": { "type": "string", "description": "Column to describe for distribution analysis (defaults to first numeric column)" },
+      "topValuesLimit": { "type": "integer", "minimum": 1, "description": "Max top values reported for categorical columns (default 5)" }
+    },
+    "required": ["dataset"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean", "description": "Whether the analysis completed without error" },
+      "summary": { "type": "object", "description": "Per-column stats plus optional trend/correlation/distribution results" },
+      "insights": { "type": "array", "description": "Human-readable insight strings" },
+      "analysisType": { "type": "string", "description": "The analysisType that was run" },
+      "rowCount": { "type": "integer", "description": "Number of rows analyzed" },
+      "columnCount": { "type": "integer", "description": "Number of columns analyzed" },
+      "error": { "type": "string", "description": "Error message, if the analysis failed" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

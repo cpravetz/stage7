@@ -1,4 +1,5 @@
 import { MongoClient, Db, Collection, ObjectId } from 'mongodb';
+import { createHash } from 'node:crypto';
 import {
   PersistenceDocument,
   PersistenceQuery,
@@ -22,6 +23,10 @@ const MONGO_DB = process.env.MONGO_DB || 'stage7';
 // 30s default per attempt. Callers retry and then refuse to start.
 const MONGO_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 5000;
 const MAX_BRAIN_LOG_ENTRIES = 200;
+// Two appendMissionEvent calls with the same logical fingerprint within this
+// window are coalesced into the first persisted event. A retry or resume that
+// re-emits an identical milestone therefore does not duplicate the feed.
+const EVENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
 type VectorDoc = { _id: string; vector: number[] };
 type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
@@ -86,6 +91,7 @@ export class MongoStore {
       await this.missionPhases.createIndex({ missionId: 1, id: 1 }, { unique: true });
       await this.missionTasks.createIndex({ missionId: 1, taskId: 1 }, { unique: true });
       await this.missionEvents.createIndex({ missionId: 1, timestamp: 1 });
+      await this.missionEvents.createIndex({ missionId: 1, fingerprint: 1, timestamp: 1 });
 
       this.connected = true;
       logger.info({ uri: MONGO_URI, db: MONGO_DB }, 'MongoStore connected');
@@ -540,15 +546,43 @@ export class MongoStore {
   }
 
   async appendMissionEvent(missionId: string, event: any): Promise<any> {
-    const id = event.id || `event:${missionId}|${event.type}|${event.data?.phaseId || ''}|${event.data?.taskId || ''}|${event.timestamp || Date.now()}`;
-    const e = { ...event, id, timestamp: event.timestamp || Date.now(), missionId };
+    const now = event.timestamp || Date.now();
+    const fingerprint = missionEventFingerprint(missionId, event);
+    const id = event.id || `event:${missionId}|${fingerprint}|${now}`;
+
+    // Idempotency: coalesce an identical logical event that was already
+    // persisted within the dedup window (retry, resume replay, or double
+    // broadcast) into the original event, keeping its single id.
+    try {
+      const existing = await this.missionEvents.findOne(
+        {
+          missionId,
+          fingerprint,
+          timestamp: { $gte: new Date(now - EVENT_DEDUP_WINDOW_MS) },
+        },
+        { sort: { timestamp: -1 } },
+      );
+      if (existing) return existing;
+    } catch (err) {
+      logger.warn({ missionId, fingerprint, err }, 'Mission event dedup lookup failed; proceeding to insert');
+    }
+
+    const e = { ...event, id, fingerprint, timestamp: now, missionId };
     await this.missionEvents.insertOne(e);
     return e;
   }
 
-  async listMissionEvents(missionId: string): Promise<any[]> {
-    const results = await this.missionEvents.find({ missionId }).sort({ timestamp: 1 }).toArray();
-    return results;
+  async listMissionEvents(missionId: string, options?: { type?: string; omitAmendmentPlan?: boolean }): Promise<any[]> {
+    const filter = { missionId, ...(options?.type ? { type: options.type } : {}) };
+    if (options?.omitAmendmentPlan) {
+      // The current plan is retrieved separately; historical snapshots can be gigabytes.
+      return this.missionEvents.aggregate([
+        { $match: filter },
+        { $sort: { timestamp: 1 } },
+        { $set: { 'data.plan': { $cond: [{ $eq: ['$type', 'phase_plan_amended'] }, '$$REMOVE', '$data.plan'] } } },
+      ]).toArray();
+    }
+    return this.missionEvents.find(filter).sort({ timestamp: 1 }).toArray();
   }
 
   async upsertVector(id: string, vector: number[]): Promise<void> {
@@ -575,4 +609,49 @@ export class MongoStore {
       return JSON.stringify(docValue) === JSON.stringify(value);
     });
   }
+}
+
+/**
+ * Stable, order-independent stringification of a fingerprintable value.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${key}:${stableStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return String(value);
+}
+
+/**
+ * Fingerprint of a logical mission event: mission-scoped, keyed on event type,
+ * phase/task context, and the human-visible content (message, question,
+ * response, error, reason, output). Identical fingerprints within
+ * EVENT_DEDUP_WINDOW_MS are coalesced so resume/retry replays and double
+ * broadcasts persist once. Legitimate repeats (e.g. a task retried with a
+ * different outcome, or planner progress whose content changed) hash
+ * differently and are still appended.
+ */
+function missionEventFingerprint(missionId: string, event: any): string {
+  const data = event && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data : {};
+  const content = {
+    message: data.message,
+    content: data.content,
+    question: data.question,
+    response: data.response,
+    error: data.error,
+    reason: data.reason,
+    output: data.output,
+  };
+  const payload = [
+    missionId,
+    String(event.type || ''),
+    String(data.phaseId || ''),
+    String(data.taskId || ''),
+    String(data.correlationId || ''),
+    stableStringify(content),
+  ].join('|');
+  return createHash('sha256').update(payload).digest('hex');
 }

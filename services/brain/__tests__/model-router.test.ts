@@ -259,4 +259,67 @@ describe('ModelRouter performance outcomes', () => {
     expect(candidateIds).toContain('image-model');
     expect(candidateIds).not.toContain('text-model');
   });
-});
+
+  it('demotes a free model whose answers are almost always rejected, even under balanced routing', () => {
+    const outcome = (successRate: number, complaintRate: number) => ({
+      successRate,
+      avgLatencyMs: 2_000,
+      avgCostPerRequest: 0,
+      totalRequests: 10_000,
+      totalCost: 0,
+      costRequests: 10_000,
+      complaintCount: complaintRate * 10_000,
+      complaintRate,
+    })
+
+    // The broken model is fast, free and its HTTP calls "succeed", so without the
+    // unusable-answer rule it wins the balanced score outright.
+    router.setPerformanceMetrics(new Map([
+      ['provider:alpha', outcome(1, 0.966)],
+      ['provider:bravo', outcome(0.98, 0.05)],
+    ]))
+    expect(router.getCandidates({ task: 'chat response', optimizeFor: 'balanced' })
+      .map(({ model: candidate }) => candidate.id).slice(0, 2)).toContain('bravo')
+    expect(router.getCandidates({ task: 'chat response', optimizeFor: 'balanced' })
+      .map(({ model: candidate }) => candidate.id)[0]).toBe('bravo')
+    expect(router.getCandidates({ task: 'chat response', optimizeFor: 'accuracy' })
+      .map(({ model: candidate }) => candidate.id)[0]).toBe('bravo')
+  })
+
+  it('does not demote on complaint rate before there is enough data', () => {
+    const smallSample = (complaintRate: number) => ({
+      successRate: 1,
+      avgLatencyMs: 5_000,
+      avgCostPerRequest: 0,
+      totalRequests: 5,
+      totalCost: 0,
+      costRequests: 5,
+      complaintCount: complaintRate * 5,
+      complaintRate,
+    })
+
+    // At a 5-call sample the extra unusable-answer penalty must not apply. Alpha's
+    // complaint rate is the only variable, so the score gap between the two runs
+    // is the ordinary complaint term (600 at accuracy) and never the 1000-point
+    // demotion — which would let bravo overtake alpha at the high rate.
+    const orderAt = (complaintRate: number) => {
+      router.setPerformanceMetrics(new Map([
+        ['provider:alpha', smallSample(complaintRate)],
+        ['provider:bravo', smallSample(0)],
+      ]))
+      return router.getCandidates({ task: 'chat response', optimizeFor: 'balanced' })
+        .map(({ model: candidate }) => candidate.id)
+    }
+    expect(orderAt(0)[0]).toBe('alpha')
+    // Other tests' models may also be registered, so assert only the relative
+    // order: alpha drops below the clean model on the ordinary 600-point
+    // complaint term, while the 1000-point unusable-answer demotion would push
+    // it below everything else in the pool.
+    const sorted = orderAt(1)
+    expect(sorted.indexOf('bravo')).toBeLessThan(sorted.indexOf('alpha'))
+    // Alpha is still eligible — it is demoted on the ordinary complaint term, not
+    // removed — which is exactly what must not happen at a 5-call sample if the
+    // 1000-point unusable-answer rule were applied.
+    expect(sorted).toContain('alpha')
+  })
+})

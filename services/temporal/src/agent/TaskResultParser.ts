@@ -1,4 +1,4 @@
-import { MissionArtifact, MissionArtifactSchema } from '@stage7-nextgen/shared';
+import { MissionArtifact, MissionArtifactSchema, type Task } from '@stage7-nextgen/shared';
 import type { TaskExecutionResult } from './TaskExecutionResult';
 
 const ASK_USER_MARKER = '__ASK_USER__:';
@@ -52,15 +52,7 @@ export function assertExpectedArtifacts(
   expected: string[],
   taskId: string,
 ): void {
-  const normalize = (value: string) => value.trim().toLocaleLowerCase();
-  const missing = expected.filter((name) => {
-    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
-    if (!artifact || artifact.purpose === 'execution-outcome' || artifact.status === 'blocked') return true;
-    if (typeof artifact.content === 'string') {
-      return !artifact.content.trim() || isExecutionOutcomeReport(artifact.content);
-    }
-    return artifact.url === undefined && artifact.data === undefined;
-  });
+  const missing = missingExpectedArtifacts(artifacts, expected);
   if (missing.length === 0) return;
 
   const blocker = artifacts.find((artifact) =>
@@ -73,6 +65,94 @@ export function assertExpectedArtifacts(
   throw new Error(
     `Task "${taskId}" did not produce the expected deliverable${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.${reason}`,
   );
+}
+
+/**
+ * The subset of `expected` deliverable names that `artifacts` does NOT satisfy.
+ * A name is satisfied only by an artifact that carries real, retrievable content:
+ * present, not an internal execution-outcome report, not blocked, and either has
+ * non-empty textual content, a URL, or data. This is the single authoritative
+ * definition of "did the task produce its declared deliverable", shared by the
+ * completion assertion and by dependency/readiness checks.
+ */
+export function missingExpectedArtifacts(artifacts: MissionArtifact[], expected: string[]): string[] {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase();
+  return expected.filter((name) => {
+    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
+    if (!artifact || artifact.purpose === 'execution-outcome' || artifact.status === 'blocked') return true;
+    if (typeof artifact.content === 'string') {
+      return !artifact.content.trim() || isExecutionOutcomeReport(artifact.content);
+    }
+    return artifact.url === undefined && artifact.data === undefined;
+  });
+}
+
+/**
+ * Determine whether an artifact carries substantive content. An artifact
+ * passes when it has non-empty text that is not merely a heading, comment, or
+ * placeholder. This is stricter than `missingExpectedArtifacts`, which only
+ * checks for non-empty content; it is used to catch deliverables that are
+ * structurally present but substantively empty.
+ */
+export function validateArtifactContent(artifact: MissionArtifact): boolean {
+  if (artifact.url !== undefined && artifact.url.trim().length > 0) return true;
+  if (artifact.data !== undefined) return true;
+  if (typeof artifact.content !== 'string') return false;
+  const content = artifact.content.trim();
+  if (content.length === 0) return false;
+  // Reject content that is only headings, comments, or placeholder markers.
+  let withoutHtmlComments = content;
+  let previousWithoutHtmlComments: string;
+  do {
+    previousWithoutHtmlComments = withoutHtmlComments;
+    withoutHtmlComments = withoutHtmlComments.replace(/<!--[\s\S]*?-->/g, '');
+  } while (withoutHtmlComments !== previousWithoutHtmlComments);
+  const stripped = withoutHtmlComments
+    .replace(/^#{1,6}\s.*$/gm, '') // headings
+    .replace(/\/\/.*$/gm, '') // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+    .replace(/^\s*>\s.*$/gm, '') // blockquotes
+    .replace(/```[\s\S]*?```/g, '') // code fences (keep? code may be substantive)
+    .trim();
+  if (stripped.length === 0) return false;
+  // Reject placeholder-like content.
+  if (/^(?:todo|tbd|placeholder|lorem ipsum|coming soon|under construction)$/i.test(stripped)) return false;
+  return true;
+}
+
+/**
+ * Names from `expected` that are present as artifacts but whose content fails
+ * `validateArtifactContent`. Used to trigger Brain remediation.
+ */
+export function invalidExpectedArtifacts(artifacts: MissionArtifact[], expected: string[]): string[] {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase();
+  return expected.filter((name) => {
+    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
+    if (!artifact) return false;
+    return !validateArtifactContent(artifact);
+  });
+}
+export function dependencyArtifactGaps(dependency: Task): string[] {
+  return missingExpectedArtifacts(dependency.artifacts || [], dependency.expectedArtifacts || []);
+}
+
+/**
+ * For a pending task, the completed dependencies that are missing a declared
+ * artifact. A non-empty result means the task has a *missing input* and must not
+ * start until the deficient dependency produces the artifact.
+ */
+export function missingDependencyInputs(
+  task: Task,
+  taskById: Map<string, Task>,
+): Array<{ dependencyTaskId: string; missingArtifacts: string[] }> {
+  const gaps: Array<{ dependencyTaskId: string; missingArtifacts: string[] }> = [];
+  for (const dependencyId of task.dependsOnTaskIds || []) {
+    const dependency = taskById.get(dependencyId);
+    if (!dependency || dependency.status !== 'completed') continue;
+    const missing = dependencyArtifactGaps(dependency);
+    if (missing.length > 0) gaps.push({ dependencyTaskId: dependencyId, missingArtifacts: missing });
+  }
+  return gaps;
 }
 
 export function parseActionReceipts(
@@ -147,7 +227,8 @@ function inferArtifactType(content: string): string {
 export function extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
   if (expected.length === 0) return [];
   const artifacts: MissionArtifact[] = [];
-  const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
+  const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)]
+    .filter((heading) => expected.some((name) => normalizeArtifactName(name) === normalizeArtifactName(heading[1] || '')));
   for (const [index, heading] of headings.entries()) {
     const name = heading[1]?.trim();
     if (!name) continue;

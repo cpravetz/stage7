@@ -30,8 +30,68 @@ export function isJsonPayload(value: unknown): boolean {
   }
 }
 
+/**
+ * Index of the bracket that closes the JSON value starting at `start`, or -1.
+ * String literals and escapes are skipped so braces inside strings do not
+ * confuse the scan.
+ */
+function findJsonBlockEnd(value: string, start: number): number {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index++) {
+    const char = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') stack.push(char === '{' ? '}' : ']');
+    else if (char === '}' || char === ']') {
+      if (stack.pop() !== char) return -1;
+      if (stack.length === 0) return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Removes structured JSON payloads embedded in agent text. Agent replies are
+ * prose; a JSON object or array in a reply is internal data (a tool manifest,
+ * plan, receipt, or action), never something to show a person.
+ */
+export function stripStructuredPayloads(value: string): string {
+  if (!value) return '';
+  let result = '';
+  let index = 0;
+  while (index < value.length) {
+    const char = value[index];
+    if (char === '{' || char === '[') {
+      const end = findJsonBlockEnd(value, index);
+      if (end > index) {
+        const candidate = value.slice(index, end + 1);
+        if (isJsonPayload(candidate)) {
+          result += ' ';
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+    result += char;
+    index++;
+  }
+  return result.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function stripInternalReasoning(value: unknown): string {
-  return (typeof value === 'string' ? value : '')
+  const source = typeof value === 'string' ? value : '';
+  return stripStructuredPayloads(source
+    .replace(/```(?:json|javascript|ts|typescript)?\s*[\s\S]*?```/gi, ' '))
     .replace(/\n?\s*\[\s*\{?\s*\\?"toolId\\?"[\s\S]*$/i, '')
     .replace(/\s*Looking up tools, creating tools, or handing work off to another agent does not count as completing that action\.?/gi, '')
     .replace(/\s*Steps that ran:[\s\S]*$/i, '')
@@ -45,25 +105,15 @@ export function isInternalReasoning(value: unknown): boolean {
   return INTERNAL_REASONING_PATTERNS.some((pattern) => pattern.test(value));
 }
 
+/**
+ * True for any structured JSON payload authored by an agent. Agent-to-user
+ * conversation is prose; JSON is always internal transport (a tool manifest,
+ * plan, receipt, action, or execution record) regardless of its keys. Key
+ * sniffing previously let tool manifests named with `id`/`name`/`inputSchema`
+ * reach the conversation as raw JSON dumps.
+ */
 export function isAgentConversationPayload(value: unknown): boolean {
-  if (!isJsonPayload(value)) return false;
-  try {
-    const parsed = JSON.parse(String(value).trim()) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true;
-    const record = parsed as Record<string, unknown>;
-    return typeof record.tool === 'string'
-      || typeof record.toolId === 'string'
-      || typeof record.action === 'string'
-      || typeof record.sourceCode === 'string'
-      || typeof record.entrypoint === 'string'
-      || Array.isArray(record.phases)
-      || Array.isArray(record.tasks)
-    || Array.isArray(record.artifacts)
-    || 'plan' in record
-    || typeof record.satisfied === 'boolean';
-  } catch {
-    return false;
-  }
+  return isJsonPayload(value);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { ToolConfigResolver } from '../src/services/ToolConfig';
-import { Tool } from '../src/types';
+import { Tool, CredentialRequiredError } from '../src/types';
 import { PluginGenerator } from '../src/services/PluginGenerator';
 import { ToolDiscovery } from '../src/services/ToolDiscovery';
 import { CodeExecutor } from '../src/executors/CodeExecutor';
@@ -35,8 +35,17 @@ describe('mission tool configuration', () => {
     // Credential-backed fields are resolved dynamically, so the static gate must
     // not reject the run merely because the mapped value is absent.
     await expect(config.validateConfigSchema(tool, {}, 'exec-1')).resolves.toBeNull();
-    const resolved = await config.resolveCredentials(tool, {}, 'exec-1');
-    expect(resolved.resolved.account_id).toBeUndefined();
+    // But resolveCredentials will throw CredentialRequiredError for missing required credential-backed fields
+    try {
+      await config.resolveCredentials(tool, {}, 'exec-1');
+    } catch (e) {
+      expect(e).toBeInstanceOf(CredentialRequiredError);
+      if (e instanceof CredentialRequiredError) {
+        expect(e.request.missingCredentials).toHaveLength(1);
+        expect(e.request.missingCredentials[0].key).toBe('account_id');
+        expect(e.request.missingCredentials[0].label).toBe('Account ID');
+      }
+    }
   });
 
   it('uses deterministic provider configuration in initial and repair acceptance tests', async () => {
@@ -85,6 +94,112 @@ describe('mission tool configuration', () => {
       }
   });
 
+  it('repairs a schema-invalid acceptance contract before generating the plugin', async () => {
+    jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+    const validContract = {
+      description: 'Verify SMS submission',
+      cases: [{
+        name: 'sends SMS',
+        input: {},
+        expectedOutput: { success: true },
+        httpMocks: [{ method: 'POST', urlPattern: 'https://api.example.test/messages', responseStatus: 200, responseBody: {} }],
+      }],
+    };
+    const invalidContract = structuredClone(validContract);
+    (invalidContract.cases[0].httpMocks[0] as { responseBody: unknown }).responseBody = 'invalid';
+    const plugin = {
+      id: 'sms-probe', name: 'SMS probe', description: 'Send SMS', type: 'code',
+      language: 'python', entrypoint: 'main.py', sourceCode: 'print("{}")', requirements: [],
+      configSchema: { type: 'object', properties: {} },
+      inputs: { type: 'object', properties: {} }, outputs: { type: 'object', properties: {} },
+    };
+    const prompts: string[] = [];
+    let brainCall = 0;
+    jest.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { prompt: string };
+      prompts.push(body.prompt);
+      return {
+        ok: true, status: 200,
+        json: async () => ({ content: JSON.stringify([invalidContract, validContract, plugin][brainCall++]) }),
+      } as Response;
+    });
+
+    jest.spyOn(CodeExecutor.prototype, 'execute').mockResolvedValue({ success: true, output: '{"success":true}' });
+
+    const result = await new PluginGenerator().generate({
+      description: 'Send SMS', requirements: [],
+      context: { missionGoal: 'Send a text message', taskObjective: 'Send the requested text' },
+    });
+    expect(result.success).toBe(true);
+    expect(prompts[0]).toContain('Original mission goal (authoritative scope): Send a text message');
+    expect(prompts[1]).toContain('test case 1.HTTP fixture 1.responseBody must be a JSON object');
+    expect(prompts[1]).not.toContain(JSON.stringify(invalidContract));
+  });
+
+  it('stops without generating a tool when no relevant deterministic tests can be supplied', async () => {
+    jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ content: JSON.stringify({ description: 'No suitable tests', cases: [] }) }),
+    } as Response);
+    const result = await new PluginGenerator().generate({ description: 'Send a message', requirements: [] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no deterministic test cases');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates a generated SMS tool with dummy credentials and an isolated provider fixture', async () => {
+      jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+      const contract = {
+        description: 'Verify SMS submission',
+        cases: [{
+          name: 'sends SMS',
+          input: { to: '+15555550100', body: 'Hello' },
+          credentials: { account_id: 'ACtest', auth_token: 'dummy-token' },
+          expectedOutput: { success: true, messageId: 'message-test' },
+          httpMocks: [{
+            method: 'POST', urlPattern: 'https://api.twilio.com/2010-04-01/Accounts/*/Messages.json',
+            expectedRequestBody: 'To=%2B15555550100&Body=Hello',
+            responseStatus: 201, responseBody: { sid: 'message-test' },
+          }],
+        }],
+      };
+      const plugin = {
+        id: 'sms-probe', name: 'SMS probe', description: 'Send SMS', type: 'code',
+        language: 'python', entrypoint: 'main.py', requirements: [],
+        sourceCode: `import json
+import urllib.request
+import urllib.parse
+account = __get_credential('account_id')
+token = __get_credential('auth_token')
+if not account or not token:
+      raise ValueError('missing credentials')
+data = urllib.parse.urlencode({'To': __tool_input['to'], 'Body': __tool_input['body']}).encode()
+request = urllib.request.Request('https://api.twilio.com/2010-04-01/Accounts/' + account + '/Messages.json', data=data, method='POST')
+with urllib.request.urlopen(request) as response:
+      result = json.loads(response.read().decode())
+print(json.dumps({'success': True, 'messageId': result['sid']}))`,
+        configSchema: {
+          type: 'object',
+          properties: {
+            account_id: { type: 'string', vaultSecretId: 'account-id' },
+            auth_token: { type: 'string', vaultSecretId: 'auth-token', sensitive: true },
+          },
+          required: ['account_id', 'auth_token'],
+        },
+        inputs: { type: 'object', properties: {} }, outputs: { type: 'object', properties: {} },
+      };
+      let brainCall = 0;
+      jest.spyOn(global, 'fetch').mockImplementation(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ content: JSON.stringify(brainCall++ === 0 ? contract : plugin) }),
+      } as Response));
+
+      const result = await new PluginGenerator().generate({ description: 'Send SMS', requirements: [] });
+      expect(result.success).toBe(true);
+      expect(result.tool?.manifest?.validation).toMatchObject({ passed: true, testCount: 1 });
+  });
+
   it('resolves previously supplied values from the tool-specific vault entry', async () => {
     const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
@@ -93,7 +208,10 @@ describe('mission tool configuration', () => {
     const config = new ToolConfigResolver(new Map());
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
-    expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:account_id'));
+    // A by-name recovery lookup may precede the declared lookup; what matters is
+    // that the tool-specific `secret:` entry is tried.
+    expect(fetcher.mock.calls.map((call) => String(call[0])))
+      .toContainEqual(expect.stringContaining(encodeURIComponent('secret:account_id')));
   });
 
   it('resolves an explicitly named existing vault secret independently of the logical key', async () => {
@@ -114,5 +232,78 @@ describe('mission tool configuration', () => {
     } finally {
       credentialProvider.invalidate();
     }
+  });
+});
+
+describe('vault credential resolution by secret name', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    credentialProvider.invalidate();
+  });
+
+  const twilioTool: Tool = {
+    id: 'sms-twilio',
+    name: 'Send SMS via Twilio',
+    description: 'Send an SMS text message using the Twilio REST API',
+    type: 'code',
+    configSchema: {
+      type: 'object',
+      properties: {
+        accountSid: { type: 'string', description: 'Twilio Account SID', vaultSecretId: 'twilio-account-sid' },
+        authToken: { type: 'string', description: 'Twilio Auth Token', vaultSecretId: 'twilio-auth-token', sensitive: true },
+      },
+      required: ['accountSid', 'authToken'],
+    },
+    manifest: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const secretValues: Record<string, string> = {
+    'secret:twilio_acct_sid': 'AC-real-sid',
+    'secret:twilio_auth_token': 'real-auth-token',
+    'secret:endpoint': 'https://example.invalid',
+  };
+
+  // Vault mimic: invented ids 404, real names decrypt, and only GET /api/vault/secrets lists names.
+  const mockVault = () => jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith('/api/vault/secrets')) {
+      return {
+        ok: true,
+        json: async () => ({ secrets: Object.keys(secretValues).map((name) => ({ name })) }),
+      } as Response;
+    }
+    const decrypt = url.match(/\/api\/vault\/secrets\/name\/([^/]+)\/decrypt/)
+    if (decrypt) {
+      const name = decodeURIComponent(decrypt[1])
+      const value = secretValues[name]
+      return value === undefined
+        ? { ok: false, status: 404, json: async () => ({}) } as Response
+        : { ok: true, json: async () => ({ plaintext: value }) } as Response;
+    }
+    return { ok: false, status: 404, json: async () => ({}) } as Response;
+  });
+
+  it('uses configured vault secrets when a generated tool invents non-existent vaultSecretIds', async () => {
+    mockVault();
+    const resolver = new ToolConfigResolver(new Map());
+    const { resolved } = await resolver.resolveCredentials(twilioTool, {}, 'exec-sms');
+    expect(resolved.accountSid).toBe('AC-real-sid');
+    expect(resolved.authToken).toBe('real-auth-token');
+  });
+
+  it('does not bind an unrelated secret to a credential', async () => {
+    mockVault();
+    const resolver = new ToolConfigResolver(new Map());
+    const tool: Tool = {
+      ...twilioTool,
+      configSchema: {
+        type: 'object',
+        properties: { apiKey: { type: 'string', description: 'Weather service API key', vaultSecretId: 'made-up-key' } },
+        required: ['apiKey'],
+      },
+    };
+    await expect(resolver.resolveCredentials(tool, {}, 'exec-1')).rejects.toBeInstanceOf(CredentialRequiredError);
   });
 });

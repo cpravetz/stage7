@@ -6,7 +6,7 @@ import type {
   TrajectoryAgentRole,
 } from '@stage7-nextgen/shared';
 import type { Plan } from '@stage7-nextgen/shared';
-import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
+import type { MissionPhaseOutput } from '../types/workflow';
 import type { WorkflowInput } from '../types/workflow';
 
 const skillCategories = new Set<SkillCategory>([

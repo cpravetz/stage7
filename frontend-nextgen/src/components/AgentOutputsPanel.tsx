@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 import { canonicalAgentRoleKey, interactionQuestionText, missionAgentRoleLabel } from '../utils/missionEvents';
 
@@ -246,9 +246,6 @@ function getReasoningDedupeKey(event: { type: string; message: string; timestamp
 
 const ReasoningBox = ({ events }: { events: Array<{ type: string; message: string; timestamp?: number; metadata?: Record<string, unknown>; id?: string }> }) => {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [events]);
 
   // Component-level dedupe for reasoning events
   const dedupedEvents = useMemo(() => {
@@ -295,6 +292,38 @@ function agentsEqual(a: AgentInfo[], b: AgentInfo[]): boolean {
   return true;
 }
 
+// Build the agent list from mission events and the plan. Purely event-driven:
+// the feed store pushes new events over the websocket and the plan/status come
+// from the mission detail store. No network polling happens here.
+function computeSourceAgents(
+  events: Array<{ type: string; missionId?: string; timestamp?: number; metadata?: Record<string, unknown> }>,
+  plan: Plan | null | undefined,
+  missionId: string,
+  missionStatus?: string,
+): AgentInfo[] {
+  const eventAgents = extractAgentsFromEvents(events, missionId)
+    .filter((agent) => !SYSTEM_ROLES.has(canonicalRole(String(agent.role || ''))));
+  const planAgents = extractAgentsFromPlan(plan, missionId)
+    .filter((agent) => !SYSTEM_ROLES.has(canonicalRole(String(agent.role || ''))));
+  const merged = new Map<string, AgentInfo>();
+  for (const agent of eventAgents) merged.set(agent.id, agent);
+  for (const agent of planAgents) {
+    if (!merged.has(agent.id)) merged.set(agent.id, { ...agent, status: agent.status || 'planned' });
+  }
+  if (missionStatus === 'running') {
+    if (!merged.has(`agent-${missionId}-planner`)) merged.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
+    if (!merged.has(`agent-${missionId}-mission-director`)) merged.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
+  }
+  if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
+    for (const [id, agent] of merged.entries()) {
+      const role = canonicalRole(String(agent.role || ''));
+      if (role === 'planner') merged.set(id, { ...agent, status: missionStatus === 'failed' ? (agent.status === 'failed' ? 'failed' : 'completed') : 'completed' });
+      else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
+    }
+  }
+  return Array.from(merged.values());
+}
+
 const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanelProps) => {
   const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -302,147 +331,83 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
   const [error, setError] = useState<string | null>(null);
   const eventsRef = useRef(events);
   const agentsRef = useRef<AgentInfo[]>([]);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     eventsRef.current = events;
   }, [events]);
 
+  // Event-driven derivation from the feed store (websocket) + plan + status.
+  // Re-runs only when events, plan, or mission status change — no polling.
   useEffect(() => {
-    let mounted = true;
-    const activeRequests = new Set<AbortController>();
-    const load = async () => {
-      if (activeRequests.size > 0) return;
-      setError(null);
-      const eventAgents = extractAgentsFromEvents(eventsRef.current, missionId)
-        .filter((agent) => !SYSTEM_ROLES.has(canonicalRole(String(agent.role || ''))));
-      const planAgents = extractAgentsFromPlan(plan, missionId)
-        .filter((agent) => !SYSTEM_ROLES.has(canonicalRole(String(agent.role || ''))));
-      const fallbackAgents = new Map<string, AgentInfo>();
-      for (const agent of eventAgents) fallbackAgents.set(agent.id, agent);
-      for (const agent of planAgents) {
-        if (!fallbackAgents.has(agent.id)) fallbackAgents.set(agent.id, { ...agent, status: agent.status || 'planned' });
-      }
-      if (missionStatus === 'running') {
-        if (!fallbackAgents.has(`agent-${missionId}-planner`)) fallbackAgents.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
-        if (!fallbackAgents.has(`agent-${missionId}-mission-director`)) fallbackAgents.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
-      }
-      const newAgents = Array.from(fallbackAgents.values());
-      if (!agentsEqual(newAgents, agentsRef.current)) {
-        agentsRef.current = newAgents;
-        setAgents(newAgents);
-      }
-      setLoading(fallbackAgents.size === 0);
+    const newAgents = computeSourceAgents(eventsRef.current, plan, missionId, missionStatus);
+    if (!agentsEqual(newAgents, agentsRef.current)) {
+      agentsRef.current = newAgents;
+      setAgents(newAgents);
+    }
+    setLoading(false);
+  }, [events, missionId, missionStatus, plan]);
 
-      const controller = new AbortController();
-      activeRequests.add(controller);
-      let timedOut = false;
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, 8_000);
-      try {
-        const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`, {
-          signal: controller.signal,
+  useEffect(() => {
+    // One initial API fetch on mount to enrich with runtime progress data.
+    void refreshAgent();
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const refreshAgent = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
+      if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
+      const data = await res.json();
+      if (!mountedRef.current) return;
+      const apiAgents = extractAgents(data).map((a) => ({
+        id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,
+        name: displayAgentName(a.name, a.id),
+        role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
+        status: a.status,
+        lastError: a.lastError,
+        activeTaskId: a.activeTaskId,
+        progress: a.progress,
+      }));
+      const baseAgents = computeSourceAgents(eventsRef.current, plan, missionId, missionStatus);
+      const merged = new Map<string, AgentInfo>();
+      for (const a of baseAgents) merged.set(a.id, { ...a });
+      for (const a of apiAgents) {
+        const current = merged.get(a.id);
+        merged.set(a.id, {
+          ...current,
+          ...a,
+          name: a.name || current?.name,
+          role: a.role || current?.role,
+          status: chooseStatus(current?.status, a.status),
+          activeTaskId: a.activeTaskId || current?.activeTaskId,
+          progress: a.progress || current?.progress,
+          lastError: a.lastError !== undefined ? a.lastError : current?.lastError,
         });
-        if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
-        const data = await res.json();
-        if (!mounted) return;
-        const apiAgents = extractAgents(data).map((a) => ({
-          id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,
-          name: displayAgentName(a.name, a.id),
-          role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
-          status: a.status,
-          lastError: a.lastError,
-          activeTaskId: a.activeTaskId,
-          progress: a.progress,
-        }));
-        // Extract agents from plan
-        const planAgents = extractAgentsFromPlan(plan, missionId);
-        // Filter out system/architectural roles that are not task-executing agents
-        const filteredApiAgents = apiAgents.filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-        const filteredPlanAgents = planAgents.filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-        // Merge agents, preferring API agents, then event agents, then plan agents
-        const merged = new Map<string, AgentInfo>();
-        for (const a of filteredApiAgents) {
-          const current = merged.get(a.id);
-          merged.set(a.id, {
-            ...current,
-            ...a,
-            status: chooseStatus(current?.status, a.status),
-            activeTaskId: a.activeTaskId || current?.activeTaskId,
-            progress: a.progress || current?.progress,
-          });
-        }
-        for (const a of eventAgents) {
-          const current = merged.get(a.id);
-          merged.set(a.id, {
-            ...a,
-            ...current,
-            status: current?.status || a.status,
-          });
-        }
-        for (const a of filteredPlanAgents) {
-          const current = merged.get(a.id);
-          merged.set(a.id, { ...a, ...current, status: current?.status || a.status });
-        }
-        if (missionStatus === 'running') {
-          if (!merged.has(`agent-${missionId}-planner`)) merged.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
-          if (!merged.has(`agent-${missionId}-mission-director`)) merged.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
-        }
-        if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
-          for (const [id, agent] of merged.entries()) {
-            const role = canonicalRole(String(agent.role || ''));
-            if (role === 'planner') merged.set(id, { ...agent, status: missionStatus === 'failed' ? (agent.status === 'failed' ? 'failed' : 'completed') : 'completed' });
-            else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
-          }
-        }
-        const mergedAgents = Array.from(merged.values());
-        if (!agentsEqual(mergedAgents, agentsRef.current)) {
-          agentsRef.current = mergedAgents;
-          setAgents(mergedAgents);
-        }
-      } catch (err) {
-        if (!mounted) return;
-        // Fallback to event-derived agents + plan agents
-        const fallbackPlanAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-        const merged = new Map<string, AgentInfo>();
-        for (const a of eventAgents) merged.set(a.id, a);
-        for (const a of fallbackPlanAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
-        if (missionStatus === 'running') {
-          if (!merged.has(`agent-${missionId}-planner`)) merged.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
-          if (!merged.has(`agent-${missionId}-mission-director`)) merged.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
-        }
-        if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
-          for (const [id, agent] of merged.entries()) {
-            const role = canonicalRole(String(agent.role || ''));
-            if (role === 'planner') merged.set(id, { ...agent, status: missionStatus === 'failed' ? (agent.status === 'failed' ? 'failed' : 'completed') : 'completed' });
-            else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
-          }
-        }
-        const fallbackAgents = Array.from(merged.values());
-        if (!agentsEqual(fallbackAgents, agentsRef.current)) {
-          agentsRef.current = fallbackAgents;
-          setAgents(fallbackAgents);
-        }
-        setError(timedOut
-          ? 'Agent status request timed out after 8 seconds; showing agents from the plan and mission events.'
-          : err instanceof Error ? err.message : String(err));
-      } finally {
-        clearTimeout(timeout);
-        activeRequests.delete(controller);
-        if (mounted) setLoading(false);
       }
-    };
-    void load();
-    const interval = missionStatus === 'running'
-      ? setInterval(() => { void load(); }, 5_000)
-      : undefined;
-    return () => {
-      mounted = false;
-      if (interval) clearInterval(interval);
-      for (const controller of activeRequests) controller.abort();
-    };
-  }, [missionId, missionStatus, plan]);
+      if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
+        for (const [id, agent] of merged.entries()) {
+          const role = canonicalRole(String(agent.role || ''));
+          if (role === 'planner') merged.set(id, { ...agent, status: missionStatus === 'failed' ? (agent.status === 'failed' ? 'failed' : 'completed') : 'completed' });
+          else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
+        }
+      }
+      const refreshedAgents = Array.from(merged.values());
+      if (!agentsEqual(refreshedAgents, agentsRef.current)) {
+        agentsRef.current = refreshedAgents;
+        setAgents(refreshedAgents);
+      }
+      setError(null);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (!mountedRef.current) return;
+      setLoading(false);
+    }
+  };
 
   const eventsByAgent = useMemo(() => {
     const inferRole = (e: { type: string; metadata?: Record<string, unknown> }): string | undefined => {
@@ -468,60 +433,6 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
     }
     return map;
   }, [events, missionId]);
-
-  const refreshAgent = async () => {
-    try {
-      const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const apiAgents = extractAgents(data).map((a) => ({
-        id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,
-        name: displayAgentName(a.name, a.id),
-        role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
-        status: a.status,
-        lastError: a.lastError,
-        activeTaskId: a.activeTaskId,
-        progress: a.progress,
-      }));
-      const eventAgents = extractAgentsFromEvents(eventsRef.current, missionId).filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-      const planAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-      const filteredApiAgents = apiAgents.filter((a) => !SYSTEM_ROLES.has(canonicalRole(String(a.role || ''))));
-      const merged = new Map<string, AgentInfo>();
-      for (const a of filteredApiAgents) {
-        const current = merged.get(a.id);
-        merged.set(a.id, {
-          ...current,
-          ...a,
-          status: chooseStatus(current?.status, a.status),
-          activeTaskId: a.activeTaskId || current?.activeTaskId,
-          progress: a.progress || current?.progress,
-        });
-      }
-      for (const a of eventAgents) {
-        if (!merged.has(a.id)) merged.set(a.id, a);
-      }
-      for (const a of planAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
-      if (missionStatus === 'running') {
-        if (!merged.has(`agent-${missionId}-planner`)) merged.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
-        if (!merged.has(`agent-${missionId}-mission-director`)) merged.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
-      }
-      if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
-        for (const [id, agent] of merged.entries()) {
-          const role = canonicalRole(String(agent.role || ''));
-          if (role === 'planner') merged.set(id, { ...agent, status: missionStatus === 'failed' ? (agent.status === 'failed' ? 'failed' : 'completed') : 'completed' });
-          else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
-        }
-      }
-      const refreshedAgents = Array.from(merged.values());
-      if (!agentsEqual(refreshedAgents, agentsRef.current)) {
-        agentsRef.current = refreshedAgents;
-        setAgents(refreshedAgents);
-      }
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
 
   if (loading && agents.length === 0) return <div className="agent-outputs-panel">Loading agents...</div>;
   if (error && agents.length === 0) return <div className="agent-outputs-panel error">{error}</div>;
@@ -665,4 +576,4 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
   );
 };
 
-export default AgentOutputsPanel;
+export default memo(AgentOutputsPanel);

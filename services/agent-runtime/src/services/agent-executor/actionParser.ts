@@ -77,6 +77,7 @@ function containsToolActionShape(value: unknown): boolean {
   const record = asRecord(value)
   if (!record) return false
   if (typeof record.tool === 'string' && asRecord(record.args)) return true
+  if (record.action === 'tool_use' && typeof record.toolId === 'string' && asRecord(record.parameters)) return true
   return Object.values(record).some(containsToolActionShape)
 }
 

@@ -291,6 +291,7 @@ export class ToolConfigResolver {
       label?: string;
       required: boolean;
       source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean };
+      description?: string;
     }> = [];
     const configSchema = (tool.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined) ?? (manifest?.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined);
     const properties = configSchema?.properties ?? {};
@@ -312,6 +313,7 @@ export class ToolConfigResolver {
         logicalKey,
         label: (schema.label as string) || logicalKey,
         required: requiredSet.has(logicalKey),
+        description: typeof schema.description === 'string' ? schema.description : undefined,
         source: {
           vaultSecretId: schema.vaultSecretId as string | undefined,
           envVar: schema.envVar as string | undefined,
@@ -328,7 +330,44 @@ export class ToolConfigResolver {
       configKey: c.source.configKey,
       sensitive: c.source.sensitive,
     }));
-    const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
+    // Generated tools often invent a `vaultSecretId` (e.g. "twilio-account-sid")
+    // that does not exist while the operator already stored the value under a
+    // different name (e.g. "secret:twilio_acct_sid"). Give the provider the tool
+    // name, the property's label/description and its logical key so an existing
+    // secret can be matched by name instead of prompting for it again.
+    const providerName = `${tool.name} ${tool.description} ${tool.id}`.toLowerCase();
+    // The capability request recorded at generation time names the provider and
+    // the secrets that already existed in the Vault. It is the strongest signal
+    // that an invented `vaultSecretId` should map onto one of those entries.
+    const recordedRequest = (manifest?.capabilityRequest ?? {}) as Record<string, unknown>;
+    const recordedContext = [
+      typeof recordedRequest.capability === 'string' ? recordedRequest.capability : '',
+      typeof recordedRequest.description === 'string' ? recordedRequest.description : '',
+      Array.isArray(recordedRequest.requirements) ? recordedRequest.requirements.join(' ') : '',
+      typeof recordedRequest.missionGoal === 'string' ? recordedRequest.missionGoal : '',
+    ].join(' ').toLowerCase();
+    const hintsFor = (entry: typeof credentialEntries[number]) => ({
+      candidateNames: [
+        entry.source.vaultSecretId,
+        `secret:${entry.logicalKey}`,
+        entry.logicalKey,
+      ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+      descriptors: [
+        entry.logicalKey,
+        ...(entry.label ? [entry.label] : []),
+        ...(entry.description ? [entry.description] : []),
+        providerName,
+        recordedContext,
+      ],
+    });
+    const resolved = await credentialProvider.resolveAll(
+      namedSources,
+      configuredValues,
+      (source) => {
+        const entry = credentialEntries.find((candidate) => candidate.logicalKey === source.logicalKey);
+        return entry ? hintsFor(entry) : undefined;
+      },
+    );
     for (const credential of credentialEntries) {
       if (!resolved[credential.logicalKey] && credential.source.configKey) {
         const value = await this.tryResolveFromVault(tool, credential.logicalKey, _input);
@@ -338,12 +377,12 @@ export class ToolConfigResolver {
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
-    // Credential-backed fields (envVar / vaultSecretId / configKey) are resolved
-    // dynamically at execution time; they must not be treated as statically
-    // required config values. Only non-credential required fields can block
-    // execution. Consistent with validateConfigSchema().
+    // All required credential fields (including those backed by envVar / vaultSecretId / configKey)
+    // must be resolved before execution can proceed. If any required credential is missing,
+    // we throw CredentialRequiredError with the exact missing keys. This is now consistent
+    // with validateConfigSchema() which also gates on all required fields.
     const missing = credentialEntries
-      .filter((c) => c.required && !merged[c.logicalKey] && !c.source.envVar && !c.source.vaultSecretId && !c.source.configKey)
+      .filter((c) => c.required && !merged[c.logicalKey])
       .map((c) => ({
         key: c.logicalKey,
         label: c.label || c.logicalKey,

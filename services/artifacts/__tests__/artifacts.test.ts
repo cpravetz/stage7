@@ -1,5 +1,6 @@
 import request from 'supertest';
 import express from 'express';
+import { createHash } from 'node:crypto';
 import documentRoutes from '../src/routes/documents';
 import missionRoutes from '../src/routes/missions';
 import brainPersistenceRoutes from '../src/routes/brainPersistence';
@@ -37,7 +38,7 @@ function mockArtifactsService(store: InMemoryStore): void {
     .mockImplementation((missionId, taskId) => store.getMissionTask(missionId, taskId));
   jest.spyOn(artifactsService, 'appendMissionEvent')
     .mockImplementation((missionId, event) => store.appendMissionEvent(missionId, event));
-  jest.spyOn(artifactsService, 'listMissionEvents').mockImplementation((id) => store.listMissionEvents(id));
+  jest.spyOn(artifactsService, 'listMissionEvents').mockImplementation((id, options) => store.listMissionEvents(id, options));
   jest.spyOn(artifactsService, 'listPendingApprovals').mockImplementation(() => store.listPendingApprovals());
   jest.spyOn(artifactsService, 'appendBrainLog').mockImplementation((entry) => store.appendBrainLog(entry));
   jest.spyOn(artifactsService, 'listBrainLogs').mockImplementation((limit) => store.listBrainLogs(limit));
@@ -1059,3 +1060,191 @@ describe('MongoStore state upserts', () => {
     );
   });
 });
+
+describe('mission event append idempotency', () => {
+  const baseEvent = {
+    type: 'user_input_resolved',
+    timestamp: 1_700_000_000_000,
+    data: {
+      missionId: 'mission-ide',
+      phaseId: 'phase-1',
+      taskId: 'task-1',
+      response: 'smtp_host: smtp.example.com',
+    },
+  };
+
+  it('coalesces an identical event re-appended within the dedup window', async () => {
+    const store = new InMemoryStore();
+    const first = await store.appendMissionEvent('mission-ide', baseEvent);
+    const second = await store.appendMissionEvent('mission-ide', { ...baseEvent, timestamp: baseEvent.timestamp + 5_000 });
+
+    expect(second.id).toBe(first.id);
+    expect(second.fingerprint).toBe(first.fingerprint);
+    const stored = await store.listMissionEvents('mission-ide');
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe(first.id);
+  });
+
+  it('keeps distinct events for different content', async () => {
+    const store = new InMemoryStore();
+    const first = await store.appendMissionEvent('mission-ide', baseEvent);
+    const second = await store.appendMissionEvent('mission-ide', {
+      ...baseEvent,
+      data: { ...baseEvent.data, response: 'smtp_host: mail.example.com' },
+      timestamp: baseEvent.timestamp + 5_000,
+    });
+
+    expect(second.id).not.toBe(first.id);
+    const stored = await store.listMissionEvents('mission-ide');
+    expect(stored).toHaveLength(2);
+    expect(stored.map((stored) => stored.id)).toContain(first.id);
+    expect(stored.map((stored) => stored.id)).toContain(second.id);
+  });
+
+  it('re-appends the same logical event after the dedup window expires', async () => {
+    const store = new InMemoryStore();
+    await store.appendMissionEvent('mission-ide', baseEvent);
+    const later = { ...baseEvent, timestamp: baseEvent.timestamp + 11 * 60 * 1000 };
+    const second = await store.appendMissionEvent('mission-ide', later);
+
+    expect(second.id).not.toBe(await firstId(store, baseEvent));
+    const stored = await store.listMissionEvents('mission-ide');
+    expect(stored).toHaveLength(2);
+  });
+
+  it('does not coalesce events for a different mission or type', async () => {
+    const store = new InMemoryStore();
+    await store.appendMissionEvent('mission-ide', baseEvent);
+    await store.appendMissionEvent('mission-other', baseEvent);
+    await store.appendMissionEvent('mission-ide', { ...baseEvent, type: 'mission_resumed' });
+
+    const stored = await store.listMissionEvents('mission-ide');
+    expect(stored).toHaveLength(2);
+  });
+
+  it('returns the persisted single id through the events API for duplicate appends', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/artifacts/missions', missionRoutes);
+    mockArtifactsService(new InMemoryStore());
+    const base = '/api/artifacts/missions/mission-idempotent-api';
+
+    const first = await request(app).post(`${base}/events`).send(baseEvent).expect(201);
+    const second = await request(app).post(`${base}/events`).send({ ...baseEvent, timestamp: baseEvent.timestamp + 5_000 }).expect(201);
+
+    expect(second.body.id).toBe(first.body.id);
+    const response = await request(app).get(`${base}/events`).expect(200);
+    expect(response.body.events).toHaveLength(1);
+    expect(response.body.events[0].id).toBe(first.body.id);
+  });
+});
+
+describe('mission event retrieval', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('stores amendments without duplicate plans while returning the live plan', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/artifacts/missions', missionRoutes);
+    const store = new InMemoryStore();
+    mockArtifactsService(store);
+    const plan = { phases: [{ id: 'phase-1', tasks: [{ id: 'task-1' }] }] };
+
+    const response = await request(app).post('/api/artifacts/missions/m1/events').send({
+      type: 'phase_plan_amended', timestamp: 100, data: { phaseId: 'phase-1', plan },
+    }).expect(201);
+    expect(response.body.data.plan).toEqual(plan);
+    const events = await store.listMissionEvents('m1');
+    expect(events[0].data).toEqual({ phaseId: 'phase-1' });
+  });
+
+  it('retains the review explanation when mission events are reloaded', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/artifacts/missions', missionRoutes);
+    mockArtifactsService(new InMemoryStore());
+    const base = '/api/artifacts/missions/review-mission';
+    await request(app).post(`${base}/events`).send({
+      type: 'mission_needs_review', timestamp: 100,
+      data: { reviewStatus: 'awaiting_review', gaps: ['The endpoint is not configured.'] },
+    }).expect(201);
+    const response = await request(app).get(`${base}/events`).expect(200);
+    expect(response.body.events).toContainEqual(expect.objectContaining({
+      type: 'mission_needs_review',
+      data: expect.objectContaining({ gaps: ['The endpoint is not configured.'] }),
+    }));
+  });
+
+  it('omits historical amendment plans from the feed without removing stored data or other plans', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/artifacts/missions', missionRoutes);
+    const store = new InMemoryStore();
+    mockArtifactsService(store);
+    const base = '/api/artifacts/missions/mission-event-plans';
+    const plan = { phases: [{ id: 'phase-1', tasks: [] }] };
+    await store.appendMissionEvent('mission-event-plans', { type: 'plan_generated', timestamp: 1, data: { plan } });
+    await store.appendMissionEvent('mission-event-plans', {
+      type: 'phase_plan_amended', timestamp: 2, data: { phaseId: 'phase-1', plan },
+    });
+    await store.appendMissionEvent('mission-event-plans', {
+      type: 'task_completed', timestamp: 3, data: { artifacts: [{ name: 'result.txt', content: 'result' }] },
+    });
+
+    const feed = await request(app).get(`${base}/events`).expect(200);
+    expect(feed.body.events[0].data.plan).toEqual(plan);
+    expect(feed.body.events[1].data).toEqual({ phaseId: 'phase-1' });
+    expect((await store.listMissionEvents('mission-event-plans'))[1].data.plan).toEqual(plan);
+    const artifacts = await request(app).get(`${base}/artifacts`).expect(200);
+    expect(artifacts.body.artifacts).toEqual([expect.objectContaining({ name: 'result.txt' })]);
+  });
+
+  it('filters artifact reads and projects amendment plans in Mongo before loading events', async () => {
+    const store = new MongoStore();
+    const toArray = jest.fn().mockResolvedValue([]);
+    const sort = jest.fn().mockReturnValue({ toArray });
+    const find = jest.fn().mockReturnValue({ sort });
+    const aggregate = jest.fn().mockReturnValue({ toArray });
+    Object.defineProperty(store, 'missionEvents', { value: { find, aggregate } });
+
+    await store.listMissionEvents('m1', { type: 'task_completed' });
+    expect(find).toHaveBeenCalledWith({ missionId: 'm1', type: 'task_completed' });
+    await store.listMissionEvents('m1', { omitAmendmentPlan: true });
+    expect(aggregate).toHaveBeenCalledWith([
+      { $match: { missionId: 'm1' } },
+      { $sort: { timestamp: 1 } },
+      { $set: { 'data.plan': { $cond: [{ $eq: ['$type', 'phase_plan_amended'] }, '$$REMOVE', '$data.plan'] } } },
+    ]);
+  });
+});
+
+function firstId(store: InMemoryStore, event: any): Promise<string | undefined> {
+  return store.listMissionEvents('mission-ide').then((events) =>
+    events.find((stored) => stored.fingerprint === missionEventFingerprint(store, 'mission-ide', event))?.id,
+  );
+}
+
+function missionEventFingerprint(_store: InMemoryStore, missionId: string, event: any): string {
+  // Mirrors the private fingerprint in MongoStore for assertion purposes only.
+  const data = event && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data : {};
+  const content = {
+    message: data.message,
+    content: data.content,
+    question: data.question,
+    response: data.response,
+    error: data.error,
+    reason: data.reason,
+    output: data.output,
+  };
+  const payload = [
+    missionId,
+    String(event.type || ''),
+    String(data.phaseId || ''),
+    String(data.taskId || ''),
+    String(data.correlationId || ''),
+    JSON.stringify(content),
+  ].join('|');
+  return createHash('sha256').update(payload).digest('hex');
+}

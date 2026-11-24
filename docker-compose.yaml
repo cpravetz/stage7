@@ -167,6 +167,14 @@ services:
       - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
       - TOOL_STORE_DIR=/var/lib/stage7/tool-executor/tools
       - PLUGIN_DEPLOY_DIR=/var/lib/stage7/tool-executor/plugins
+    # Generated plugins are validated in an isolated bubblewrap sandbox that
+    # calls unshare(CLONE_NEWUSER/CLONE_NEWNET/CLONE_NEWPID). Docker Desktop's
+    # LinuxKit kernel suppresses unprivileged user namespaces, and the default
+    # seccomp profile blocks the clone flags, so the sandbox fails with
+    # "bwrap: Creating new namespace failed: Operation not permitted".
+    # Privileged mode restores those namespaces; network isolation is still
+    # enforced by bwrap's --unshare-net inside the sandbox.
+    privileged: true
     volumes:
       - tool_executor_data:/var/lib/stage7/tool-executor
     depends_on:

@@ -1,3 +1,4 @@
+import path from 'path';
 import { ToolRegistry } from '../services/ToolRegistry';
 import { ToolStore } from '../services/ToolStore';
 import { ToolExecutor } from '../services/ToolExecutor';
@@ -29,11 +30,14 @@ mcpToolExecutive.setRegistry(toolRegistry);
 setToolRegistry(toolRegistry);
 
 /**
- * Load native tool manifests from the manifests folder and register them as
- * built-in defaults. Tools are defined by JSON manifests that reference JS/Python
- * code files in the codes folder — no TypeScript build step required to add tools.
+ * Load native tool manifests from colocated tool folders and register them as
+ * built-in defaults. Each tool folder contains its own manifest.json and the
+ * JS/Python code file it references — no TypeScript build step is required to
+ * add a tool.
  */
-export const toolManifestLoader = new ToolManifestLoader();
+export const toolManifestLoader = new ToolManifestLoader([
+  path.resolve(__dirname, '../../../../tools'),
+]);
 const loadedTools = toolManifestLoader.loadAll();
 for (const { tool } of loadedTools) {
   toolRegistry.registerDefault(tool);

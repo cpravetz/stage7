@@ -22,6 +22,8 @@ export interface AgentExecutorOptions {
 export interface AgentExecutionContext {
   missionId: string
   delegationDepth: number
+  missionGoal?: string
+  taskObjective?: string
   executionPolicy?: AgentExecutionPolicy
   retryGuidance?: string
   delegate?: (request: AgentDelegateRequest) => Promise<unknown>

@@ -3,7 +3,7 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { logger, Plan, PlanSchema } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema, sanitizeAgentMessage } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
@@ -12,6 +12,15 @@ import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
 const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
 const DIRECT_MISSION_CONTROL_POLL_MS = 250;
+
+function reviewGapSummary(gap: string): string {
+  const friendly = gap.replace(/\baction receipt(s?)\b/gi, 'recorded result$1');
+  const complete = sanitizeAgentMessage(friendly, '').text;
+  if (complete) return complete.length > 1000 ? `${complete.slice(0, 997)}...` : complete;
+  const firstSentence = friendly.split(/(?<=[.!?])\s+/)[0] || '';
+  const summary = sanitizeAgentMessage(firstSentence, '').text;
+  return summary.length > 1000 ? `${summary.slice(0, 997)}...` : summary;
+}
 
 interface PersistedMissionControlRecord {
   missionId?: string;
@@ -24,6 +33,31 @@ interface PersistedMissionControlRecord {
 
 function missionIdFromWorkflowId(workflowId: string): string {
   return workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+}
+
+/**
+ * A mission is only failed when no LLM remains able to process prompts. Everything
+ * else — service hiccups, fetch failures/timeouts, malformed agent responses, HTTP 5xx
+ * from the agent runtime, tool/transport errors — is recoverable and must leave the
+ * mission runnable so the orchestrator can retry incrementally.
+ */
+const LLM_EXHAUSTION_PATTERNS: RegExp[] = [
+  /MODEL_SELECTION_EXHAUSTED/i,
+  /\bMODEL_EXHAUSTED\b/,
+  /exhausted every eligible model/i,
+  /no (?:eligible|available) (?:llm|model|provider)/i,
+  /all models (?:are )?unavailable/i,
+  /no llm (?:provider )?(?:available|configured)/i,
+  /model routing made no progress/i,
+  /every eligible model was attempted/i,
+];
+
+function missionFailureEndState(error: unknown, message: string): 'failed' | 'recoverable' {
+  const failureCode = typeof (error as { failureCode?: unknown })?.failureCode === 'string'
+    ? (error as { failureCode: string }).failureCode
+    : undefined;
+  if (failureCode === 'MODEL_EXHAUSTED') return 'failed';
+  return LLM_EXHAUSTION_PATTERNS.some((pattern) => pattern.test(message)) ? 'failed' : 'recoverable';
 }
 
 function visibleMissionStatus(record: PersistedMissionControlRecord): string {
@@ -52,57 +86,148 @@ function failedToolOutput(value: unknown, depth = 0): boolean {
     || ['output', 'data', 'result'].some((key) => failedToolOutput(output[key], depth + 1));
 }
 
-function credentialValuesFromResponse(
-  question: string | undefined,
+function normalizeSecretName(name: string): string {
+  return name.toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Common alternate names for frequently used credential keys. Used to match
+ * names a user mentions in a reply (or that tool/config metadata declares) to
+ * the logical keys of a credential request, beyond exact and normalized match.
+ */
+const COMMON_CREDENTIAL_ALIASES: Record<string, string[]> = {
+  apiToken: ['api_token', 'apikey', 'api key', 'access_token', 'accessToken'],
+  smtp_host: ['smtp host', 'smtphost', 'smtpHost'],
+  smtp_user: ['smtp user', 'smtpuser', 'smtpUser', 'username'],
+  smtp_pass: ['smtp pass', 'smtppass', 'smtpPass', 'password', 'pass'],
+  token: ['api_token', 'access_token', 'apikey'],
+  username: ['user', 'login'],
+  password: ['pass', 'pwd'],
+};
+
+function candidateSecretNames(key: string, extraNames: string[] = []): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (name: string) => {
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push(name);
+  };
+  for (const name of extraNames) add(name);
+  add(`secret:${key}`);
+  add(key);
+  const aliases = COMMON_CREDENTIAL_ALIASES[key];
+  if (aliases) for (const alias of aliases) add(alias);
+  return out;
+}
+
+function credentialKeyForMention(
+  mention: string,
+  missingCredentials: Array<{ key: string }>,
+): string | undefined {
+  const norm = normalizeSecretName(mention);
+  // Pass 1: exact or alias match on the normalized forms.
+  for (const { key } of missingCredentials) {
+    if (normalizeSecretName(key) === norm) return key;
+    const aliases = COMMON_CREDENTIAL_ALIASES[key];
+    if (aliases && aliases.some((alias) => normalizeSecretName(alias) === norm)) return key;
+  }
+  // Pass 2: a user-stated secret name may be prefixed/suffixed (e.g.
+  // `prod-smtp-host` for key `smtp_host`), so match by containment either way.
+  for (const { key } of missingCredentials) {
+    const keyNorm = normalizeSecretName(key);
+    if (keyNorm && (norm.includes(keyNorm) || keyNorm.includes(norm))) return key;
+  }
+  return undefined;
+}
+
+export interface CredentialReplyParse {
+  /** key -> supplied value: a plaintext value, a `secret:<name>` reference, or a `vault://...` reference */
+  values: Record<string, string>;
+  /** missing-credential keys the reply does not address */
+  unresolved: string[];
+}
+
+function parseCredentialResponse(
   response: string,
   missingCredentials: Array<{ key: string; label: string }>,
-): Record<string, string> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(response);
-  } catch {
-    parsed = undefined;
-  }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const values: Record<string, string> = {};
-    for (const { key } of missingCredentials) {
-      const value = (parsed as Record<string, unknown>)[key];
-      if (typeof value !== 'string' || !value.trim()) {
-        throw new Error(`The credential response is missing a non-empty string value for "${key}"`);
-      }
+): CredentialReplyParse {
+  const values: Record<string, string> = {};
+  const assigned = new Set<string>();
+
+  const assign = (key: string, value: string) => {
+    if (!assigned.has(key)) {
       values[key] = value;
+      assigned.add(key);
     }
-    return values;
-  }
+  };
 
-  if (question?.match(/^\s*\[secret:tool-credentials\]/i)) {
-    const vaultReference = response.match(/Vault reference:\s*(vault:\/\/[a-zA-Z0-9._-]+)/i)?.[1];
-    if (!vaultReference) {
-      throw new Error('The secure credential answer did not include its Vault reference');
+  const text = response.trim();
+
+  // 1. JSON object fragment: {"key": "value", ...}
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const { key } of missingCredentials) {
+        const value = (parsed as Record<string, unknown>)[key];
+        if (typeof value === 'string' && value.trim()) assign(key, value);
+      }
     }
-    return Object.fromEntries(missingCredentials.map(({ key }) => [key, vaultReference]));
+  } catch {
+    // Not JSON; fall through to textual parsing.
   }
 
-  if (missingCredentials.length === 1) {
-    return { [missingCredentials[0].key]: response };
+  // 2. Explicit secret references: secret:<name>
+  for (const match of text.matchAll(/secret:\s*([A-Za-z0-9._-]+)/gi)) {
+    const key = credentialKeyForMention(match[1], missingCredentials);
+    if (key) assign(key, `secret:${match[1]}`);
   }
 
-  throw new Error('This tool requires multiple credential values; configure them in Tools or Vault before continuing');
+  // 3. Vault references: vault://<id>. Unambiguous only when a single
+  //    credential is missing; otherwise the reply does not say which key it is for.
+  const vaultRefs = [...text.matchAll(/vault:\/\/[A-Za-z0-9._-]+/gi)].map((match) => match[0]);
+  if (missingCredentials.length === 1 && vaultRefs.length > 0) {
+    assign(missingCredentials[0].key, vaultRefs[0]);
+  }
+
+  // 4. key: value / key=value pairs for keys not yet addressed.
+  for (const { key } of missingCredentials) {
+    if (assigned.has(key)) continue;
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(?:^|[\\s,;(>])\\s*${escaped}\\s*[:=]\\s*([^\\s,;}]+)`, 'gi');
+    const match = pattern.exec(text);
+    if (match && match[1]) assign(key, match[1]);
+  }
+
+  // 5. A single missing credential answered with a plain token. An explanatory
+  //    sentence is never treated as a secret value.
+  if (missingCredentials.length === 1 && assigned.size === 0) {
+    const [single] = missingCredentials;
+    const token = text.replace(/^["']|["']$/g, '').trim();
+    if (
+      token
+      && !/\s/.test(token)
+      && !/^(already|configured|set|done|ready|ok|yes|no|none|null)\b/i.test(token)
+    ) {
+      assign(single.key, token);
+    }
+  }
+
+  const unresolved = missingCredentials.map(({ key }) => key).filter((key) => !assigned.has(key));
+  return { values, unresolved };
 }
 
 async function configuredCredentialReferences(
   toolId: string,
   missingCredentials: Array<{ key: string; label: string }>,
+  options: { candidateNames?: Record<string, string[]> } = {},
 ): Promise<Record<string, string>> {
   const vaultUrl = (process.env.VAULT_URL || 'http://vault:4000').replace(/\/+$/, '');
   const references: Record<string, string> = {};
-  const missing: string[] = [];
+  const unresolved: Array<{ key: string; label: string }> = [];
 
-  for (const { key } of missingCredentials) {
-    const candidates = [
-      `secret:${key}`,
-      key,
-    ];
+  for (const { key, label } of missingCredentials) {
+    const candidates = candidateSecretNames(key, options.candidateNames?.[key] ?? []);
     let found = false;
     for (const secretName of candidates) {
       let secret: { id?: unknown } | undefined;
@@ -122,11 +247,15 @@ async function configuredCredentialReferences(
       found = true;
       break;
     }
-    if (!found) missing.push(key);
+    if (!found) unresolved.push({ key, label });
   }
 
-  if (missing.length > 0) {
-    throw new Error(`Configure these Vault values before continuing: ${missing.join(', ')}`);
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Could not resolve configured credentials for tool "${toolId}": missing values for `
+      + unresolved.map(({ key, label }) => `${key} (${label ?? key}`).join(', ')
+      + '. Configure them in Vault/Tools or supply them in your reply.',
+    );
   }
   return references;
 }
@@ -491,23 +620,49 @@ export class TemporalClient {
               ? 'mission_incomplete'
               : 'mission_completed';
           const outputDetails = result.output && typeof result.output === 'object'
-            ? (result.output as { outputs?: { gaps?: unknown } }).outputs
+            ? (result.output as { outputs?: {
+              status?: string;
+              gaps?: unknown;
+              reason?: unknown;
+              pendingInteraction?: MissionPendingInteraction;
+            } }).outputs
             : undefined;
           const incompleteGaps = Array.isArray(outputDetails?.gaps)
             ? outputDetails.gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim().length > 0)
             : [];
+          const reviewGaps = [...new Set(incompleteGaps.map(reviewGapSummary).filter(Boolean))];
           await this.broadcastMissionUpdate({
             type: completionType,
             missionId: input.missionId,
             workflowId,
             status: result.status,
-            ...(result.status === 'incomplete'
+            ...(result.status === 'awaiting_review'
               ? {
                 data: {
-                  reason: incompleteGaps.length > 0
-                    ? incompleteGaps.join('; ')
+                  reviewStatus: outputDetails?.status || 'awaiting_review',
+                  gaps: reviewGaps.slice(0, 8),
+                  omittedGapCount: Math.max(0, incompleteGaps.length - reviewGaps.slice(0, 8).length),
+                  ...(incompleteGaps.some((gap) => /\buncertain\b|outcome.?unknown/i.test(gap))
+                    ? { outcomeUncertain: true }
+                    : {}),
+                  ...(typeof outputDetails?.reason === 'string'
+                    ? { reason: reviewGapSummary(outputDetails.reason) }
+                    : {}),
+                  ...(outputDetails?.pendingInteraction?.taskTitle
+                    ? { taskTitle: outputDetails.pendingInteraction.taskTitle }
+                    : {}),
+                  ...(outputDetails?.pendingInteraction?.permission?.toolName
+                    ? { toolName: outputDetails.pendingInteraction.permission.toolName }
+                    : {}),
+                },
+              }
+              : result.status === 'incomplete'
+              ? {
+                data: {
+                  reason: reviewGaps.length > 0
+                    ? reviewGaps.join('; ')
                     : 'Produced outputs did not satisfy the mission goal',
-                  ...(incompleteGaps.length > 0 ? { gaps: incompleteGaps } : {}),
+                  ...(reviewGaps.length > 0 ? { gaps: reviewGaps } : {}),
                 },
               }
               : {}),
@@ -586,6 +741,15 @@ export class TemporalClient {
             return;
           }
           const error = err instanceof Error ? err.message : String(err);
+          if (missionFailureEndState(err, error) === 'recoverable') {
+            // A mission is only ever failed when no LLMs remain to process prompts.
+            // Service hiccups, timeouts, connectivity loss and malformed agent
+            // responses are recoverable: keep the mission resumable so it retries
+            // on its own instead of terminating.
+            logger.warn({ missionId: input.missionId, error }, 'Mission stopped on a recoverable error; leaving it resumable instead of failing it');
+            await this.recordRecoverableStop(input, workflowId, error, startTime);
+            return;
+          }
           logger.error({ missionId: input.missionId, error }, 'Mission workflow failed');
           await this.persistMissionState({
             missionId: input.missionId,
@@ -631,6 +795,47 @@ export class TemporalClient {
       this.directMissionRuns.delete(input.missionId);
       throw error;
     }
+  }
+
+  /**
+   * Persists a stop that is NOT a mission failure: the mission stays resumable (status
+   * `incomplete`) so it can continue from its saved progress once the transient cause is
+   * gone. Used for every failure except LLM exhaustion.
+   */
+  private async recordRecoverableStop(
+    input: WorkflowInput,
+    workflowId: string,
+    error: string,
+    startTime: number,
+  ): Promise<void> {
+    await this.persistMissionState({
+      missionId: input.missionId,
+      tenantId: input.tenantId || '',
+      assistantId: input.assistantId || '',
+      status: 'incomplete',
+      controlState: 'running',
+      currentStep: 0,
+      totalSteps: 1,
+      history: [{ step: 0, status: 'incomplete' as const, startedAt: startTime, completedAt: Date.now(), error }],
+      input,
+      error,
+      startedAt: startTime,
+      completedAt: Date.now(),
+      createdAt: startTime,
+      updatedAt: Date.now(),
+    });
+    await this.broadcastMissionUpdate({
+      type: 'mission_incomplete',
+      missionId: input.missionId,
+      workflowId,
+      status: 'incomplete',
+      error,
+      data: {
+        reason: sanitizeAgentMessage(error, '').text
+          || 'A temporary service problem interrupted the mission. It can continue from its saved progress.',
+        recoverable: true,
+      },
+    });
   }
 
   async pauseMission(workflowId: string): Promise<'pausing' | 'paused'> {
@@ -682,20 +887,23 @@ export class TemporalClient {
     ) {
       return 'running';
     }
-    if (
-      record.status !== 'pending'
-      &&
-      record.status !== 'paused'
-      &&
-      record.status !== 'awaiting_review'
-      &&
-      record.status !== 'failed'
-      &&
-      record.status !== 'incomplete'
-      && !(record.status === 'running' && pendingInteraction)
-      && record.controlState !== 'pause_requested'
-      && record.controlState !== 'paused'
-    ) {
+    const hasUserMessage = Boolean(continuation.interactionResponse?.trim());
+    const isTerminalState = record.status === 'completed' || record.status === 'canceled';
+    const allowedResumeStates = [
+      'pending',
+      'paused',
+      'awaiting_review',
+      'failed',
+      'incomplete',
+    ];
+    const canResumeFromTerminal = isTerminalState && hasUserMessage;
+    const isAllowedState = allowedResumeStates.includes(record.status || '')
+      || (record.status === 'running' && pendingInteraction)
+      || record.controlState === 'pause_requested'
+      || record.controlState === 'paused'
+      || canResumeFromTerminal;
+
+    if (!isAllowedState) {
       throw new Error(`Cannot resume mission ${missionId} while it is ${record.status || 'unknown'}`);
     }
 
@@ -703,7 +911,7 @@ export class TemporalClient {
       const orchestratorActive = MissionOrchestrator.getActive(missionId);
       if (orchestratorActive) {
         if (pendingInteraction) {
-          throw new Error(`Cannot resume mission ${missionId}: the pending interaction is still being finalized; retry shortly`);
+          throw new MissionAwaitingInputError(pendingInteraction.question);
         }
         await this.updatePersistedMissionControl(missionId, 'running', 'running');
         return 'running';
@@ -756,23 +964,67 @@ export class TemporalClient {
       && (interactionResponse || continuation.useConfiguredCredentials)
     ) {
       const credentialRequest = pendingInteraction.credentialRequest;
-      const credentials = continuation.useConfiguredCredentials
-        ? await configuredCredentialReferences(credentialRequest.toolId, credentialRequest.missingCredentials)
-        : credentialValuesFromResponse(
-          pendingInteraction.question,
-          interactionResponse || '',
-          credentialRequest.missingCredentials,
-        );
+      const { toolId, toolName, executionId, missingCredentials } = credentialRequest;
+      const labelByKey = new Map(missingCredentials.map(({ key, label }) => [key, label]));
+
+      let credentials: Record<string, string>;
+
+      if (interactionResponse) {
+        const parsed = parseCredentialResponse(interactionResponse, missingCredentials);
+        const values: Record<string, string> = {};
+        const unresolved: string[] = [];
+
+        for (const { key } of missingCredentials) {
+          const supplied = parsed.values[key];
+          if (supplied === undefined) {
+            unresolved.push(key);
+            continue;
+          }
+          if (/^secret:/i.test(supplied)) {
+            // The user pointed to an existing secret by name: resolve it via Vault.
+            const secretName = supplied.slice('secret:'.length);
+            const resolved = await configuredCredentialReferences(toolId, [{ key, label: labelByKey.get(key) ?? key }], {
+              candidateNames: { [key]: [secretName] },
+            });
+            values[key] = resolved[key];
+          } else {
+            // Plaintext value or an already-qualified vault:// reference: pass it through.
+            values[key] = supplied;
+          }
+        }
+
+        // Per-key configured fallback: replies that only say the values are already
+        // configured (or leave some keys unaddressed) are resolved from storage under
+        // each key's own name, normalized form, and common aliases.
+        for (const key of [...unresolved]) {
+          try {
+            const resolved = await configuredCredentialReferences(toolId, [{ key, label: labelByKey.get(key) ?? key }]);
+            if (resolved[key] !== undefined) {
+              values[key] = resolved[key];
+              unresolved.splice(unresolved.indexOf(key), 1);
+            }
+          } catch {
+            // Leave the key unresolved so the error below names it specifically.
+          }
+        }
+
+        if (unresolved.length > 0) {
+          throw new Error(
+            `Could not resolve credentials for tool "${toolName}": missing values for `
+            + unresolved.map((key) => `${key} (${labelByKey.get(key) ?? key})`).join(', ')
+            + '. Provide the values or point to existing secrets (secret:<name> or vault://...).',
+          );
+        }
+        credentials = values;
+      } else {
+        try {
+          credentials = await configuredCredentialReferences(toolId, missingCredentials);
+        } catch {
+          logger.warn({ toolId, toolName, missingCredentials }, 'Configured credentials not found in vault; continuing without resolved credentials');
+          credentials = {};
+        }
+      }
       const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
-      const response = await fetch(
-        `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentials }),
-        },
-      );
-      const bodyText = await response.text();
       let execution: {
         status?: string;
         toolId?: string;
@@ -781,24 +1033,38 @@ export class TemporalClient {
         outcomeKnown?: boolean;
         reconciliation?: { outcomeKnown?: boolean };
         request?: { missingCredentials?: Array<{ label?: string; key?: string }> };
-      };
+      } | undefined;
+      try {
+        const response = await fetch(
+        `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials }),
+        },
+      );
+      const bodyText = await response.text();
       try {
         execution = JSON.parse(bodyText) as typeof execution;
       } catch {
         throw new Error(`Tool Executor returned an invalid credential submission response (${response.status})`);
       }
-      if (!response.ok || execution.status !== 'completed') {
-        const remaining = execution.request?.missingCredentials
+      if (!execution || !response.ok || execution.status !== 'completed') {
+        const remaining = execution?.request?.missingCredentials
           ?.map((credential) => credential.label || credential.key)
           .filter((value): value is string => typeof value === 'string');
         const detail = remaining?.length
           ? ` Still missing: ${remaining.join(', ')}.`
           : '';
-        throw new Error(`${execution.error || `Credential submission failed (${response.status})`}${detail}`);
+        throw new Error(`${execution?.error || `Credential submission failed (${response.status})`}${detail}`);
       }
-      const actionReceipt = (pendingInteraction.actionReceipts || []).find(
-        (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
-      );
+      } catch (error) {
+        logger.warn({ executionId: credentialRequest.executionId, error: error instanceof Error ? error.message : String(error) }, 'Credential submission failed; continuing without resolved credentials');
+      }
+      if (execution) {
+        const actionReceipt = (pendingInteraction.actionReceipts || []).find(
+          (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
+        );
       const outcomeUnknown = execution.outcomeKnown === false || execution.reconciliation?.outcomeKnown === false;
       const failed = outcomeUnknown || failedToolOutput(execution.output);
       const completedReceipt = {
@@ -823,6 +1089,7 @@ export class TemporalClient {
         : failed
           ? `The requested values were securely supplied, but "${credentialRequest.toolName}" returned a failure. Examine the recorded result and continue with a safe alternative.`
           : `The requested values were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
+      }
     } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {
@@ -859,24 +1126,38 @@ export class TemporalClient {
         ? `The user granted permission for MCP tool "${pendingInteraction.permission?.toolName || 'the requested tool'}". Continue the task.`
         : `The user denied permission for MCP tool "${pendingInteraction.permission?.toolName || 'the requested tool'}". Do not use it; report the blocker or continue safely without it.`;
     }
+    const userMessage = hasUserMessage ? interactionResponse! : undefined;
     const resumeInput: WorkflowInput = {
       ...input,
       ...(continuation.clarificationAnswers
         ? { clarificationAnswers: [...continuation.clarificationAnswers] }
         : {}),
-      ...(interactionResponse ? { interactionResponse } : {}),
+      ...(interactionResponse && !canResumeFromTerminal ? { interactionResponse } : {}),
+      ...(userMessage && canResumeFromTerminal ? { userMessages: [userMessage] } : {}),
     };
+    const resumedOutput = pendingInteraction && record.output
+      ? {
+          ...record.output,
+          outputs: {
+            ...record.output.outputs,
+            status: 'running',
+            pendingInteraction: undefined,
+          },
+        }
+      : undefined;
     const awaitingClarification = record.output?.outputs?.status === 'awaiting_clarification'
       && Boolean(continuation.clarificationAnswers?.length);
-    const checkpoint = record.status === 'pending' || awaitingClarification
+    const checkpoint = (record.status === 'pending' || awaitingClarification) && !canResumeFromTerminal
       ? undefined
-      : await this.loadPersistedCheckpoint(missionId, pendingInteraction);
+      : canResumeFromTerminal
+        ? undefined
+        : await this.loadPersistedCheckpoint(missionId, pendingInteraction);
     const leaseClaimed = await this.claimDirectRecoveryLease(missionId);
     if (leaseClaimed === false) {
       throw new Error(`Cannot resume mission ${missionId}: another process still owns its execution lease`);
     }
     try {
-      await this.updatePersistedMissionControl(missionId, 'running', 'running', resumeInput);
+      await this.updatePersistedMissionControl(missionId, 'running', 'running', resumeInput, resumedOutput);
     } catch (error) {
       if (leaseClaimed) await this.releaseDirectRecoveryLease(missionId);
       throw error;
@@ -887,20 +1168,6 @@ export class TemporalClient {
         ? `${interactionResponse.slice(0, 1997)}...`
         : interactionResponse
       : undefined;
-    if (pendingInteraction) {
-      await this.broadcastMissionUpdate({
-        type: 'user_input_resolved',
-        missionId,
-        workflowId: `mission-${missionId}`,
-        status: 'running',
-        timestamp: Date.now(),
-        data: {
-          phaseId: pendingInteraction.phaseId,
-          taskId: pendingInteraction.taskId,
-          ...(responsePreview ? { response: responsePreview } : {}),
-        },
-      });
-    }
     await this.broadcastMissionUpdate({
       type: 'mission_resumed',
       missionId,
@@ -1406,6 +1673,7 @@ export class TemporalClient {
     status: string,
     controlState: NonNullable<PersistedMissionControlRecord['controlState']>,
     input?: WorkflowInput,
+    output?: PersistedMissionControlRecord['output'],
   ): Promise<void> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
@@ -1414,7 +1682,13 @@ export class TemporalClient {
     const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, controlState, ...(input ? { input } : {}), updatedAt: Date.now() }),
+      body: JSON.stringify({
+        status,
+        controlState,
+        ...(input ? { input } : {}),
+        ...(output ? { output } : {}),
+        updatedAt: Date.now(),
+      }),
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);
@@ -1701,6 +1975,61 @@ export class TemporalClient {
       throw new Error(`Could not persist mission state (${response.status}): ${details}`);
     }
     logger.debug({ missionId: state.missionId, status: state.status }, 'Mission state persisted');
+  }
+
+  /**
+   * Classifies a user message in the context of a pending interaction.
+   * Returns how the message should be handled: ANSWER (direct answer to pending question),
+   * FEEDBACK (correction/feedback requiring re-plan), or UNCLEAR (needs clarification).
+   */
+  async classifyUserMessageForPendingInteraction(
+    missionId: string,
+    userMessage: string,
+    pendingInteraction: MissionPendingInteraction,
+  ): Promise<'ANSWER' | 'FEEDBACK' | 'UNCLEAR'> {
+    if (!pendingInteraction.question) return 'UNCLEAR';
+
+    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+    try {
+      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `The mission is waiting for a user response to this question: "${pendingInteraction.question}"
+
+The user replied: "${userMessage}"
+
+Classify the user's reply:
+- ANSWER: The user directly provides the requested information (e.g., password, credential, specific value, yes/no to a direct question)
+- FEEDBACK: The user provides correction, feedback, or a different approach (e.g., "that's wrong", "use a different method", "you don't need that", "actually do X instead")
+- UNCLEAR: The user asks a question, gives an ambiguous response, or the intent cannot be determined
+
+Respond with ONLY a JSON object: {"classification": "ANSWER|FEEDBACK|UNCLEAR", "reasoning": "..."}`,
+          schema: {
+            type: 'object',
+            properties: {
+              classification: { type: 'string', enum: ['ANSWER', 'FEEDBACK', 'UNCLEAR'] },
+              reasoning: { type: 'string' }
+            },
+            required: ['classification', 'reasoning']
+          },
+          temperature: 0.1,
+          maxTokens: 200,
+        }),
+      });
+
+      if (!response.ok) {
+        logger.warn({ missionId, status: response.status }, 'Brain classification failed, defaulting to FEEDBACK');
+        return 'FEEDBACK';
+      }
+
+      const result = await response.json() as { output?: { classification?: string }; classification?: string };
+      const classification = result.output?.classification || result.classification;
+      return (classification === 'ANSWER' || classification === 'FEEDBACK' || classification === 'UNCLEAR') ? classification : 'FEEDBACK';
+    } catch (err) {
+      logger.warn({ missionId, err: err instanceof Error ? err.message : String(err) }, 'Error classifying user message, defaulting to FEEDBACK');
+      return 'FEEDBACK';
+    }
   }
 }
 

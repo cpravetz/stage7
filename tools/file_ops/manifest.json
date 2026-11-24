@@ -1,0 +1,55 @@
+{
+  "id": "file_ops",
+  "name": "File Operations",
+  "description": "Read, write, list, delete, check existence, and create directories in a secure sandboxed file storage (local filesystem under FILE_STORAGE_BASE_PATH or /tmp/stage7-filestore). Supports buckets for logical separation.",
+  "type": "native",
+  "manifest": {
+    "executor": "files",
+    "codeFile": "files.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["read", "write", "list", "delete", "exists", "mkdir"], "description": "File operation to perform", "required": true },
+      "path": { "type": "string", "description": "File or directory path (relative to base path or bucket)", "required": true },
+      "content": { "type": "string", "description": "Content to write (for write operation)" },
+      "bucket": { "type": "string", "description": "Optional bucket name for logical separation" }
+    },
+    "required": ["operation", "path"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "data": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "bytes": { "type": "integer" },
+          "message": { "type": "string" },
+          "listing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "isDirectory": { "type": "boolean" },
+                "size": { "type": "integer" }
+              }
+            }
+          },
+          "exists": { "type": "boolean" }
+        }
+      },
+      "error": { "type": "string" },
+      "durationMs": { "type": "integer" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

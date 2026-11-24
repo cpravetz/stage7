@@ -76,7 +76,11 @@ export function createRun(
     deps,
     definition,
     task,
-    context,
+    context: {
+      ...context,
+      ...(typeof spec.taskContext.missionGoal === 'string' ? { missionGoal: spec.taskContext.missionGoal } : {}),
+      ...(typeof spec.taskContext.taskObjective === 'string' ? { taskObjective: spec.taskContext.taskObjective } : {}),
+    },
     toolPolicy,
     policy,
     limits: computeRunLimits(policy, deps.maxIterations, grantResumeAllowance),

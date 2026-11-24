@@ -7,6 +7,7 @@ import {
 } from '@stage7-nextgen/shared'
 import { Plan, Phase, Task } from '@stage7-nextgen/shared'
 import { createCompletedTaskSummary } from '../src/types/workflow'
+import { BrainClient } from '../src/brain/BrainClient'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -67,6 +68,26 @@ describe('MissionAgentRuntime', () => {
     jest.restoreAllMocks()
   })
 
+  it('gives the acceptance reviewer the later sections of a substantive deliverable', async () => {
+    const review = jest.spyOn(BrainClient.prototype, 'complete')
+      .mockResolvedValue({ value: { accepted: ['research.md'], rejected: [] } })
+    const content = `${'Introduction. '.repeat(120)}\n## Fifth concept\nDetails for the fifth concept.`
+    jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/tasks')) return jsonResponse({ taskId: 'research' })
+      if (url.endsWith('/execute')) return jsonResponse({
+        status: 'completed', result: { output: `## research.md\n${content}` },
+      })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const result = await runtime.executePromptTask(agent.id, {
+      taskId: 'research', type: 'researcher', prompt: 'List five concepts.', expectedArtifacts: ['research.md'],
+    })
+    expect(result.artifacts[0].content).toBe(content)
+    expect(review.mock.calls[0][0].prompt).toContain('Details for the fifth concept.')
+  })
+
   it('includes earlier user messages in the task prompt without replacing the original goal', async () => {
     const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
     const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
@@ -74,9 +95,53 @@ describe('MissionAgentRuntime', () => {
     })
     await runtime.executeTask(agent.id, task, phase, plan, false, undefined, [], undefined, undefined,
       'Original goal', ['Use secret:service_key.', 'The setting is already configured.'])
-    expect(execute.mock.calls[0][1].prompt).toContain('Original mission goal: Original goal')
+    expect(execute.mock.calls[0][1].prompt).toContain('Original mission goal (authoritative scope): Original goal')
     expect(execute.mock.calls[0][1].prompt).toContain('Use secret:service_key.')
     expect(execute.mock.calls[0][1].prompt).toContain('The setting is already configured.')
+  })
+
+  it('resumes with the original user question and answer so the agent can continue without repeating it', async () => {
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
+      output: 'I recommend the strongest option based on the stated goals.',
+      artifacts: [],
+      tokensUsed: 1,
+    })
+    const previousQuestion = 'What type of online service business are you interested in?'
+    const userResponse = 'You should decide what makes sense and choose what is most likely to succeed.'
+
+    await runtime.executeTask(
+      agent.id,
+      { ...task },
+      phase,
+      plan,
+      false,
+      undefined,
+      [],
+      undefined,
+      {
+        response: userResponse,
+        pendingInteraction: {
+          kind: 'user_input',
+          phaseId: phase.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          agentRole: task.agentRole,
+          question: previousQuestion,
+          resumeCount: 0,
+        },
+      },
+      'Choose a business likely to succeed with minimal startup costs.',
+    )
+
+    const request = execute.mock.calls[0][1]
+    expect(request.prompt).toContain(`The question you previously asked was: ${previousQuestion}`)
+    expect(request.prompt).toContain(`The user's response to that interruption is: ${userResponse}`)
+    expect(request.prompt).toContain('Do not repeat or rephrase the same question')
+    expect(request.context).toMatchObject({
+      priorUserQuestion: previousQuestion,
+      priorUserResponse: userResponse,
+    })
   })
 
   it.each([false, true])('preserves incomplete results and receipts after recovery=%s', async (recover) => {
@@ -238,7 +303,7 @@ describe('MissionAgentRuntime', () => {
 
     const submittedInput = requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>
     expect(submittedInput.prompt).toContain(`Task Instructions: ${task.systemPrompt}`)
-    expect(submittedInput.prompt).toContain('Original mission goal: Research the topic and produce research.md.')
+    expect(submittedInput.prompt).toContain('Original mission goal (authoritative scope): Research the topic and produce research.md.')
     expect(submittedInput.prompt).toContain('Completed dependency results')
     expect(submittedInput.prompt).toContain('The source task calculated 42.')
     expect(submittedInput.prompt).toContain('answer.json')
@@ -256,7 +321,9 @@ describe('MissionAgentRuntime', () => {
         retryGuidance: 'Use the steps already completed; do not repeat actions with side effects.',
       })
 
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    // Submit, execute, and the artifact acceptance review of the produced
+    // deliverable; no worker/assistant discovery calls are expected.
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('parses structured credential questions into resumable mission interruptions', async () => {
@@ -447,6 +514,27 @@ describe('MissionAgentRuntime', () => {
         type: 'evidence',
         content: '[{"toolId":"calculate","isError":false,"content":"{\\"result\\":4}"}]',
       }],
+    }, ...Array.from({ length: 10 }, (_, i) => ({
+      taskId: `phase-1-mission-recovery-${i + 1}`,
+      status: 'failed',
+      output: `Old failure ${i + 1}`,
+      artifactNames: [],
+    })), ...Array.from({ length: 700 }, (_, i) => ({
+      taskId: `phase-2-mission-recovery-${i + 1}`,
+      status: 'completed',
+      output: `\`\`\`json\n{"action":"tool_use","toolId":"lookup","parameters":{"query":"attempt-${i + 1}"}}\n\`\`\``,
+      artifactNames: [],
+    })), {
+      taskId: 'phase-1-mission-recovery-11',
+      status: 'failed',
+      output: 'Outcome unknown',
+      artifactNames: [],
+    }, {
+      taskId: 'phase-1-mission-recovery-12',
+      status: 'failed',
+      output: 'Failed with recorded receipt',
+      artifactNames: ['system-action-receipts.json'],
+      artifacts: [{ name: 'system-action-receipts.json', type: 'evidence', content: '[]' }],
     }])
 
     expect(result).toEqual({ satisfied: true, gaps: [] })
@@ -478,6 +566,12 @@ describe('MissionAgentRuntime', () => {
     ])
     expect(prompts[1]).toContain('Previous response: No.')
     expect(prompts[2]).toContain('Do not return generic gap text')
+    expect(prompts[0]).toContain('"omittedHistoricalRecoveryFailures":704')
+    expect(prompts[0]).not.toContain('Old failure 1"')
+    expect(prompts[0]).not.toContain('attempt-1\\"')
+    expect(prompts[0]).toContain('attempt-700')
+    expect(prompts[0]).toContain('Outcome unknown')
+    expect(prompts[0]).toContain('Failed with recorded receipt')
   })
 
   it('executes a dependent task and instructs recovery when completed dependency output is unavailable', async () => {
@@ -639,6 +733,32 @@ describe('MissionAgentRuntime', () => {
     expect(result.output).toBe('## research.md\nRecovered from the saved checkpoint.')
     expect(executedPaths).toHaveLength(2)
     expect(executedPaths[0]).toBe(executedPaths[1])
+  })
+
+  it('does not blindly retry a classified non-transient Agent execution failure', async () => {
+      let executes = 0
+      jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url.endsWith(`/missions/mission-1/agents/${agent.id}`) && method === 'GET') return jsonResponse(agent)
+        if (url.endsWith(`/missions/mission-1/agents/${agent.id}/start`)) return jsonResponse({})
+        if (url.endsWith('/tasks') && method === 'POST') return jsonResponse({
+          agentId: agent.id, taskId: 'mission-1:phase-1:task-1', type: 'researcher',
+          input: {}, priority: 1, status: 'pending', createdAt: new Date().toISOString(),
+        })
+        if (url.endsWith('/tasks/mission-1:phase-1:task-1/execute')) {
+          executes++
+          return jsonResponse({ error: 'Request is irreducible', failureCode: 'REQUEST_TOO_LARGE' }, 500)
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`)
+      })
+      const runtime = new MissionAgentRuntime({
+        missionId: 'mission-1', tenantId: 'tenant-1', agentRuntimeUrl: 'http://agent-runtime:3400',
+      })
+      await expect(runtime.executeTask(agent.id, task, phase, plan)).rejects.toMatchObject({
+        failureCode: 'REQUEST_TOO_LARGE',
+      })
+      expect(executes).toBe(1)
   })
 
   it('receives an already-running persisted Agent task result through its event stream', async () => {

@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { putJSON, fetchJSON, deleteResource } from '../utils/api';
 
+// The Vault service requires an authenticated tenant context on every secrets
+// route (see services/vault/src/utils/tenant.ts). This single-tenant deployment
+// stores its secrets under the "system" tenant, matching Tools.tsx and
+// Settings.tsx, so every call here must carry it explicitly.
+const VAULT_TENANT_ID = 'system';
+
 interface Secret {
   id: string;
   name: string;
@@ -26,7 +32,7 @@ const Vault = () => {
 
   const loadSecrets = async () => {
     try {
-      const data = await fetchJSON<{ secrets: Secret[] }>('/api/vault/secrets');
+      const data = await fetchJSON<{ secrets: Secret[] }>(`/api/vault/secrets?tenantId=${encodeURIComponent(VAULT_TENANT_ID)}`);
       setSecrets(data.secrets);
     } catch {
       setError('Failed to load secrets');
@@ -46,7 +52,7 @@ const Vault = () => {
     setLoading(true);
     setError(null);
     try {
-      await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext, tenantId: 'system' });
+      await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext, tenantId: VAULT_TENANT_ID });
       setName('');
       setPlaintext('');
       await loadSecrets();
@@ -67,7 +73,7 @@ const Vault = () => {
       return;
     }
     try {
-      const data = await fetchJSON<DecryptedSecret>(`/api/vault/secrets/${secret.id}/decrypt`);
+      const data = await fetchJSON<DecryptedSecret>(`/api/vault/secrets/${secret.id}/decrypt?tenantId=${encodeURIComponent(VAULT_TENANT_ID)}`);
       setRevealed((prev) => ({ ...prev, [secret.id]: data.plaintext }));
     } catch {
       setError('Failed to decrypt secret');
@@ -78,7 +84,7 @@ const Vault = () => {
     setError(null);
     setName(secret.name);
     try {
-      const data = await fetchJSON<DecryptedSecret>(`/api/vault/secrets/${secret.id}/decrypt`);
+      const data = await fetchJSON<DecryptedSecret>(`/api/vault/secrets/${secret.id}/decrypt?tenantId=${encodeURIComponent(VAULT_TENANT_ID)}`);
       setPlaintext(data.plaintext);
     } catch {
       setPlaintext('');
@@ -89,7 +95,7 @@ const Vault = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this secret? This cannot be undone.')) return;
     try {
-      await deleteResource(`/api/vault/secrets/${id}`);
+      await deleteResource(`/api/vault/secrets/${id}?tenantId=${encodeURIComponent(VAULT_TENANT_ID)}`);
       setRevealed((prev) => {
         const next = { ...prev };
         delete next[id];

@@ -1,0 +1,42 @@
+{
+  "id": "slack_messaging",
+  "name": "Slack Messaging",
+  "description": "Send messages, list channels, and upload files to Slack via the Slack Web API. Requires the `slackToken` credential (Slack bot token, e.g. xoxb-...) for Bearer auth. Supports post_message, list_channels, and upload_file operations.",
+  "type": "native",
+  "manifest": {
+    "executor": "vendor",
+    "codeFile": "vendor.js",
+    "vendor": "slack",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "slackToken": { "type": "string", "title": "Slack Token", "description": "Slack bot token (e.g. xoxb-...)", "sensitive": true, "required": false, "envVar": "SLACK_TOKEN", "label": "Slack Token" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["post_message", "list_channels", "upload_file"], "description": "Slack Web API operation to perform" },
+      "channel": { "type": "string", "description": "Channel ID or name (required for post_message and upload_file)" },
+      "text": { "type": "string", "description": "Message text (for post_message)" },
+      "blocks": { "description": "Slack Block Kit JSON array for rich message layouts (for post_message)" },
+      "content": { "type": "string", "description": "File content as a string (required for upload_file)" },
+      "filename": { "type": "string", "description": "Filename for the uploaded file (for upload_file; defaults to file.txt)" }
+    },
+    "required": ["operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "ok": { "type": "boolean", "description": "Slack API success flag" },
+      "ts": { "type": "string", "description": "Message timestamp (for post_message)" },
+      "channel": { "type": "string", "description": "Channel where the message was posted or file uploaded" },
+      "channels": { "type": "array", "description": "List of channels (for list_channels)" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

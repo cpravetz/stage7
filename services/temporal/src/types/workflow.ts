@@ -5,6 +5,7 @@ import {
   extractReceiptBinding,
   receiptMatchesRequiredAction,
   describeRequiredAction,
+  sanitizeAgentMessage,
   type ActionReceiptLike,
   type RequiredActionLike,
 } from '@stage7-nextgen/shared';
@@ -31,6 +32,22 @@ export interface WorkflowInput {
 export interface MissionTaskCheckpoint {
   phaseId: string;
   taskId: string;
+}
+
+/**
+ * Per-phase mission result shape shared by the in-process mission engine
+ * (MissionOrchestrator) and the completion/stage listeners.
+ */
+export interface MissionPhaseOutput {
+  phaseId: string;
+  name: string;
+  status: 'completed' | 'incomplete';
+  tasks: Array<{
+    taskId: string;
+    status: 'completed' | 'incomplete' | 'failed' | 'pending';
+    artifacts: MissionArtifact[];
+    output?: string;
+  }>;
 }
 
 export interface MissionCredentialRequest {
@@ -75,6 +92,7 @@ export interface MissionPendingInteraction {
 
 export interface CompletedTaskSummary {
   taskId: string;
+  status?: string;
   output: string;
   artifactNames: string[];
   artifacts?: MissionArtifact[];
@@ -94,6 +112,20 @@ export function completedTaskIdsWithSummaries(
   return taskIds.filter((taskId) => summarizedTaskIds.has(taskId));
 }
 
+export function recoveryTaskDependencies(
+  tasks: Task[],
+  summaries: Iterable<Pick<CompletedTaskSummary, 'taskId'>>,
+  targetTaskIds: string[],
+): string[] {
+  const summarized = new Set(Array.from(summaries, (summary) => summary.taskId));
+  const completed = tasks.filter((task) => task.status === 'completed' && summarized.has(task.id));
+  const original = completed.filter((task) => !/-mission-recovery-\d+/i.test(task.id));
+  const targets = new Set(targetTaskIds);
+  const prioritized = [...original.filter((task) => targets.has(task.id)), ...original.filter((task) => !targets.has(task.id))];
+  const recentRecovery = completed.filter((task) => /-mission-recovery-\d+/i.test(task.id)).slice(-6);
+  return [...prioritized.slice(0, 12 - recentRecovery.length), ...recentRecovery].map((task) => task.id);
+}
+
 export interface MissionPhaseEvidence {
   phaseId: string;
   status: string;
@@ -103,6 +135,25 @@ export interface MissionPhaseEvidence {
     artifacts: MissionArtifact[];
     output?: string;
   }>;
+}
+
+export function phaseRequirementEvidenceGaps(
+  plan: Plan,
+  phaseId: string,
+  phaseOutput: MissionPhaseEvidence,
+): string[] {
+  const phase = plan.phases.find((candidate) => candidate.id === phaseId);
+  if (!phase) return [`Phase ${phaseId} is missing from the plan.`];
+  const requiredTasks = phase.tasks.filter((task) =>
+    task.requiresExternalAction
+    || (task.requiredActions || []).length > 0
+    || (task.expectedArtifacts || []).some((name) => name.toLocaleLowerCase() !== 'system-action-receipts.json'),
+  );
+  if (requiredTasks.length === 0) return [];
+  return missionExecutionEvidenceGaps(
+    { ...plan, phases: [phase] },
+    [{ ...phaseOutput, status: 'completed' }],
+  ).filter((gap) => requiredTasks.some((task) => gap.includes(`(${task.id})`)));
 }
 
 export function recoveryGapFingerprint(gaps: string[]): string {
@@ -131,6 +182,31 @@ export interface RecoveryProgressObservation {
   outputs?: string[];
 }
 
+export function recoveryEvidenceState(
+  tasks: MissionPhaseEvidence['tasks'],
+  expectedArtifacts: string[],
+): Pick<RecoveryProgressObservation, 'artifactNames' | 'receiptOps'> {
+  const expected = new Set(expectedArtifacts.map((name) => name.trim().toLocaleLowerCase()));
+  const artifactNames: string[] = [];
+  const receiptOps: string[] = [];
+  for (const task of tasks) {
+    for (const artifact of task.artifacts || []) {
+      const name = artifact.name.trim().toLocaleLowerCase();
+      if (name === 'system-action-receipts.json') {
+        for (const receipt of receiptsFromArtifact(artifact)) {
+          if (receipt.outcome !== 'success' || receipt.isError || receipt.outcomeKnown === false
+            || receipt.toolId === '__list_tools' || receipt.toolId === '__delegate') continue;
+          receiptOps.push(JSON.stringify([receipt.toolId, receipt.operation, receipt.providerRequestId, receipt.executionId]));
+        }
+      } else if (expected.has(name) && artifact.status !== 'blocked' && artifact.purpose !== 'execution-outcome'
+        && ((typeof artifact.content === 'string' && artifact.content.trim()) || artifact.url !== undefined || artifact.data !== undefined)) {
+        artifactNames.push(name);
+      }
+    }
+  }
+  return { artifactNames: [...new Set(artifactNames)], receiptOps: [...new Set(receiptOps)] };
+}
+
 export function recoveryProgressSignature(obs: RecoveryProgressObservation): string {
   const gapFp = recoveryGapFingerprint(obs.gaps);
   // Exclude recovery/amendment/config scaffolding so adding a recovery task that
@@ -152,26 +228,105 @@ export function hasRecoveryProgress(previous: string | undefined, current: strin
   return !previous || previous !== current;
 }
 
+export function hasEvidenceRecoveryProgress(previous: string | undefined, current: string): boolean {
+  return !previous || previous.split('::')[1] !== current.split('::')[1];
+}
+
 // Hard safety ceilings (anti-runaway). Blind count cutoffs replaced by progress-aware logic + ceilings.
 export const MAX_PHASE_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_MISSION_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
+// A completion-review verification failure (the reviewer could not produce a
+// valid verdict) is recoverable, not a mission-incomplete: retry the review a
+// few times before falling back to a resumable review state instead of aborting.
+export const MAX_COMPLETION_VERIFICATION_RETRIES = 2;
+
+/** Bounded reruns of a dependency whose completion did not produce its declared artifact (a missing input). */
+export const MAX_DEPENDENCY_INPUT_RERUNS = 2;
+
+/** A recovery/amendment/configuration-scaffold task id (not a normally-planned task). */
+export function isRecoveryTask(taskId: string): boolean {
+  return /-mission-recovery-\d+|-amendment-\d+|-configuration-request-\d+/i.test(taskId);
+}
 
 
 export function isConfigurationBlocker(evidence: string[]): boolean {
   const text = evidence.join('\n');
-  // A blocker is a configuration blocker when the evidence says something the
-  // operator has to supply is absent (credentials, configuration, or a
-  // capability that is not available in the live catalog). Missing deliverables
-  // or task outputs are execution failures, not configuration blockers, so the
-  // subject has to be a capability/service/configuration term.
-  const missingSignal = /\b(?:missing|required|needed|not provided|not supplied|unavailable|not found|not registered|not configured|not available|isn't available|isn't configured)\b|\bnot in the live system catalog\b/i;
-  const subjectSignal = /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|service|configuration|provider|tool|catalog|capability|integration|connector|plugin|subscription|license|account)\b/i;
-  return missingSignal.test(text) && subjectSignal.test(text);
+  // Only a missing secret or an authorization decision is a user blocker. A
+  // missing tool/capability is self-service: the system must discover, compose,
+  // or create and verify it, so tool/catalog/provider/configuration subjects are
+  // deliberately excluded here.
+  const missingSignal = /\b(?:missing|required|needed|not provided|not supplied|denied|forbidden|not authorized)\b/i;
+  const secretSignal = /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|permission)\b/i;
+  return missingSignal.test(text) && secretSignal.test(text);
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not complete "${missionGoal}" because a required service or configuration is missing. I have already tried to discover, resolve, or create the needed capability automatically. Open Tools configuration, fill in the secure form for the relevant tool or provider, and continue after you save — then reply here so I can resume.`;
+  return `I could not complete "${missionGoal}" because a required secret or authorization is missing. I have already tried to discover, resolve, or create the needed capability automatically. Provide the specific requested value (for example an API key or token) or grant the required permission, then reply here so I can resume.`;
+}
+
+function gapRequiresUserInput(gap: string): boolean {
+  return /\b(?:ask(?:ing)? (?:you|the user)|user (?:must|needs to|should)|provide (?:your|a) (?:value|answer|decision|approval)|approval required|requires? (?:your|user) (?:approval|decision|input|response)|question requiring|waiting for (?:your|user))\b/i.test(gap);
+}
+
+/**
+ * Gaps that describe lost, unrecorded, or malformed data/state rather than a
+ * genuine unmet mission requirement. Data and state errors must never abort a
+ * mission: the mission is resumable and the affected task can be retried.
+ */
+export function gapIsDataOrStateIssue(gap: string): boolean {
+  return /\bhas no execution result\b/i.test(gap)
+    || /\bno non-empty deliverable content or file reference was recorded\b/i.test(gap)
+    || /\bunreadable action-receipt record\b/i.test(gap)
+    || /\bexecution result is missing its (?:phase|task) ID\b/i.test(gap)
+    || /\breturned internal data instead of\b/i.test(gap)
+    || /\breturned an internal structured payload\b/i.test(gap)
+    || /\bcontains no usable result\b/i.test(gap)
+    || /\bstate (?:is )?(?:missing|inconsistent|lost)\b/i.test(gap);
+}
+
+export function classifyMissionCompletionGaps(
+  missionGoal: string,
+  gaps: string[],
+  options?: { pendingUserInteraction?: boolean; failureCode?: string },
+): { status: 'awaiting_review' | 'incomplete'; reason: string; question?: string } {
+  const evidence = gaps.filter(Boolean);
+  if (options?.pendingUserInteraction || evidence.some(gapRequiresUserInput)) {
+    return {
+      status: 'awaiting_review',
+      reason: evidence[0] || 'User input is required before the mission can continue.',
+      question: evidence.find(gapRequiresUserInput) || evidence[0],
+    };
+  }
+
+  const configFailure = options?.failureCode === 'CREDENTIAL_REQUIRED'
+    || options?.failureCode === 'CONFIGURATION_REQUIRED'
+    || isConfigurationBlocker(evidence);
+  if (configFailure) {
+    return {
+      status: 'awaiting_review',
+      reason: evidence[0] || 'Required configuration is missing.',
+      question: missionConfigurationQuestion(missionGoal),
+    };
+  }
+
+  // A data/state problem means recorded evidence was lost or unreadable, not
+  // that the mission outcome is unachievable. Route it to a resumable review
+  // state so the affected task is retried instead of aborting the mission.
+  const stateGaps = evidence.filter(gapIsDataOrStateIssue);
+  if (stateGaps.length > 0) {
+    return {
+      status: 'awaiting_review',
+      reason: `Mission state needs recovery before completion can be verified: ${stateGaps[0]} Resume the mission to retry the affected task.`,
+      question: 'The mission recorded incomplete state for part of its work. Resume the mission so the affected task can be retried?',
+    };
+  }
+
+  const detail = evidence.slice(0, 8).join(' ');
+  return {
+    status: 'incomplete',
+    reason: detail || 'The mission could not be completed automatically because required work or deliverables remain unresolved.',
+  };
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([
@@ -226,6 +381,35 @@ function receiptsFromArtifact(artifact?: MissionArtifact): ActionReceiptLike[] {
 }
 
 /**
+ * A task's outcome can be recorded on the planned task itself (the persisted
+ * plan is updated as tasks run). When the caller's execution result is missing
+ * an entry but the plan records that the task finished, that recorded outcome
+ * IS the execution result — losing the in-memory copy is a data/state problem,
+ * not evidence that the task never ran.
+ */
+function plannedTaskOutcome(plannedTask: Task): { taskId: string; status: string; artifacts: MissionArtifact[]; output?: string } | undefined {
+  const status = String(plannedTask.status || '');
+  if (!status || status === 'pending' || status === 'in_progress') return undefined;
+  return {
+    taskId: plannedTask.id,
+    status,
+    artifacts: plannedTask.artifacts || [],
+    output: plannedTask.output,
+  };
+}
+
+/**
+ * Task outputs are prose for a person. A structured payload (tool manifest,
+ * plan, receipt dump) is internal transport and must never be shown, or used,
+ * as a failure explanation.
+ */
+function readableTaskDetail(output?: string): string {
+  if (!output) return '';
+  const readable = sanitizeAgentMessage(output, '').text.trim();
+  return readable.length > 500 ? `${readable.slice(0, 497)}...` : readable;
+}
+
+/**
  * Binding-aware, recovery-aware evidence gaps (Task 6/7).
  * - Planned task statuses are checked per task (no sibling success masking).
  * - Required/external actions: satisfied by an authoritative matching receipt produced
@@ -274,11 +458,70 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         gaps.push(`Phase "${plannedPhase.name}" returned unplanned task "${task.taskId}".`);
       }
     }
+    let hasLaterCompletedRecovery = false;
+    const laterCompletedRecovery = new Set<string>();
+    for (const candidate of [...plannedPhase.tasks].reverse()) {
+      if (hasLaterCompletedRecovery) laterCompletedRecovery.add(candidate.id);
+      if (/-mission-recovery-\d+/i.test(candidate.id) && tasksById.get(candidate.id)?.status === 'completed') {
+        hasLaterCompletedRecovery = true;
+      }
+    }
     for (const plannedTask of plannedPhase.tasks) {
-      const task = tasksById.get(plannedTask.id);
+      const task = tasksById.get(plannedTask.id) ?? plannedTaskOutcome(plannedTask);
+      const supersededAmendment = /-amendment-\d+/i.test(plannedTask.id)
+        && plannedPhase.tasks.some((candidate) =>
+          /-mission-recovery-\d+/i.test(candidate.id)
+          && tasksById.get(candidate.id)?.status === 'completed'
+          && candidate.systemPrompt.includes(plannedTask.id)
+          && plannedPhase.tasks.indexOf(candidate) > plannedPhase.tasks.indexOf(plannedTask),
+        );
+      if ((/-mission-recovery-\d+/i.test(plannedTask.id) || supersededAmendment)
+        && laterCompletedRecovery.has(plannedTask.id)
+        && (task?.status === 'failed' || task?.status === 'incomplete')
+        && !plannedTask.requiresExternalAction
+        && !(plannedTask.requiredActions || []).length
+        && !(plannedTask.expectedArtifacts || []).length) {
+        const receiptArtifact = task?.artifacts.find((artifact) =>
+          artifact.name.toLocaleLowerCase() === 'system-action-receipts.json',
+        );
+        let uncertainRecovery = /\b(?:unknown outcome|outcome unknown|outcome uncertain)\b/i.test(task?.output || '');
+        if (typeof receiptArtifact?.content === 'string') {
+          try {
+            const receipts: unknown = JSON.parse(receiptArtifact.content);
+            uncertainRecovery ||= !Array.isArray(receipts) || receipts.some((value: unknown) =>
+              !isActionReceiptLike(value) || value.outcomeKnown === false || /outcome.?unknown/i.test(value.content || ''),
+            );
+          } catch {
+            uncertainRecovery = true;
+          }
+        } else if (receiptArtifact) {
+          uncertainRecovery = true;
+        }
+        if (!uncertainRecovery) continue;
+      }
       if (!task) {
-        phaseHadTaskGap = true;
-        gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
+        const names = (plannedTask.expectedArtifacts || []).filter((name) =>
+          name.trim().toLocaleLowerCase() !== 'system-action-receipts.json',
+        );
+        const recovered = names.length > 0
+          && !plannedTask.requiresExternalAction
+          && !(plannedTask.requiredActions || []).length
+          && names.every((name) => phases.some((evidencePhase) => evidencePhase.tasks.some((evidenceTask) =>
+            evidenceTask.status === 'completed' && evidenceTask.artifacts.some((artifact) =>
+              artifact.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()
+              && artifact.purpose !== 'execution-outcome'
+              && artifact.status !== 'blocked'
+              && ((typeof artifact.content === 'string' && artifact.content.trim().length > 0
+                && !/^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(artifact.content)
+                && !/^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(artifact.content))
+                || (typeof artifact.url === 'string' && artifact.url.trim().length > 0)
+                || artifact.data !== undefined),
+            ),
+          )));
+        if (!recovered) {
+          phaseHadTaskGap = true;
+          gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
+        }
         continue;
       }
 
@@ -372,7 +615,8 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
       const expectedArtifactsList = Array.isArray((plannedTask as any).expectedArtifacts) ? (plannedTask as any).expectedArtifacts as string[] : [];
       for (const expectedName of expectedArtifactsList) {
         if (normalize(expectedName) === 'system-action-receipts.json') continue;
-        const artifact = [...phaseArtifacts, ...globalArtifacts].find((candidate) => normalize(candidate.name) === normalize(expectedName));
+        const artifact = [...(task.artifacts || []), ...phaseArtifacts, ...globalArtifacts]
+          .find((candidate) => normalize(candidate.name) === normalize(expectedName));
         const artifactContent = typeof artifact?.content === 'string' ? artifact.content.trim() : '';
         const isBlocker = artifactContent.length > 0
           && (
@@ -411,10 +655,10 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
       // Not resolved: report status and requirement detail.
       phaseHadTaskGap = true;
       if (task.status !== 'completed') {
-        const detail = task.output?.trim();
+        const detail = readableTaskDetail(task.output);
         gaps.push(
           `Task "${plannedTask.title}" (${plannedTask.id}) is ${task.status}, not completed.`
-          + (detail ? ` Reason: ${detail.slice(0, 500)}` : ''),
+          + (detail ? ` Reason: ${detail}` : ''),
         );
       }
       gaps.push(...requirementGaps);

@@ -9,19 +9,24 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
-const TEST_CONTRACT_SYSTEM_PROMPT = `You independently derive a deterministic acceptance contract for a requested tool capability.
-Do not write or assume an implementation. Return only one JSON object with this shape:
+const TEST_CONTRACT_SYSTEM_PROMPT = `Create small, deterministic input/output tests for the requested tool capability. Do not write an implementation.
+When a mission goal is provided, it defines the scope: the capability must be necessary for that goal and preserve its operation and medium. If it conflicts with the goal, return no cases.
+Return the tests themselves, not instructions for creating tests. Return one JSON object:
 {"description":"...","cases":[{"name":"...","input":{},"credentials":{},"expectedOutput":{},"httpMocks":[{"method":"POST","urlPattern":"https://api.example.test/path","expectedRequestBody":"...","responseStatus":200,"responseHeaders":{},"responseBody":{}}]}]}
 Requirements:
 - Provide 1-5 small, deterministic input/output examples that directly verify the stated capability.
-- Every input and expectedOutput must be a JSON object; do not include secrets, real personal data, live network endpoints, or side effects.
-- When a capability needs HTTP, include a local HTTP fixture for each expected request, with its method, URL pattern, optional exact request body, and fixed response. Use a reserved .test hostname; requests are intercepted in-process and unmatched requests are blocked.
-- When a request uses persistent configuration such as an API endpoint or account ID, include dummy string values in the case's credentials object keyed by logical credential key. Use a .test endpoint matching the HTTP fixture. Never include real credentials.
+- Each case's input and expectedOutput must be JSON objects. Credentials must be an object whose values are strings. Do not include real secrets or personal data.
+- When a capability needs HTTP, include a local HTTP fixture for each expected request, with its method, URL pattern, optional exact request body, and fixed JSON-object response. Fixture URLs must match the URL the implementation will call; use the known provider hostname if the API has a fixed hostname, or a reserved .test hostname for configurable endpoints. Requests are intercepted in-process and unmatched requests are blocked, so no live request is made. Use * for variable path segments such as account IDs.
+- When a request uses persistent configuration such as an API endpoint or account ID, include dummy string values in the case's credentials object keyed by logical credential key. Use an endpoint matching the HTTP fixture. Never include real credentials.
+- Key credentials by the provider's own vocabulary, using the exact names the provider documents for them (for example a Twilio account SID and auth token, or an API key). Do not invent generic keys such as "endpoint" or "token" when the provider has specific configuration, and do not omit the provider's account identifier. The generated tool is required to read these exact keys.
 - Expected outputs must be exact JSON values, not prose, descriptions, or wildcards.
 - If the requested capability cannot be tested with deterministic inputs and outputs, return {"description":"...","cases":[]} so the tool is not deployed without a verifiable contract.
 - Return no markdown fences or text outside the JSON object.`;
 
 const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-ready plugins for an AI agent platform.
+
+  The original mission goal, when provided, is authoritative. Generate only a capability
+  necessary for that goal, preserving the requested operation and medium.
 
   PREFER PYTHON. Generate deterministic, side-effect-free tools in Python whenever the task
   fits the standard library. Only fall back to JavaScript when the task genuinely needs
@@ -64,6 +69,19 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     requested by the user prompt.
   - Implement the supplied independent acceptance contract exactly; it will be executed
     with network access and credentials disabled before deployment.
+  - Implement HTTP authentication the way the provider documents it. Do not pass a
+    provider credential somewhere the provider does not read it: for HTTP Basic
+    authentication build the header from BOTH the username and password
+    (base64 of "user:pass"), not one of them alone, and never send a token as a
+    bare header value when the provider expects a scheme. A credential that is read
+    but not actually used to authenticate is a defect even if the test fixture
+    passes, so make the auth exactly match the real API.
+  - Use the acceptance contract's OWN names for inputs and credentials. Read each
+    credential with the exact key the contract's credentials object uses, and each
+    input with the exact key its input object uses. Do not rename them, and do not
+    read a value (such as an endpoint URL) from a different key than the contract
+    supplies. If the contract provides an endpoint URL, build the request URL from
+    that value; if it does not, use the provider's fixed, documented URL.
   - Include configSchema in every response; use {"type":"object","properties":{}} when no
     configuration is needed.
   - Never read configuration, credentials, or secrets from process.env, os.environ,
@@ -99,6 +117,12 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     guessed logical key or request the secret value.
   - Never put secrets in config defaults, source code, logs, outputs, or acceptance-test
     fixtures; acceptance tests must use dummy values and must not make live requests.
+  - Do not silently convert provider failures into an "accepted": false style result.
+    On an HTTP error, capture the response status and the provider's parsed JSON body
+    (code and message) and include them in the JSON result so the caller can see the
+    exact rejection (for example a trial-account unverified-recipient error). Raise
+    only when no structured result can be produced; prefer a result object carrying
+    the error text over an unhandled exception.
   - If the tool must return a secret value, mark that output property with
     "x-stage7-secret": true. ToolExecutor stores it in Vault and returns only a
     vault:// reference to the Agent; never include real secret values in acceptance tests.
@@ -129,7 +153,7 @@ const pluginTestContractSchema = z.object({
       responseHeaders: z.record(z.string(), z.string()).optional(),
       responseBody: z.record(z.string(), z.unknown()),
     }).strict()).max(5).optional(),
-  }).strict()).min(1).max(5),
+  }).strict()).max(5),
 }).strict();
 const pluginValidationSchema = z.object({
   method: z.literal('isolated-contract-tests'),
@@ -170,8 +194,9 @@ const generatedPluginSchema = z.object({
   // (vaultSecretId / envVar / configKey). Required config fields must declare a
   // credential source so missing values can be requested at runtime.
   const properties = (plugin.configSchema.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const required = Array.isArray(plugin.configSchema.required) ? plugin.configSchema.required : [];
   for (const [field, propertySchema] of Object.entries(properties)) {
-    if (!propertySchema || propertySchema.required !== true) continue;
+    if (!propertySchema || (propertySchema.required !== true && !required.includes(field))) continue;
     const property = propertySchema;
     const hasCredentialSource = property.vaultSecretId || property.envVar || property.configKey;
     if (!hasCredentialSource) {
@@ -204,7 +229,7 @@ function expectedEntrypoint(language: unknown): 'index.js' | 'main.py' | undefin
   return undefined;
 }
 
-function extractFirstJsonObject(content: string): unknown | undefined {
+export function extractFirstJsonObject(content: string): unknown | undefined {
   // Some models wrap the JSON in prose or markdown fences. Pull the first
   // balanced top-level object out of the content so a single JSON object can be
   // parsed even when the model adds conversational text around it.
@@ -229,6 +254,214 @@ function extractFirstJsonObject(content: string): unknown | undefined {
     }
   }
   return undefined;
+}
+
+export function looksTruncated(content: string): boolean {
+  // A well-formed JSON object ends with balanced braces and no open string.
+  // If the scan hits end-of-content with depth > 0 or an unterminated string,
+  // the model was cut off before the object closed (typical of maxTokens caps).
+  if (content.trim().length === 0) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+  }
+  return depth > 0 || inString;
+}
+
+// ---------------------------------------------------------------------------
+// Focused remediation framework
+// ---------------------------------------------------------------------------
+// A remediation step is an *incremental query about one specific defect*, not a
+// re-send of the entire generation prompt with a generic "try again" note.
+// Three rules, applied everywhere below:
+//   1. Incremental — each query names the concrete defect and carries only the
+//      fragment needed to fix it (a truncated prefix to complete, the offending
+//      field, the failing test case, or the id to change).
+//   2. Focused context — remediation drops the bulky, decision-irrelevant parts
+//      of the original prompt (requirements list, serialized context blob) and
+//      keeps only what regeneration needs (capability + acceptance contract).
+//   3. Stronger models — every attempt shares a stable routingSessionId so the
+//      Brain's per-session model exclusion rotates to a *different* model after
+//      each failure, and remediation attempts are accuracy-weighted so the
+//      rotation prefers stronger models.
+
+export const PLUGIN_JSON_SHAPE_JSON = JSON.stringify({
+  id: 'string (lowercase, safe identifier)',
+  name: 'string',
+  description: 'string',
+  type: 'code',
+  language: 'javascript | python',
+  entrypoint: 'index.js | main.py',
+  sourceCode: 'complete runnable code reading __tool_input and printing one JSON result',
+  requirements: [],
+  configSchema: { type: 'object', properties: {} },
+  inputs: { type: 'object', properties: {} },
+  outputs: { type: 'object', properties: {} },
+});
+
+export const CONTRACT_JSON_SHAPE_JSON = JSON.stringify({
+  description: 'string',
+  cases: [
+    {
+      name: 'string',
+      input: {},
+      credentials: {},
+      expectedOutput: {},
+      httpMocks: [],
+    },
+  ],
+});
+
+function missionScope(context: Record<string, unknown> | undefined): string {
+  const goal = typeof context?.missionGoal === 'string' ? context.missionGoal.trim() : '';
+  const task = typeof context?.taskObjective === 'string' ? context.taskObjective.trim() : '';
+  if (!goal) return '';
+  return `Original mission goal (authoritative scope): ${goal}\n${task ? `Assigned task: ${task}\n` : ''}The capability must directly support the goal. Do not substitute another operation or medium.\n\n`;
+}
+
+/**
+ * Names of secrets already stored in the Vault, so generated tools can bind to
+ * real, configured credentials instead of inventing identifiers that resolve to
+ * nothing and force a fresh credential prompt for a value the operator already
+ * supplied.
+ */
+export async function listVaultSecretNames(): Promise<string[]> {
+  const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+  try {
+    // A short deadline keeps a slow or absent Vault from delaying generation: the
+    // secret list only sharpens the prompt, and generation must not depend on it.
+    const response = await fetch(`${vaultUrl}/api/vault/secrets`, {
+      headers: { 'X-Tenant-Id': 'system' },
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!response.ok) return [];
+    const data = await response.json() as unknown;
+    const list = Array.isArray(data)
+      ? data
+      : (data && typeof data === 'object' && Array.isArray((data as { secrets?: unknown[] }).secrets)
+        ? (data as { secrets: unknown[] }).secrets
+        : []);
+    return list
+      .map((entry) => (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed for plugin generation');
+    return [];
+  }
+}
+
+/** Credential-related vault names worth showing the generator, bounded to keep the prompt small. */
+export function credentialSecretHint(names: string[], max = 40): string {
+  const credentialLike = names.filter((name) => !/^(tool:[^:]+:searxng|eventTypes)/i.test(name));
+  if (credentialLike.length === 0) return '';
+  return `\nCredentials already stored in the Vault (use these exact names as vaultSecretId when the tool needs them; do not invent new names):\n${credentialLike.slice(0, max).map((name) => `- ${name}`).join('\n')}\n`;
+}
+
+export interface RemediationOptions {
+  temperature: number;
+  maxTokens: number;
+  optimizeFor: 'accuracy' | 'balanced';
+  routingSessionId: string;
+}
+
+export function remediationOptions(params: {
+  attempt: number;
+  routingSessionId: string;
+  maxTokens: number;
+  baseTemperature: number;
+}): RemediationOptions {
+  const { attempt, routingSessionId, maxTokens, baseTemperature } = params;
+  const isFirst = attempt <= 1;
+  return {
+    // Vary temperature on retries so a near-deterministic weak model does not
+    // reproduce the identical rejected output.
+    temperature: isFirst ? baseTemperature : Math.min(0.7, Math.round((baseTemperature + 0.2) * 10) / 10),
+    maxTokens,
+    // First attempt uses normal routing; every remediation attempt is
+    // accuracy-weighted and, via the shared routingSessionId, excludes the
+    // model(s) that already failed.
+    optimizeFor: isFirst ? 'balanced' : 'accuracy',
+    routingSessionId,
+  };
+}
+
+function truncatedExcerpt(content: string | undefined, max = 4000): string {
+  const trimmed = (content || '').slice(0, max);
+  return trimmed ? `\n\nYour previous response (truncated to ${max} chars):\n${trimmed}` : '';
+}
+
+// Truncated output: complete the JSON from where it stopped (cheapest, most
+// incremental fix — the prefix already contains the model's own work).
+export function buildPluginTruncatedCompletionQuery(previousContent: string): string {
+  const prefix = previousContent.slice(0, 8000);
+  return `Your previous response was cut off before the JSON object closed. Continue it from exactly where it stopped.\n\nPrefix produced so far:\n${prefix}\n\nOutput ONLY the remainder of the JSON so that prefix + your output together form one complete, valid JSON object. Do not repeat the prefix and do not add prose or markdown fences.`;
+}
+
+// Not-JSON / prose-only / unparseable: focused envelope query. Keeps the
+// capability + contract (needed to regenerate) but drops requirements + context.
+export function buildPluginContentRepairQuery(params: {
+  description: string;
+  testContract: unknown;
+  reason: string;
+  previousContent?: string;
+}): string {
+  const { description, testContract, reason, previousContent } = params;
+  return `Your previous response could not be used as the plugin JSON object.\nReason: ${reason}${truncatedExcerpt(previousContent)}\n\nGenerate the plugin again for this capability:\n${description}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
+}
+
+// Schema-invalid: name the offending fields, no need to restate the capability
+// when the previous object was structurally close; include it as a fallback.
+export function buildPluginSchemaRepairQuery(params: {
+  reason: string;
+  description?: string;
+  testContract?: unknown;
+  previousContent?: string;
+}): string {
+  const { reason, description, testContract, previousContent } = params;
+  const regen = description
+    ? `\n\nCapability: ${description}\nAcceptance contract to implement exactly:\n${JSON.stringify(testContract)}`
+    : '';
+  return `Your previous plugin JSON failed validation.\nReason: ${reason}${truncatedExcerpt(previousContent)}${regen}\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
+}
+
+// Registry conflict: narrow defect — keep the code, only change the id.
+export function buildPluginRegistryRepairQuery(id: string): string {
+  return `The plugin id '${id}' is already registered. Return the same plugin JSON you just produced but with a new, unique, lowercase id (keep every other field identical).\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
+}
+
+// Test failure: fix only the code against the specific failing cases.
+export function buildPluginTestFailureRepairQuery(params: {
+  description: string;
+  testContract: unknown;
+  sourceCode: string;
+  failedCases: string[];
+}): string {
+  const { description, testContract, sourceCode, failedCases } = params;
+  return `Your tool's code failed its isolated acceptance tests. Fix ONLY the code so the cases below pass; do not change the acceptance contract.\n\nCapability: ${description}\nAcceptance contract:\n${JSON.stringify(testContract)}\n\nFailing cases:\n${failedCases.map((c) => `- ${c}`).join('\n')}\n\nCurrent sourceCode:\n${sourceCode}\n\nWhen a case reports a credential or output mismatch, do not weaken or mock the real provider call. Align the implementation with the contract: read credentials through __get_credential using the configSchema logical keys the contract supplies, call the real provider endpoint the fixture stands in for, and return exactly the JSON keys and values the case expects. Never make the tool report success without performing the provider request.\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
+}
+
+// Acceptance-contract defect: focused query about the contract only.
+export function buildContractRepairQuery(params: {
+  description: string;
+  requirements: string[];
+  reason: string;
+  previousContent?: string;
+}): string {
+  const { description, requirements, reason } = params;
+  const readableReason = reason
+    .replace(/\bcases\.(\d+)/g, (_match, index: string) => `test case ${Number(index) + 1}`)
+    .replace(/\bhttpMocks\.(\d+)/g, (_match, index: string) => `HTTP fixture ${Number(index) + 1}`)
+    .replace(/Invalid input: expected record, received \w+/gi, 'must be a JSON object')
+    .replace(/Invalid input: expected string, received \w+/gi, 'must be a string');
+  return `Create deterministic tests for: ${description}${requirements.length ? `\nRequirements: ${requirements.join('; ')}` : ''}\nCorrect these problems: ${readableReason}\nReturn the test data itself as one JSON object, not a plan or instructions.`;
 }
 
 function extractFirstJsonArray(content: string): unknown | undefined {
@@ -262,6 +495,29 @@ function canonicalJson(value: unknown): string {
     return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+function describeOutputMismatch(expected: unknown, actual: unknown, path = '$'): string {
+  if (canonicalJson(expected) === canonicalJson(actual)) return '';
+  if (Array.isArray(expected) && Array.isArray(actual)) {
+    if (expected.length !== actual.length) return `${path}: array length differs`;
+    for (let index = 0; index < expected.length; index++) {
+      const difference = describeOutputMismatch(expected[index], actual[index], `${path}[${index}]`);
+      if (difference) return difference;
+    }
+  } else if (expected && actual && typeof expected === 'object' && typeof actual === 'object'
+    && !Array.isArray(expected) && !Array.isArray(actual)) {
+    const expectedRecord = expected as Record<string, unknown>;
+    const actualRecord = actual as Record<string, unknown>;
+    for (const key of Object.keys(expectedRecord).sort()) {
+      const childPath = `${path}.${key.replace(/[^a-zA-Z0-9_-]/g, '?').slice(0, 80)}`;
+      if (!(key in actualRecord)) return `${childPath}: missing field`;
+      const difference = describeOutputMismatch(expectedRecord[key], actualRecord[key], childPath);
+      if (difference) return difference;
+    }
+    if (Object.keys(actualRecord).some((key) => !(key in expectedRecord))) return `${path}: unexpected field`;
+  }
+  return `${path}: value or type differs`;
 }
 
 export class PluginGenerator {
@@ -328,6 +584,10 @@ export class PluginGenerator {
     missionId?: string;
     repairFeedback?: string;
     maxAttempts?: number;
+    secretHint?: string;
+    capabilityRequest?: Record<string, unknown>;
+    /** The capability phrase the agent asked for, used to record what the tool was created for. */
+    capability?: string;
   }): Promise<PluginGenerationResult> {
     const {
       description,
@@ -336,23 +596,38 @@ export class PluginGenerator {
       testContract,
       brainUrl,
       missionId,
+      secretHint = '',
+      capability,
     } = options;
-    const basePrompt = `Generate an executable plugin for this capability:\n${description}\nRequirements: ${requirements.join(', ')}\nContext: ${JSON.stringify(context)}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}`;
-    let repairFeedback = options.repairFeedback || '';
+    const capabilityRequest = options.capabilityRequest ?? {
+      ...(typeof capability === 'string' ? { capability } : {}),
+      description,
+      requirements,
+      ...(missionId ? { missionId } : {}),
+      ...(typeof context.missionGoal === 'string' ? { missionGoal: context.missionGoal } : {}),
+    };
+    const basePrompt = `Generate an executable plugin for this capability:\n${description}\nRequirements: ${requirements.join(', ')}\nContext: ${JSON.stringify(context)}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}`;
     const maxAttempts = options.maxAttempts || MAX_PLUGIN_GENERATION_ATTEMPTS;
+    // Stable per-generation routing session: every attempt below shares it so
+    // the Brain excludes models that already failed and rotates to a new one.
+    const routingSessionId = `plugin-gen:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    // Focused remediation query for the *next* attempt. null = use the full
+    // first-attempt prompt. Each defect class builds its own minimal query.
+    let focusedQuery: string | null = options.repairFeedback
+      ? buildPluginContentRepairQuery({ description, testContract, reason: options.repairFeedback })
+      : null;
+    let lastReason = options.repairFeedback || 'Generated plugin failed validation after bounded repair attempts';
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const nonce = `plugin-gen-${attempt}-${Date.now()}`;
-      const prompt = repairFeedback
-        ? `${basePrompt}\n\nThe previous generated code was rejected. Fix this specific issue without changing the contract:\n${repairFeedback}\nRetry nonce: ${nonce}`
-        : `${basePrompt}\nRetry nonce: ${nonce}`;
+      const prompt = `${missionScope(context)}${focusedQuery ?? basePrompt}\nRetry nonce: ${nonce}`;
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
           systemPrompt: PLUGIN_SYSTEM_PROMPT,
-          options: { temperature: 0.2, maxTokens: 4096 },
+          options: remediationOptions({ attempt, routingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
       });
@@ -374,12 +649,19 @@ export class PluginGenerator {
         // a single JSON object survives conversational wrappers.
         rawPlugin = extractFirstJsonObject(data.content);
         if (rawPlugin === undefined) {
-          // Some models answer in pure prose with no JSON at all. Ask for a
-          // JSON-only retry before giving up, so a conversational wrapper does
-          // not abort generation on the first attempt.
+          // Some models answer in prose or markdown fences, or truncate. Fix the
+          // specific defect with a focused query instead of re-sending the whole
+          // generation prompt.
           if (attempt < maxAttempts) {
-            const retryNonce = `plugin-json-retry-${attempt}-${Date.now()}`;
-            repairFeedback = `Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.\nRetry nonce: ${retryNonce}`;
+            focusedQuery = looksTruncated(data.content)
+              ? buildPluginTruncatedCompletionQuery(data.content)
+              : buildPluginContentRepairQuery({
+                description,
+                testContract,
+                reason: 'response was not a JSON object (prose or markdown fences only)',
+                previousContent: data.content,
+              });
+            lastReason = 'LLM plugin response did not contain a single JSON object';
             continue;
           }
           validationError = 'LLM plugin response did not contain a single JSON object';
@@ -395,21 +677,14 @@ export class PluginGenerator {
       if (validationError || !validation?.success) {
         const reason = validationError || 'Generated plugin response could not be validated';
         await this.reportBrainComplaint(data.requestId, reason, missionId);
-        // Give the model the exact required JSON shape so a schema-shaped
-        // rejection can be self-corrected instead of retried blindly.
-        repairFeedback = `${reason}\n\nYour response must be a single JSON object with EXACTLY this shape and nothing else (no markdown fences, no prose, no explanation):\n${JSON.stringify({
-          id: 'string (lowercase, safe identifier)',
-          name: 'string',
-          description: 'string',
-          type: 'code',
-          language: 'javascript | python',
-          entrypoint: 'index.js | main.py',
-          sourceCode: 'complete runnable code reading __tool_input and printing one JSON result',
-          requirements: [],
-          configSchema: { type: 'object', properties: {} },
-          inputs: { type: 'object', properties: {} },
-          outputs: { type: 'object', properties: {} },
-        })}`;
+        lastReason = reason;
+        // Focused query naming the exact validation failure; no full re-send.
+        focusedQuery = buildPluginSchemaRepairQuery({
+          reason,
+          description,
+          testContract,
+          previousContent: typeof data.content === 'string' ? data.content : undefined,
+        });
         continue;
       }
 
@@ -417,7 +692,9 @@ export class PluginGenerator {
       if (this.registry?.get(parsed.id)) {
         const reason = `Generated plugin id '${parsed.id}' is already registered`;
         await this.reportBrainComplaint(data.requestId, reason, missionId);
-        repairFeedback = reason;
+        lastReason = reason;
+        // Narrow defect: only the id must change.
+        focusedQuery = buildPluginRegistryRepairQuery(parsed.id);
         continue;
       }
 
@@ -487,13 +764,20 @@ export class PluginGenerator {
           continue;
         }
         if (canonicalJson(actualOutput) !== canonicalJson(testCase.expectedOutput)) {
-          failedCases.push(`${testCase.name}: output did not match the acceptance contract`);
+          failedCases.push(`${testCase.name}: output did not match the acceptance contract (${describeOutputMismatch(testCase.expectedOutput, actualOutput)})`);
         }
       }
       if (failedCases.length > 0) {
         const reason = `Generated plugin failed isolated acceptance tests: ${failedCases.join('; ')}`;
         await this.reportBrainComplaint(data.requestId, reason, missionId);
-        repairFeedback = reason;
+        lastReason = reason;
+        // Focused query: current source + only the failing cases to fix.
+        focusedQuery = buildPluginTestFailureRepairQuery({
+          description,
+          testContract,
+          sourceCode: parsed.sourceCode,
+          failedCases,
+        });
         continue;
       }
 
@@ -508,7 +792,7 @@ export class PluginGenerator {
       return { success: true, tool };
     }
 
-    return { success: false, error: repairFeedback || 'Generated plugin failed validation after bounded repair attempts' };
+    return { success: false, error: lastReason };
   }
 
   async generate(request: PluginGenerationRequest): Promise<PluginGenerationResult> {
@@ -541,14 +825,16 @@ export class PluginGenerator {
       const missionId = typeof request.context?.missionId === 'string'
         ? request.context.missionId
         : undefined;
+      const contractRoutingSessionId = `contract-gen:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
       const contractNonce = `contract-gen-${Date.now()}`;
+      const scope = missionScope(request.context);
       const contractResponse = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nRetry nonce: ${contractNonce}`,
+          prompt: `${scope}Create deterministic input/output tests for: ${request.description}\nRequirements: ${(request.requirements || []).join('; ')}\nRetry nonce: ${contractNonce}`,
           systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
-          options: { temperature: 0.1, maxTokens: 2048 },
+          options: remediationOptions({ attempt: 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
           missionId,
         }),
       });
@@ -557,50 +843,54 @@ export class PluginGenerator {
         return { success: false, error: `Acceptance contract request failed with ${contractResponse.status}: ${text.slice(0, 200)}` };
       }
       let contractData: { content?: unknown; requestId?: unknown } = await contractResponse.json() as { content?: unknown; requestId?: unknown };
-      if (typeof contractData.content !== 'string'
-        || Buffer.byteLength(contractData.content, 'utf8') > MAX_TEST_CONTRACT_BYTES) {
-        const error = 'Acceptance contract is missing or exceeds the test contract size limit';
-        await this.reportBrainComplaint(contractData.requestId, error, missionId);
-        return { success: false, error };
-      }
-      let rawContract: unknown;
+      let testContract: z.infer<typeof pluginTestContractSchema> | undefined;
       let contractRepairFeedback = '';
       for (let contractAttempt = 1; contractAttempt <= MAX_PLUGIN_GENERATION_ATTEMPTS; contractAttempt++) {
-        const contractContent = typeof contractData.content === 'string' ? contractData.content : '';
-        rawContract = extractFirstJsonObject(contractContent);
-        if (rawContract !== undefined) break;
+        if (typeof contractData.content !== 'string'
+          || Buffer.byteLength(contractData.content, 'utf8') > MAX_TEST_CONTRACT_BYTES) {
+          contractRepairFeedback = 'Acceptance contract is missing or exceeds the test contract size limit';
+        } else {
+          const rawContract = extractFirstJsonObject(contractData.content);
+          if (rawContract === undefined) {
+            contractRepairFeedback = looksTruncated(contractData.content)
+              ? 'Acceptance contract was truncated before the JSON object completed (unbalanced braces or unterminated string). Return a complete, self-contained JSON object and nothing else; reduce the number or size of test cases if needed so it fits within the limit.'
+              : 'Acceptance contract must be a single JSON object: response did not contain a JSON object';
+          } else {
+            const validation = pluginTestContractSchema.safeParse(rawContract);
+            if (validation.success) {
+              testContract = validation.data;
+              break;
+            }
+            contractRepairFeedback = `Acceptance contract failed validation: ${validation.error.issues.map((issue) => `${issue.path.join('.') || 'contract'} ${issue.message}`).join('; ')}`;
+          }
+        }
+        await this.reportBrainComplaint(contractData.requestId, contractRepairFeedback, missionId);
         if (contractAttempt < MAX_PLUGIN_GENERATION_ATTEMPTS) {
-          contractRepairFeedback = 'Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.';
           const retryNonce = `contract-retry-${contractAttempt}-${Date.now()}`;
+          // Focused query about the contract defect only, not a full re-send.
+          const retryPrompt = buildContractRepairQuery({
+            description: request.description,
+            requirements: request.requirements || [],
+            reason: contractRepairFeedback,
+          });
           const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\n\nThe previous response was not a single JSON object. ${contractRepairFeedback}\nRetry nonce: ${retryNonce}`,
+              prompt: `${scope}${retryPrompt}\nRetry nonce: ${retryNonce}`,
               systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
-              options: { temperature: 0.1, maxTokens: 2048 },
+              options: remediationOptions({ attempt: contractAttempt + 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
               missionId,
             }),
           });
-          if (retryResponse.ok) {
-            contractData = await retryResponse.json() as { content?: unknown; requestId?: unknown };
-          } else {
-            break;
+          if (!retryResponse.ok) {
+            const text = await retryResponse.text();
+            return { success: false, error: `Acceptance contract retry failed with ${retryResponse.status}: ${text.slice(0, 200)}` };
           }
+          contractData = await retryResponse.json() as { content?: unknown; requestId?: unknown };
         }
       }
-      if (rawContract === undefined) {
-        const reason = 'Acceptance contract must be a single JSON object: response did not contain a JSON object';
-        await this.reportBrainComplaint(contractData.requestId, reason, missionId);
-        return { success: false, error: reason };
-      }
-      const contractValidation = pluginTestContractSchema.safeParse(rawContract);
-      if (!contractValidation.success) {
-        const reason = `Acceptance contract failed validation: ${contractValidation.error.issues.map((issue) => `${issue.path.join('.') || 'contract'} ${issue.message}`).join('; ')}`;
-        await this.reportBrainComplaint(contractData.requestId, reason, missionId);
-        return { success: false, error: reason };
-      }
-      const testContract = contractValidation.data;
+      if (!testContract) return { success: false, error: contractRepairFeedback };
       if (Buffer.byteLength(JSON.stringify(testContract), 'utf8') > MAX_TEST_CONTRACT_BYTES) {
         const error = `Acceptance contract exceeds the ${MAX_TEST_CONTRACT_BYTES}-byte limit`;
         await this.reportBrainComplaint(contractData.requestId, error, missionId);
@@ -611,16 +901,31 @@ export class PluginGenerator {
         await this.reportBrainComplaint(contractData.requestId, error, missionId);
         return { success: false, error };
       }
+      const secretHint = credentialSecretHint(
+        Array.isArray(request.context?.vaultSecretNames)
+          ? request.context.vaultSecretNames.filter((name): name is string => typeof name === 'string')
+          : [],
+      );
+      const pluginCapabilityRequest = {
+        capability: typeof request.capability === 'string' ? request.capability : undefined,
+        description: request.description,
+        requirements: request.requirements || [],
+        ...(missionId ? { missionId } : {}),
+        ...(typeof request.context?.missionGoal === 'string' ? { missionGoal: request.context.missionGoal } : {}),
+      };
       const repairRejectedPlugin = async (reason: string): Promise<PluginGenerationResult> => {
         const repaired = await this.generateContractTestedTool({
           description: request.description,
           requirements: request.requirements || [],
           context: request.context || {},
+          capability: request.capability,
           testContract,
           brainUrl,
           missionId,
           repairFeedback: reason,
           maxAttempts: 1,
+          secretHint,
+          capabilityRequest: pluginCapabilityRequest,
         });
         return repaired.success
           ? repaired
@@ -628,7 +933,8 @@ export class PluginGenerator {
       };
 
       const userPromptNonce = `plugin-user-${Date.now()}`;
-      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
+      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
+      const pluginRoutingSessionId = `plugin-user:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
@@ -636,7 +942,7 @@ export class PluginGenerator {
         body: JSON.stringify({
           prompt: userPrompt,
           systemPrompt: PLUGIN_SYSTEM_PROMPT,
-          options: { temperature: 0.2, maxTokens: 4096 },
+          options: remediationOptions({ attempt: 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
       });
@@ -654,21 +960,29 @@ export class PluginGenerator {
         return await repairRejectedPlugin(error);
       }
       let rawPlugin: unknown;
-      let pluginRepairFeedback = '';
       for (let pluginAttempt = 1; pluginAttempt <= MAX_PLUGIN_GENERATION_ATTEMPTS; pluginAttempt++) {
         const pluginContent = typeof data.content === 'string' ? data.content : '';
         rawPlugin = extractFirstJsonObject(pluginContent);
         if (rawPlugin !== undefined) break;
         if (pluginAttempt < MAX_PLUGIN_GENERATION_ATTEMPTS) {
-          pluginRepairFeedback = 'Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.';
+          // Focused query for the specific defect (truncated prefix to complete,
+          // or a JSON-envelope fix), not a full prompt re-send.
+          const retryPrompt = looksTruncated(pluginContent)
+            ? buildPluginTruncatedCompletionQuery(pluginContent)
+            : buildPluginContentRepairQuery({
+              description: request.description,
+              testContract,
+              reason: 'response was not a JSON object (prose or markdown fences only)',
+              previousContent: pluginContent,
+            });
           const pluginRetryNonce = `plugin-retry-${pluginAttempt}-${Date.now()}`;
           const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: `${userPrompt}\n\nThe previous response was not a single JSON object. ${pluginRepairFeedback}\nRetry nonce: ${pluginRetryNonce}`,
+              prompt: `${retryPrompt}\nRetry nonce: ${pluginRetryNonce}`,
               systemPrompt: PLUGIN_SYSTEM_PROMPT,
-              options: { temperature: 0.2, maxTokens: 4096 },
+              options: remediationOptions({ attempt: pluginAttempt + 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
               missionId,
             }),
           });
@@ -710,6 +1024,7 @@ export class PluginGenerator {
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
           testContract,
+          ...(pluginCapabilityRequest ? { capabilityRequest: pluginCapabilityRequest } : {}),
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         configSchema: parsed.configSchema || { type: 'object', properties: {} },
@@ -755,7 +1070,7 @@ export class PluginGenerator {
           continue;
         }
         if (canonicalJson(actualOutput) !== canonicalJson(testCase.expectedOutput)) {
-          failedCases.push(`${testCase.name}: output did not match the acceptance contract`);
+          failedCases.push(`${testCase.name}: output did not match the acceptance contract (${describeOutputMismatch(testCase.expectedOutput, actualOutput)})`);
         }
       }
       if (failedCases.length > 0) {
@@ -826,6 +1141,13 @@ export class PluginGenerator {
         return { success: false, error: 'Plugin id resolves outside the deployment directory' };
       }
       if (this.registry?.get(tool.id) || fs.existsSync(pluginDir)) {
+        // A tool that is already registered is live and usable; a new-generation
+        // attempt for the same capability must never take it out of service.
+        // Report the existing tool so the caller keeps a working capability.
+        const live = this.registry?.get(tool.id);
+        if (live) {
+          return { success: true, deployPath: fs.existsSync(pluginDir) ? pluginDir : undefined };
+        }
         return { success: false, error: `Plugin id '${tool.id}' is already registered or deployed` };
       }
 
@@ -876,6 +1198,7 @@ export class PluginGenerator {
       if (this.registry) {
         try {
           this.registry.register(tool);
+          this.registry.markDeployedPlugin?.(tool.id);
         } catch (error) {
           try {
             fs.rmSync(pluginDir, { recursive: true, force: true });

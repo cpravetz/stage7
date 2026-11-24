@@ -22,19 +22,6 @@ const INTERNAL_REASONING_PATTERNS: RegExp[] = [
   /\btask output is incomplete\b/i,
 ];
 
-const STRUCTURED_PAYLOAD_KEYS = [
-  'tool',
-  'toolId',
-  'action',
-  'sourceCode',
-  'entrypoint',
-  'phases',
-  'tasks',
-  'artifacts',
-  'plan',
-  'satisfied',
-] as const;
-
 export function isJsonPayload(value: string): boolean {
   const trimmed = (value || '').trim();
   if (!trimmed || !/^[[{]/.test(trimmed)) return false;
@@ -46,28 +33,82 @@ export function isJsonPayload(value: string): boolean {
   }
 }
 
+/**
+ * Index of the bracket that closes the JSON value starting at `start`, or -1.
+ * String literals and escapes are skipped so braces inside strings do not
+ * confuse the scan.
+ */
+function findJsonBlockEnd(value: string, start: number): number {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index++) {
+    const char = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') stack.push(char === '{' ? '}' : ']');
+    else if (char === '}' || char === ']') {
+      if (stack.pop() !== char) return -1;
+      if (stack.length === 0) return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Removes structured JSON payloads embedded in agent text. Agent replies are
+ * prose; a JSON object or array in a reply is internal data (a tool manifest,
+ * plan, receipt, or action), never something to show a person.
+ */
+export function stripStructuredPayloads(value: string): string {
+  if (!value) return '';
+  let result = '';
+  let index = 0;
+  while (index < value.length) {
+    const char = value[index];
+    if (char === '{' || char === '[') {
+      const end = findJsonBlockEnd(value, index);
+      if (end > index) {
+        const candidate = value.slice(index, end + 1);
+        if (isJsonPayload(candidate)) {
+          result += ' ';
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+    result += char;
+    index++;
+  }
+  return result.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function isInternalReasoning(value: string): boolean {
   return INTERNAL_REASONING_PATTERNS.some((marker) => marker.test(value));
 }
 
 /**
- * True for payloads that are only meaningful to an agent: tool manifests,
- * actions, plans, receipts, and structured reviews.
+ * True for any structured JSON payload authored by an agent. Agent-to-user
+ * conversation is prose; JSON is always internal transport (a tool manifest,
+ * plan, receipt, action, or execution record) regardless of its keys. Key
+ * sniffing previously let tool manifests named with `id`/`name`/`inputSchema`
+ * reach the conversation as raw JSON dumps.
  */
 export function isAgentConversationPayload(value: string): boolean {
-  if (!isJsonPayload(value)) return false;
-  try {
-    const parsed = JSON.parse(value.trim()) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true;
-    const record = parsed as Record<string, unknown>;
-    return STRUCTURED_PAYLOAD_KEYS.some((key) => key in record);
-  } catch {
-    return false;
-  }
+  return isJsonPayload(value);
 }
 
 export function stripInternalReasoning(value: string): string {
-  return (value || '')
+  return stripStructuredPayloads((value || '')
+    .replace(/```(?:json|javascript|ts|typescript)?\s*[\s\S]*?```/gi, ' '))
     .replace(/\n?\s*\[\s*\{?\s*\\?"toolId\\?"[\s\S]*$/i, '')
     .replace(/\s*Looking up tools, creating tools, or handing work off to another agent does not count as completing that action\.?/gi, '')
     .replace(/\s*Steps that ran:[\s\S]*$/i, '')
@@ -119,7 +160,13 @@ export interface MissionEventDetail {
   startedAt?: string | number;
   completedAt?: string | number;
   input?: { prompt?: string };
-  output?: { outputs?: { phases?: MissionEventPhaseOutput[]; gaps?: string[] } };
+  output?: { outputs?: {
+    status?: string;
+    phases?: MissionEventPhaseOutput[];
+    gaps?: string[];
+    reason?: string;
+    pendingInteraction?: { taskTitle?: string; permission?: { toolName?: string } };
+  } };
 }
 
 export const CONVERSATION_EVENT_TYPES = new Set([
@@ -214,6 +261,7 @@ const MILESTONE_EVENT_TYPES = new Set([
   'mission_canceled',
   'mission_incomplete',
   'mission_needs_review',
+  'mission_resumed',
 ]);
 
 const FAILURE_LABELS: Record<string, string> = {
@@ -516,17 +564,22 @@ export function buildMissionEvents(options: {
     const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
     if (!hasLive(['mission_needs_review'])) {
       const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
-      const gapText = missionGapText(gaps);
+      const outputs = detail.output?.outputs;
+      const reviewData = {
+        gaps,
+        reviewStatus: outputs?.status,
+        reason: outputs?.reason,
+        taskTitle: outputs?.pendingInteraction?.taskTitle,
+        toolName: outputs?.pendingInteraction?.permission?.toolName,
+      };
       derived.push({
         id: `derived-mission-needs-review-${completedAt}`,
         type: 'mission_needs_review',
         source: 'orchestrator',
-        message: gapText
-          ? `Mission needs review: ${gapText}`
-          : 'Mission needs review before it can be completed.',
+        message: missionReviewMessage(reviewData),
         timestamp: completedAt,
         missionId,
-        metadata: gaps.length > 0 ? { gaps } : undefined,
+        metadata: reviewData,
       });
     }
   } else if (detail?.status === 'incomplete') {
@@ -557,6 +610,9 @@ export function buildMissionEvents(options: {
   events = dedupePlannerProgress(events);
   events = dedupePlannerAndReasoningEvents(events);
   events = dedupeQuestionAsked(events);
+  events = dedupeUserInputResolved(events);
+  events.sort((left, right) => left.timestamp - right.timestamp);
+  events = mergeResumeMilestones(events, detail?.status);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
 
@@ -572,6 +628,28 @@ export function buildMissionEvents(options: {
 
   // Strict chronological order: oldest first, newest at the bottom.
   events.sort((left, right) => left.timestamp - right.timestamp);
+  if (detail?.status === 'awaiting_review') {
+    let index = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'mission_needs_review') {
+        index = i;
+        break;
+      }
+    }
+    const event = events[index];
+    if (event && !Array.isArray(event.metadata?.gaps)) {
+      const outputs = detail.output?.outputs;
+      const reviewData = {
+        ...event.metadata,
+        gaps: outputs?.gaps || [],
+        reviewStatus: outputs?.status,
+        reason: outputs?.reason || event.metadata?.reason,
+        taskTitle: outputs?.pendingInteraction?.taskTitle,
+        toolName: outputs?.pendingInteraction?.permission?.toolName,
+      };
+      events[index] = { ...event, message: missionReviewMessage(reviewData), metadata: reviewData };
+    }
+  }
   return applyMissionError(events, detail?.error);
 }
 
@@ -644,15 +722,115 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
     }
 
     // Drop conflicting terminal events.
-    if (terminalTypes.has(type)) {
+    if (terminalTypes.has(type) && type !== 'mission_needs_review') {
       if (preferredTerminal && type !== preferredTerminal) continue;
       // If no preferred, keep only the first terminal encountered.
-      if (!preferredTerminal && result.some((e) => terminalTypes.has(String(e.type)))) continue;
+      if (!preferredTerminal && result.some((e) => terminalTypes.has(String(e.type)) && e.type !== 'mission_needs_review')) continue;
     }
 
     result.push(event);
   }
   return result;
+}
+
+const RESUME_ANNOUNCEMENT_TYPES = ['planner_started', 'plan_generated'];
+
+const BARE_PLANNER_STARTED = /^planning mission\.{0,3}(?: (?:⋯|\.\.\.))?$/i;
+
+const DERIVED_PLANNING_STATUSES = new Set(['running', 'paused', 'awaiting_review']);
+
+function planSourceOf(event: FeedEvent): string {
+  const data = event.metadata || {};
+  const nested = data.data && typeof data.data === 'object' && !Array.isArray(data.data)
+    ? (data.data as Record<string, unknown>)
+    : undefined;
+  if (typeof data.planSource === 'string') return data.planSource;
+  if (typeof data.source === 'string') return data.source;
+  return typeof nested?.planSource === 'string' ? nested.planSource : '';
+}
+
+/**
+ * True for the planner announcements that say nothing new about a mission
+ * which already has its plan: the bare "Planning mission" announcement and the
+ * "Plan generated" announcement for a plan that was loaded rather than
+ * generated.
+ */
+function isResumeAnnouncement(event: FeedEvent): boolean {
+  const type = String(event.type);
+  if (!RESUME_ANNOUNCEMENT_TYPES.includes(type)) return false;
+  if (type === 'planner_started') {
+    return BARE_PLANNER_STARTED.test(String(event.message || '').trim());
+  }
+  return planSourceOf(event).toLowerCase() === 'loaded';
+}
+
+/**
+ * After the user answers an interaction the mission resumes with the plan it
+ * already has, yet the agents announce "Mission resumed", "Planning mission"
+ * and "Plan generated" again, which pushes the user's answer up the thread and
+ * out of view. Once a mission has already started, re-planning it is silent:
+ * the conversation never gains those announcements, and a turn that only
+ * repeats them is tagged so buildTranscript can drop it. A mission that never
+ * produced a plan still reports that the planner is working on it.
+ *
+ * A resumed milestone is kept only until the mission carries on, so an earlier
+ * review issue is not resurrected by its removal.
+ */
+function mergeResumeMilestones(events: FeedEvent[], status?: string): FeedEvent[] {
+  const missionStartedBefore = new Set<string>();
+  const resumable = status === undefined || DERIVED_PLANNING_STATUSES.has(status);
+  const result: FeedEvent[] = [];
+  // A resumed milestone waits for the mission to carry on: keeping it until
+  // then stops its removal from resurrecting an earlier review issue. If no
+  // further event follows, the bare "Mission resumed" line is kept so the
+  // outcome still has its context.
+  let heldResume: FeedEvent | null = null;
+  const release = (keep: boolean) => {
+    if (keep && heldResume) result.push(heldResume);
+    heldResume = null;
+  };
+  for (const event of events) {
+    const missionId = event.missionId || '';
+    const isOwn = (candidate: FeedEvent | null) => Boolean(candidate && candidate.missionId === missionId);
+    if (event.type === 'mission_started') {
+      missionStartedBefore.add(missionId);
+      release(isOwn(heldResume));
+      result.push(event);
+      continue;
+    }
+    if (resumable && missionStartedBefore.has(missionId) && event.type === 'mission_resumed') {
+      // Each resume gets a marker so the milestone de-duplication can tell one
+      // cycle from the next. It is dropped once real content follows.
+      const markedResume: FeedEvent = {
+        ...event,
+        metadata: { ...(event.metadata || {}), resumeAnnouncement: true },
+      };
+      release(true);
+      heldResume = markedResume;
+      continue;
+    }
+    if (resumable && missionStartedBefore.has(missionId) && isResumeAnnouncement(event)) continue;
+    // Any later event of the same mission is the mission carrying on after the
+    // reply and replaces the bare "Mission resumed" line.
+    release(!isOwn(heldResume));
+    result.push(event);
+  }
+  release(true);
+  return result;
+}
+
+/**
+ * The resume milestone stays in the event list so an earlier review issue is
+ * not resurrected, but it is not conversation: drop a resumed turn that only
+ * repeats the resume/planning announcement. A resumed turn that carries real
+ * content (an agent reply) is kept. Missions still running (older records have
+ * no marker) lose the bare milestone only; the planning chatter is dropped by
+ * mergeResumeMilestones.
+ */
+function isResumeOnlyTurn(turn: TranscriptTurn): boolean {
+  const line = turn.lines[0];
+  if (turn.role !== 'system' || turn.lines.length !== 1 || !line) return false;
+  return line.type === 'mission_resumed' && line.metadata?.resumeAnnouncement === true;
 }
 
 /**
@@ -690,7 +868,10 @@ function dedupePlannerAndReasoningEvents(events: FeedEvent[]): FeedEvent[] {
         if (seen.has(key)) return false;
         seen.add(key);
       } else {
-        const key = `${type}|${planSource}|${event.message}`;
+        const missionId = event.missionId || '';
+        const agentId = typeof data.agentId === 'string' ? data.agentId : '';
+        const agentRole = typeof data.agentRole === 'string' ? data.agentRole : '';
+        const key = `${type}|${missionId}|${agentId}|${agentRole}|${planSource}`;
         if (seen.has(key)) return false;
         seen.add(key);
       }
@@ -716,17 +897,73 @@ function dedupeQuestionAsked(events: FeedEvent[]): FeedEvent[] {
 }
 
 /**
+ * A pending interaction is resolved once: drop repeated user_input_resolved
+ * announcements for the same mission, phase, task, and response (e.g. a
+ * resume/retry that re-emits the resolution alongside the orchestrator's own).
+ */
+function dedupeUserInputResolved(events: FeedEvent[]): FeedEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (String(event.type) !== 'user_input_resolved') return true;
+    const data = event.metadata || {};
+    const response = typeof data.response === 'string' ? data.response : '';
+    const key = `user_input_resolved|${event.missionId ?? ''}|${data.phaseId ?? ''}|${data.taskId ?? ''}|${response}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function reviewSignature(event: FeedEvent | undefined): string {
+  if (!event) return '';
+  const gaps = Array.isArray(event.metadata?.gaps) ? event.metadata.gaps.join('|') : '';
+  return `${event.message}|${gaps}`;
+}
+
+/**
  * Keeps the first announcement of every mission milestone.
  */
 function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
   const listed = new Set<string>();
-  return events.filter((event) => {
+  const result: FeedEvent[] = [];
+  let reviewIndex: number | undefined;
+  let reviewSignatures = new Set<string>();
+  for (const event of events) {
     const type = String(event.type);
-    if (!MILESTONE_EVENT_TYPES.has(type)) return true;
-    if (listed.has(type)) return false;
+    if (type === 'mission_resumed') {
+      reviewIndex = undefined;
+      reviewSignatures = new Set<string>();
+      if (!MILESTONE_EVENT_TYPES.has(type)) {
+        result.push(event);
+        continue;
+      }
+      if (event.metadata?.resumeAnnouncement === true) continue;
+      listed.add(type);
+      result.push(event);
+      continue;
+    }
+    if (type === 'mission_needs_review') {
+      // One review cycle lists one review issue; a repeat of the same issue is
+      // not a new outcome.
+      const signature = reviewSignature(event);
+      if (reviewIndex !== undefined && reviewSignatures.has(signature)) {
+        result[reviewIndex] = event;
+        continue;
+      }
+      reviewIndex = result.length;
+      reviewSignatures.add(signature);
+      result.push(event);
+      continue;
+    }
+    if (!MILESTONE_EVENT_TYPES.has(type)) {
+      result.push(event);
+      continue;
+    }
+    if (listed.has(type)) continue;
     listed.add(type);
-    return true;
-  });
+    result.push(event);
+  }
+  return result;
 }
 
 /**
@@ -735,7 +972,13 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
  * the event itself does not carry one.
  */
 export function friendlyMissionError(error: string): string {
-  return stripInternalReasoning(friendlyMissionErrorText(error));
+  const friendly = friendlyMissionErrorText(error);
+  const sanitized = sanitizeAgentMessage(friendly, '').text;
+  if (sanitized) return sanitized;
+  // A structured payload with no readable message is internal data, not an
+  // error a person can act on. Never echo the raw object into the feed.
+  if (isJsonPayload(friendly.trim())) return 'The Agent returned internal data instead of a readable result.';
+  return stripInternalReasoning(friendly);
 }
 
 /**
@@ -748,6 +991,70 @@ export function missionGapText(gaps: string[]): string {
     .map((gap) => sanitizeAgentMessage(gap, '').text)
     .filter((gap) => gap.length > 0 && !isInternalReasoning(gap))
     .join('; ');
+}
+
+export function missionReviewMessage(data: Record<string, unknown>): string {
+  const gaps = Array.isArray(data.gaps)
+    ? data.gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim().length > 0)
+    : [];
+  const missingArtifacts = [...new Set(gaps.flatMap((gap) => {
+    const match = gap.match(/missing expected artifact "([^"\r\n]+)"/i);
+    return match ? [match[1]] : [];
+  }))];
+  if (missingArtifacts.length > 0) {
+    const names = missingArtifacts.slice(0, 3).join(', ');
+    const extra = gaps.length > missingArtifacts.length || missingArtifacts.length > 3
+      ? ' More details are available in the mission timeline.'
+      : '';
+    const caution = data.outcomeUncertain === true || gaps.some((gap) => /\buncertain\b|outcome.?unknown/i.test(gap))
+      ? ' Verify the uncertain outcome before resuming; do not repeat the action.'
+      : '';
+    return `Mission needs review: the agents could not complete ${names}.${extra}${caution} Select Resume to retry or send guidance.`;
+  }
+  const friendlyGaps = gaps.map((gap) => {
+    const friendly = gap.split(/\s+Reason:\s*/i)[0]
+      .replace(/\\r\\n|\\n/g, '\n')
+      .replace(/\baction receipt(s?)\b/gi, 'recorded result$1');
+    return sanitizeAgentMessage(friendly, '').text
+      || sanitizeAgentMessage(friendly.split(/(?<=[.!?])\s+/)[0], '').text;
+  }).filter(Boolean);
+  const gapText = missionGapText(friendlyGaps.slice(0, 3));
+  if (gapText) {
+    const reason = typeof data.reason === 'string' ? sanitizeAgentMessage(data.reason, '').text : '';
+    const introduction = reason ? `${reason}${/[.!?]$/.test(reason) ? '' : '.'} ` : '';
+    const extra = (typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0) || friendlyGaps.length > 3
+      ? ` Additional issues are available in the mission details.`
+      : '';
+    const caution = data.outcomeUncertain === true || /\buncertain\b|outcome.?unknown/i.test(gapText)
+      ? ' Verify the uncertain outcome before resuming; do not repeat the action.'
+      : '';
+    const punctuation = /[.!?]$/.test(gapText) ? '' : '.';
+    return `Mission needs review: ${introduction}${gapText}${punctuation}${extra}${caution} Review the issue, then send guidance or select Resume.`;
+  }
+  const task = typeof data.taskTitle === 'string' && data.taskTitle.trim()
+    ? ` for "${data.taskTitle.trim()}"`
+    : '';
+  if (data.reviewStatus === 'awaiting_user_input') {
+    return `Mission needs review: an Agent needs information${task}. Answer the question to continue.`;
+  }
+  if (data.reviewStatus === 'awaiting_permission') {
+    const tool = typeof data.toolName === 'string' && data.toolName.trim() ? ` "${data.toolName.trim()}"` : '';
+    return `Mission needs review: an Agent needs permission to use a tool${tool}${task}. Review the request to continue.`;
+  }
+  if (data.reviewStatus === 'awaiting_clarification') {
+    return 'Mission needs review: the planner needs clarification. Answer the questions to continue.';
+  }
+  const reason = typeof data.reason === 'string' ? sanitizeAgentMessage(data.reason, '').text : '';
+  if (reason) {
+    const punctuation = /[.!?]$/.test(reason) ? '' : '.';
+    return `Mission needs review: ${reason}${punctuation} Review the issue, then send guidance or select Resume.`;
+  }
+  if (data.outcomeUncertain === true) {
+    return 'Mission needs review: an action outcome is uncertain. Verify what happened before resuming; do not repeat the action.';
+  }
+  return typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0
+    ? 'Mission needs review: the issues require further inspection. Check the timeline and mission details before sending guidance or selecting Resume.'
+    : 'Mission needs review, but no specific issue was recorded. Check the timeline and plan before sending guidance or selecting Resume.';
 }
 
 function friendlyMissionErrorText(error: string): string {
@@ -840,6 +1147,7 @@ export interface TranscriptLine {
   type: string;
   text: string;
   approval?: { phaseId: string; question: string };
+  metadata?: Record<string, unknown>;
 }
 
 export interface TranscriptTurn {
@@ -902,11 +1210,56 @@ function friendlyTaskOutput(value: string): string {
 }
 
 function friendlyToolMessage(value: string): string {
-  if (!isMachineReadable(value)) return value;
+  const raw = (value || '').trim();
+  const uncertain = /The outcome of tool "([^"]+)" is uncertain; reconcile the recorded action before attempting another operation\.?/i;
+  const uncertainMatch = raw.match(uncertain);
+  const jsonStart = raw.search(/[\[{]/);
+  const jsonCandidate = jsonStart >= 0 ? raw.slice(jsonStart) : raw;
+  let parsed: unknown;
+  if (isMachineReadable(jsonCandidate)) {
+    try {
+      parsed = JSON.parse(jsonCandidate);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (uncertainMatch || (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as Record<string, unknown>).outcomeUnknown === true)) {
+    const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+    const nested = (v: unknown): Record<string, unknown> | undefined =>
+      v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+    const tool = uncertainMatch?.[1]
+      || (typeof record?.tool === 'string' ? record.tool : 'tool');
+    const detailCandidates = [
+      nested(nested(record?.output)?.output)?.error,
+      nested(record?.output)?.error,
+      record?.error,
+      record?.message,
+      record?.reason,
+      nested(record?.output)?.message,
+    ];
+    let detail = '';
+    for (const candidate of detailCandidates) {
+      if (typeof candidate === 'string' && candidate.trim() && !/^\s*[\[{]/.test(candidate)) {
+        detail = candidate.trim();
+        break;
+      }
+    }
+    return detail
+      ? `The outcome of tool "${tool}" is uncertain; reconcile the recorded action before retrying. ${detail}`
+      : `The outcome of tool "${tool}" is uncertain; reconcile the recorded action before retrying.`;
+  }
+
+  if (!isMachineReadable(raw)) {
+    const readable = stripInternalReasoning(raw);
+    return readable || 'Working on the requested task.';
+  }
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const tool = (parsed as Record<string, unknown>).tool;
+    const parsedValue: unknown = JSON.parse(raw);
+    if (parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue)) {
+      const tool = (parsedValue as Record<string, unknown>).tool;
       if (tool === '__list_tools') return 'Checking which services are available.';
       if (tool === '__create_tool') return 'Setting up a service for this task.';
       if (typeof tool === 'string' && tool.trim()) return 'Using a configured service to complete the requested step.';
@@ -1002,7 +1355,10 @@ export function interactionQuestionText(event: Pick<FeedEvent, 'type' | 'message
       }
     }
     if (/"question"\s*:/.test(question)) question = '';
-    question = stripSecretPrefix(question).replace(/\s+/g, ' ').trim();
+    question = stripSecretPrefix(question)
+      .replace(/<\/?(?:your_previous_reply|system_feedback|task)>/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (question && !/^(?:\{|\[)/.test(question)) return question;
   }
   if (event.type === 'permission_required') {
@@ -1138,6 +1494,9 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     ) {
       current = startTurn('system', 'Mission', ts, evt.id);
       const line: TranscriptLine = { kind: 'text', type, text: evt.message };
+      if (type === 'mission_resumed' && data.resumeAnnouncement === true) {
+        line.metadata = { resumeAnnouncement: true };
+      }
       if (type === 'approval_requested') {
         line.approval = {
           phaseId: (data.phaseId as string) || '',
@@ -1157,7 +1516,7 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     current.lines.push({ kind: 'text', type, text });
   }
 
-  return collapsePlannerProgress(turns);
+  return collapsePlannerProgress(turns.filter((turn) => !isResumeOnlyTurn(turn)));
 }
 
 export interface ModelUsageSummary {

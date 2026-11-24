@@ -1,5 +1,6 @@
 import request from 'supertest'
 import express, { Application } from 'express'
+import fs from 'fs'
 import { ToolRegistry } from '../src/services/ToolRegistry'
 import { ToolExecutor } from '../src/services/ToolExecutor'
 import { PluginGenerator } from '../src/services/PluginGenerator'
@@ -68,11 +69,11 @@ beforeAll(() => {
           content: JSON.stringify({
             id: `plugin_${Date.now()}`,
             name: 'calculator',
-            description: body.prompt,
+            description: typeof body.prompt === 'string' ? body.prompt.slice(0, 1000) : '',
             type: 'code',
             language: 'python',
             entrypoint: 'main.py',
-            sourceCode: body.prompt.includes('The previous generated code was rejected')
+            sourceCode: body.prompt.includes('could not be used as the plugin JSON object')
               ? repairedSourceCode
               : generatedSourceCode,
             requirements: [],
@@ -617,12 +618,15 @@ describe('ToolExecutor', () => {
     };
 
     const result = await executor.executeOrRequestCredentials(configTool, {});
-    // Credential-backed fields (configKey) are resolved dynamically, not
-    // statically required. Execution proceeds; the tool source doesn't use
-    // apiKey so it succeeds without it.
-    expect(result).not.toBeInstanceOf(CredentialRequiredError);
-    const exec = result as { status: string };
-    expect(exec.status).toBe('completed');
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return a CredentialRequiredError with the missing credential details.
+    expect(result).toBeInstanceOf(CredentialRequiredError);
+    if (result instanceof CredentialRequiredError) {
+      expect(result.request.missingCredentials).toHaveLength(1);
+      expect(result.request.missingCredentials[0].key).toBe('apiKey');
+      expect(result.request.missingCredentials[0].label).toBe('Provider API key');
+      expect(result.request.toolName).toBe('Runtime Config Tool');
+    }
   });
 
   it('should report JSON error output from a code tool as failed execution', async () => {
@@ -915,6 +919,70 @@ print(json.dumps({"blocked": blocked, "secret": os.environ.get("STAGE7_PLUGIN_TE
     }
   })
 
+  it('fails closed when the isolation runtime is unavailable', async () => {
+    const originalExists = fs.existsSync
+    const exists = jest.spyOn(fs, 'existsSync').mockImplementation((path) =>
+      path === '/usr/bin/bwrap' ? false : originalExists(path))
+    try {
+      for (const language of ['javascript', 'python'] as const) {
+        const result = await new CodeExecutor().execute({
+          language,
+          isolated: true,
+          code: language === 'python' ? 'print("unsafe fallback")' : 'console.log("unsafe fallback")',
+        })
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('refusing to run')
+      }
+    } finally {
+      exists.mockRestore()
+    }
+  })
+
+  it('does not retry outside isolation after a namespace failure', async () => {
+    const executor = new CodeExecutor()
+    const prototype = Object.getPrototypeOf(executor) as {
+      executeJavaScript: () => Promise<{ success: boolean; error: string }>
+      executePython: () => Promise<{ success: boolean; error: string }>
+    }
+    for (const [language, method] of [['javascript', 'executeJavaScript'], ['python', 'executePython']] as const) {
+      const run = jest.spyOn(prototype, method).mockResolvedValue({
+        success: false, error: 'bwrap: Creating new namespace failed: Operation not permitted',
+      })
+      try {
+        const result = await executor.execute({ language, isolated: true, code: '' })
+        expect(result.success).toBe(false)
+        expect(run).toHaveBeenCalledTimes(1)
+      } finally {
+        run.mockRestore()
+      }
+    }
+  })
+
+  it('does not allow test credentials to bypass isolated execution restrictions', async () => {
+    const credentials = { token: 'dummy-token' }
+    const result = await new CodeExecutor().execute({
+      language: 'python',
+      isolated: true,
+      testCredentials: credentials,
+      executorCallback: async () => ({}),
+      code: 'print("unsafe")',
+    }, credentials)
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('cannot receive callbacks')
+  })
+
+  it('exposes dummy acceptance credentials to JavaScript credential helpers', async () => {
+    const credentials = { token: 'dummy-token' }
+    const result = await new CodeExecutor().execute({
+      language: 'javascript',
+      isolated: true,
+      testCredentials: credentials,
+      code: 'console.log(JSON.stringify({ found: __getCredential("token") === "dummy-token" }))',
+    }, credentials)
+    expect(result.success).toBe(true)
+    expect(JSON.parse(result.output || 'null')).toEqual({ found: true })
+  })
+
   it('satisfies HTTP integration cases through local fixtures in both languages', async () => {
     const httpMocks = [{
       method: 'POST' as const,
@@ -958,6 +1026,32 @@ print(json.dumps({"id": result["id"], "status": result["status"]}))`,
     })
     expect(python.success).toBe(true)
     expect(JSON.parse(python.output || 'null')).toEqual({ id: 'message-123', status: 'queued' })
+  })
+
+  it('handles optional request bodies and JSON values in Python fixtures and inputs', async () => {
+    const result = await new CodeExecutor().execute({
+      language: 'python',
+      isolated: true,
+      input: { enabled: true, extra: null },
+      httpMocks: [{
+        method: 'POST',
+        urlPattern: 'https://api.example.test/messages',
+        responseStatus: 200,
+        responseBody: { accepted: true, error: null },
+      }],
+      timeoutMs: 5_000,
+      code: `import json
+import urllib.request
+request = urllib.request.Request('https://api.example.test/messages', data=b'test', method='POST')
+with urllib.request.urlopen(request) as response:
+    result = json.loads(response.read().decode())
+print(json.dumps({"input": __tool_input, "response": result}))`,
+    })
+    expect(result.success).toBe(true)
+    expect(JSON.parse(result.output || 'null')).toEqual({
+      input: { enabled: true, extra: null },
+      response: { accepted: true, error: null },
+    })
   })
 
   it('repairs generated code that does not satisfy its independent contract', async () => {
@@ -1061,7 +1155,7 @@ print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
       expect(completionRequests[0]?.body?.systemPrompt)
         .toContain('independently derive a deterministic acceptance contract');
       expect(completionRequests[2]?.body?.prompt)
-        .toContain('previous generated code was rejected');
+        .toContain('could not be used as the plugin JSON object');
       expect(String(completionRequests[2]?.body?.prompt)).toMatch(/configSchema/i);
       expect(String(completionRequests[2]?.body?.prompt)).toMatch(/required|expected/i);
       expect(completionRequests[1]?.body?.systemPrompt)
@@ -1368,10 +1462,13 @@ describe('REST endpoints', () => {
       .post('/api/tools/cred-tool-1/execute')
       .send({ input: { projectKey: 'TEST' } })
 
-    // Credential-backed fields (vaultSecretId / envVar) are resolved
-    // dynamically, not statically required. Execution proceeds instead of
-    // returning 428.
-    expect(res.status).not.toBe(428)
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return 428 with a credential request.
+    expect(res.status).toBe(428)
+    expect(res.body.request).toBeDefined()
+    expect(res.body.request.missingCredentials).toHaveLength(1)
+    expect(res.body.request.missingCredentials[0].key).toBe('jiraToken')
+    expect(res.body.request.toolName).toBe('Jira Tool')
   })
 
   it('reports unavailable MCP integration honestly without a credential gate', async () => {
@@ -1399,15 +1496,13 @@ describe('REST endpoints', () => {
       .post('/api/tools/cred-tool-2/execute')
       .send({ input: { channel: '#general', text: 'hello' } })
 
-    // Credential-backed fields are resolved dynamically, so the run is not
-    // gated on them. With no MCP server behind the tool, execution must still
-    // report the integration as unavailable rather than fabricating a result.
-    expect(execRes.status).not.toBe(428)
-    // The native/MCP executor produced its own error payload; the run itself
-    // completed, so the failure is reported in `error` rather than as a
-    // rejected execution.
-    expect(execRes.body.status).toBe('completed')
-    expect(String(execRes.body.error ?? '')).toMatch(/credentials|missing|required|unavailable|not connected/i)
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return 428 with a credential request.
+    expect(execRes.status).toBe(428)
+    expect(execRes.body.request).toBeDefined()
+    expect(execRes.body.request.missingCredentials).toHaveLength(1)
+    expect(execRes.body.request.missingCredentials[0].key).toBe('slackToken')
+    expect(execRes.body.request.toolName).toBe('Slack Tool')
   })
 
   describe('POST /api/tools/execute - flat payload support', () => {
@@ -1772,14 +1867,17 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
 
       await request(app).post('/api/tools').send(missingCredTool);
 
-      // Credential-backed fields (envVar) are resolved dynamically, not
-      // statically required. Execution proceeds without credentials.
+      // Credential-backed required fields that cannot be resolved now gate execution
+      // and return 428 with a credential request.
       const execRes = await request(app)
         .post('/api/tools/missing-cred-1/execute')
         .send({ input: {} });
 
-      expect(execRes.status).toBe(200);
-      expect(execRes.body.status).toBe('completed');
+      expect(execRes.status).toBe(428);
+      expect(execRes.body.request).toBeDefined();
+      expect(execRes.body.request.missingCredentials).toHaveLength(1);
+      expect(execRes.body.request.missingCredentials[0].key).toBe('missingToken');
+      expect(execRes.body.request.toolName).toBe('Missing Credential Tool');
     });
 
     it('resolves a Vault-stored credential bundle when resuming a missing-credential request', async () => {
@@ -1825,12 +1923,23 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
 
       try {
         await request(app).post('/api/tools').send(credentialTool);
+        // First execution should return 428 with missing credentials
         const executeResponse = await request(app)
           .post('/api/tools/cred-vault-bundle-1/execute')
           .send({ input: {} });
-        // Credential-backed fields (envVar) are resolved dynamically, not
-        // statically required. Execution proceeds instead of returning 428.
-        expect(executeResponse.status).not.toBe(428);
+        expect(executeResponse.status).toBe(428);
+        expect(executeResponse.body.request).toBeDefined();
+        expect(executeResponse.body.request.missingCredentials).toHaveLength(2);
+        expect(executeResponse.body.request.missingCredentials.map((c: any) => c.key).sort()).toEqual(['endpoint', 'token']);
+        expect(executeResponse.body.request.toolName).toBe('Vault Bundle Tool');
+
+        // Now submit credentials to resume
+        const executionId = executeResponse.body.request.executionId;
+        const resumeResponse = await request(app)
+          .post(`/api/executions/${executionId}/credentials`)
+          .send({ credentials: { token: 'token-value', endpoint: 'https://service.test' } });
+        expect(resumeResponse.status).toBe(200);
+        expect(resumeResponse.body.status).toBe('completed');
       } finally {
         fetchMock.mockRestore();
         if (previousVaultUrl === undefined) delete process.env.VAULT_URL;

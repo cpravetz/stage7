@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { MissionDetail, useMissionsStore } from '../stores/missionsStore';
-import { postFormData, postJSON, putJSON } from '../utils/api';
+import { fetchJSON, postFormData, postJSON, putJSON } from '../utils/api';
 import MissionArtifactContent from '../components/MissionArtifactContent';
 import {
   getArtifactMediaCategory,
@@ -18,6 +18,7 @@ import {
   CONVERSATION_EVENT_TYPES,
   friendlyMissionError,
   missionAgentRoleLabel,
+  missionReviewMessage,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from '../utils/missionEvents';
@@ -122,6 +123,7 @@ function displayInteractionQuestion(pending: PendingInteraction): string {
   }
   const secret = text.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
   if (secret) text = secret[2] || text;
+  text = text.replace(/<\/?(?:your_previous_reply|system_feedback|task)>/gi, ' ');
   text = text.replace(/__ASK_USER__:\s*/g, '');
   text = text.replace(/\{[\s\S]*?"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/gi, '$1');
   text = text.replace(/"\s*question"\s*:\s*"\.\.\."?/gi, '');
@@ -273,33 +275,56 @@ function buildMissionArtifactItems(
   events: FeedEvent[],
   storedArtifacts: unknown[] = [],
 ): MissionArtifactItem[] {
-  const items = new Map<string, MissionArtifactItem>();
+  // Name-based identity: the same logical artifact (same name) is one card,
+  // regardless of which source produced it. When multiple sources provide the
+  // same-named artifact, the richest one (has content/url) wins. Expected
+  // artifacts are tracked separately from produced ones.
+  const produced = new Map<string, MissionArtifactItem>();
+  const expected = new Map<string, MissionArtifactItem>();
   const add = (value: unknown, kind: MissionArtifactItem['kind'], phaseId?: string, taskId?: string) => {
     const item = toMissionArtifactItem(value, kind, phaseId, taskId);
     if (!item) return;
-    const key = kind === 'expected'
-      ? `expected|${item.phaseId || ''}|${item.name.toLocaleLowerCase()}`
-      : [
-          kind,
-          item.artifactId || item.logicalId || item.lineageId || item.id,
-          item.version ?? '',
-          item.phaseId || '',
-          item.taskId || '',
-          item.name.toLowerCase(),
-          item.url || '',
-          typeof item.content === 'string' ? item.content : JSON.stringify(item.content ?? ''),
-        ].join('|');
-    const existing = items.get(key);
-    if (!existing || ((!existing.content && !existing.url) && (item.content || item.url))) {
-      items.set(key, item);
+    const nameKey = item.name.toLocaleLowerCase();
+    if (kind === 'expected') {
+      const key = `${item.phaseId || ''}|${nameKey}`;
+      const existing = expected.get(key);
+      if (!existing) expected.set(key, item);
+      return;
     }
+    // For produced artifacts, name is the primary identity. Merge across
+    // sources: prefer the entry that has actual content or a URL.
+    const existing = produced.get(nameKey);
+    if (!existing) {
+      produced.set(nameKey, item);
+      return;
+    }
+    const existingHasContent = Boolean(existing.content || existing.url);
+    const newHasContent = Boolean(item.content || item.url);
+    if (!existingHasContent && newHasContent) {
+      // Preserve the earliest phaseId/taskId but take the richer content
+      produced.set(nameKey, {
+        ...item,
+        phaseId: item.phaseId || existing.phaseId,
+        taskId: item.taskId || existing.taskId,
+      });
+    } else if (existingHasContent && !newHasContent) {
+      // Keep existing; enrich with phaseId/taskId if missing
+      if ((!existing.phaseId && item.phaseId) || (!existing.taskId && item.taskId)) {
+        produced.set(nameKey, {
+          ...existing,
+          phaseId: existing.phaseId || item.phaseId,
+          taskId: existing.taskId || item.taskId,
+        });
+      }
+    }
+    // Both have content or both lack content — keep first (stable ordering)
   };
 
   for (const artifact of plan?.artifacts || []) add(artifact, 'produced');
   for (const phase of plan?.phases || []) {
     for (const artifact of phase.artifacts || []) add(artifact, 'produced', phase.id);
     for (const task of phase.tasks || []) {
-      for (const expected of task.expectedArtifacts || []) add(expected, 'expected', phase.id, task.id);
+      for (const expectedArtifact of task.expectedArtifacts || []) add(expectedArtifact, 'expected', phase.id, task.id);
       for (const artifact of task.artifacts || []) add(artifact, 'produced', phase.id, task.id);
     }
   }
@@ -326,7 +351,20 @@ function buildMissionArtifactItems(
     }
   }
 
-  return Array.from(items.values());
+  // Merge expected and produced: produced artifacts take precedence so each
+  // name appears once in the list. Expected-only artifacts (declared but not
+  // yet produced) remain so the UI can show what is still pending.
+  const merged: MissionArtifactItem[] = [];
+  const producedNames = new Set<string>();
+  for (const item of produced.values()) {
+    merged.push(item);
+    producedNames.add(item.name.toLocaleLowerCase());
+  }
+  for (const item of expected.values()) {
+    if (producedNames.has(item.name.toLocaleLowerCase())) continue;
+    merged.push(item);
+  }
+  return merged;
 }
 
 export function getTaskStatus(
@@ -364,10 +402,17 @@ const MissionRoom = () => {
   const connected = useFeedStore((s) => s.connected);
   const ensureConnected = useFeedStore((s) => s.ensureConnected);
 
-  const detail = useMissionsStore((s) => s.details[workflowId]);
+  const storedDetail = useMissionsStore((s) => s.details[workflowId]);
+  const detailMatchesMission = storedDetail
+    ? missionIdFromWorkflowId(storedDetail.missionId) === missionId
+    : false;
+  const detail = detailMatchesMission ? storedDetail : undefined;
+  const detailIdentityMismatch = Boolean(storedDetail && !detailMatchesMission);
   const detailLoading = useMissionsStore((s) => s.detailLoading[workflowId]);
   const detailError = useMissionsStore((s) => s.detailError[workflowId]);
   const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
+  const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
   const refreshDetail = useMissionsStore((s) => s.refreshDetail);
   const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
   const retryMission = useMissionsStore((s) => s.retryMission);
@@ -378,34 +423,29 @@ const MissionRoom = () => {
   const [controlError, setControlError] = useState<string | null>(null);
   const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
-  const [interactionAccepted, setInteractionAccepted] = useState(false);
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [interactionCredentials, setInteractionCredentials] = useState<Record<string, string>>({});
   const [interactionResponse, setInteractionResponse] = useState('');
+  const [dismissedInteractionKey, setDismissedInteractionKey] = useState<string | null>(null);
   const [permissionScope, setPermissionScope] = useState('');
+  const [tools, setTools] = useState<Array<{ id: string; name: string }>>([]);
+  const [toolsLoaded, setToolsLoaded] = useState(false);
 
-  const getRespondedInteractions = (): Set<string> => {
-    try {
-      const stored = sessionStorage.getItem(`mission-responded-interactions:${workflowId}`);
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch {
-      return new Set();
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchJSON<{ tools: Array<{ id: string; name: string }> }>('/api/tool-executor/tools');
+        if (!cancelled) setTools((data.tools || []).filter((t) => !t.id.startsWith('skill-')));
+      } catch {
+        if (!cancelled) setTools([]);
+      } finally {
+        if (!cancelled) setToolsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-  const markInteractionResponded = (interactionId: string) => {
-    try {
-      const responded = getRespondedInteractions();
-      responded.add(interactionId);
-      sessionStorage.setItem(`mission-responded-interactions:${workflowId}`, JSON.stringify([...responded]));
-    } catch {
-      // Ignore storage errors
-    }
-  };
-
-  const getInteractionId = (pending: NonNullable<typeof pendingInteraction>): string => {
-    return pending.requestId || `${pending.phaseId}:${pending.taskId}`;
-  };
   const [messageText, setMessageText] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptSticksToBottom = useRef(true);
@@ -443,8 +483,10 @@ const MissionRoom = () => {
   }, [ensureConnected]);
 
   const pendingInteraction = detail?.output?.outputs?.pendingInteraction;
+  const pendingInteractionKey = pendingInteraction
+    ? `${pendingInteraction.phaseId || ''}:${pendingInteraction.taskId || ''}:${pendingInteraction.requestId || ''}:${pendingInteraction.question || ''}`
+    : null;
   useEffect(() => {
-    setInteractionAccepted(false);
     setInteractionConfigurationReady(false);
     setInteractionCredentials({});
     setInteractionResponse('');
@@ -481,7 +523,7 @@ const MissionRoom = () => {
   const missionEvents = useMemo<FeedEvent[]>(() => {
     return buildMissionEvents({
       missionId,
-      liveEvents: events,
+      liveEvents: [...events, ...(detail?.persistedEvents || [])],
       detail: detail
         ? {
             status: detail.status,
@@ -586,7 +628,7 @@ const MissionRoom = () => {
         `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/approve`,
         { approvedBy: 'user' },
       );
-      refreshDetail(workflowId);
+      await Promise.all([refreshDetail(workflowId), fetchPendingApprovals()]);
     } catch (err) {
       setApprovalActionError(err instanceof Error ? err.message : 'Approve failed');
     }
@@ -599,7 +641,7 @@ const MissionRoom = () => {
         `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/reject`,
         { reason: 'Rejected by user from Mission Room' },
       );
-      refreshDetail(workflowId);
+      await Promise.all([refreshDetail(workflowId), fetchPendingApprovals()]);
     } catch (err) {
       setApprovalActionError(err instanceof Error ? err.message : 'Reject failed');
     }
@@ -713,6 +755,9 @@ const MissionRoom = () => {
       : configureInSettings || configurationProvided
         ? 'The requested values were provided securely.'
         : responseText;
+    setDismissedInteractionKey(
+      `${pending.phaseId || ''}:${pending.taskId || ''}:${pending.requestId || ''}:${pending.question || ''}`,
+    );
     setInteractionSubmitting(true);
     setControlError(null);
     appendOptimisticUserResponse(responseMessage, 'user', pending.phaseId, pending.taskId);
@@ -750,15 +795,9 @@ const MissionRoom = () => {
           updateMissionStatus(workflowId, result.status);
         }
       }
-      setInteractionAccepted(true);
-      setInteractionResponse('');
-      setInteractionCredentials({});
-      setPermissionScope('');
-      if (pending.requestId || (pending.phaseId && pending.taskId)) {
-        markInteractionResponded(getInteractionId(pending));
-      }
       await refreshDetail(workflowId);
     } catch (error) {
+      setDismissedInteractionKey(null);
       setControlError(error instanceof Error ? error.message : 'Failed to resume the mission');
     } finally {
       setInteractionSubmitting(false);
@@ -777,9 +816,6 @@ const MissionRoom = () => {
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
-
-    const pending = detail?.output?.outputs?.pendingInteraction;
-    const interactionId = pending ? getInteractionId(pending) : null;
 
     // Optimistically render the user's message immediately instead of waiting
     // for the backend round-trip and websocket broadcast. The backend echoes
@@ -805,8 +841,8 @@ const MissionRoom = () => {
         setSendError(result.error);
       } else {
         setMessageText('');
-        if (interactionId) {
-          markInteractionResponded(interactionId);
+        if (result.status === 'resuming' || result.status === 'running') {
+          await Promise.all([fetchMissions(), refreshDetail(workflowId)]);
         }
       }
     } catch (err) {
@@ -850,11 +886,8 @@ const MissionRoom = () => {
                          // was supplied outside the mission.
                          awaitsUserInput ? { useConfiguredCredentials: true } : {},
                        );
-                       updateMissionStatus(workflowId, result.status);
-                       if (pending && (pending.requestId || (pending.phaseId && pending.taskId))) {
-                         markInteractionResponded(getInteractionId(pending));
-                       }
-                       await refreshDetail(workflowId);
+                        updateMissionStatus(workflowId, result.status);
+                        await refreshDetail(workflowId);
                      } catch (error) {
                        setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
                      }
@@ -906,9 +939,30 @@ const MissionRoom = () => {
       </div>
 
       {detailError && <div className="error-banner">{detailError}</div>}
+      {detailIdentityMismatch && (
+        <div className="error-banner">Mission details did not match this room. Refresh the room to retry.</div>
+      )}
+      {detail?.eventsLoadError && (
+        <div className="error-banner">Could not load mission history: {detail.eventsLoadError}</div>
+      )}
       {detail?.status === 'failed' && detail?.error && (
         <div className="error-banner">Mission failed: {friendlyMissionError(detail.error)}</div>
       )}
+
+      {detail?.status === 'awaiting_review'
+        && !pendingInteraction
+        && !(detail.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification)
+        && (
+          <section className="warning-banner" aria-label="Mission review">
+            <p style={{ whiteSpace: 'pre-wrap' }}>
+              {missionReviewMessage({
+                gaps: detail.output?.outputs?.gaps,
+                reason: detail.output?.outputs?.reason,
+                reviewStatus: detail.output?.outputs?.status,
+              })}
+            </p>
+          </section>
+        )}
 
       {detail?.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification && (
         <div className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
@@ -954,13 +1008,10 @@ const MissionRoom = () => {
         </div>
       )}
 
-      {detail?.output?.outputs?.pendingInteraction && !(interactionSubmitting || interactionAccepted) && (() => {
+      {detail?.output?.outputs?.pendingInteraction
+        && pendingInteractionKey !== dismissedInteractionKey
+        && !interactionSubmitting && (() => {
         const pending = detail.output.outputs.pendingInteraction;
-        const interactionId = getInteractionId(pending);
-        const respondedInteractions = getRespondedInteractions();
-        if (respondedInteractions.has(interactionId)) {
-          return null;
-        }
         const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
         const secretQuestion = pending.kind === 'user_input'
           ? pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i)
@@ -973,13 +1024,21 @@ const MissionRoom = () => {
         const hasProvidedCredentials = Boolean(pending.credentialRequest)
           && secretKeys.every((key) => interactionCredentials[key]?.trim());
         const hasSmtpCredentials = secretKeys.some((key) => key.startsWith('smtp_'));
+        const questionText = (pending.question || pending.permission?.explanation || '').toLowerCase();
+        const matchedTool = toolsLoaded
+          ? tools.find((t) => questionText.includes(t.name.toLowerCase()) || questionText.includes(t.id.toLowerCase()))
+          : undefined;
+        const matchedToolId = matchedTool?.id;
+        const matchedToolLabel = matchedTool?.name || 'tool';
         const configureToolId = pending.credentialRequest?.toolId
-          || (hasSmtpCredentials ? 'email_sender' : undefined);
+          || (hasSmtpCredentials ? 'email_sender' : undefined)
+          || matchedToolId;
         const configureToolLabel = pending.credentialRequest?.toolName
-          || (hasSmtpCredentials ? 'Email Sender' : 'tool');
+          || matchedToolLabel
+          || (hasSmtpCredentials ? 'Email Sender' : 'Tool');
         const credentialToolId = pending.credentialRequest?.toolId;
         const toolSettingsUrl = configureToolId
-          ? `/tools?tool=${encodeURIComponent(configureToolId)}&tab=configure`
+          ? `/tools/${encodeURIComponent(configureToolId)}/config`
           : '/tools';
         const permission = pending.permission;
         return (
@@ -1012,7 +1071,7 @@ const MissionRoom = () => {
                               autoComplete="new-password"
                               value={interactionCredentials[key] || ''}
                               onChange={(event) => setInteractionCredentials((values) => ({ ...values, [key]: event.target.value }))}
-                              disabled={interactionConfigurationReady || interactionSubmitting || interactionAccepted}
+                              disabled={interactionConfigurationReady || interactionSubmitting}
                               style={{ display: 'block', width: '100%', marginTop: 4 }}
                             />
                           </label>
@@ -1075,7 +1134,7 @@ const MissionRoom = () => {
                       onChange={(event) => setInteractionResponse(event.target.value)}
                       placeholder="Provide the specific information or configuration details the agent requested..."
                       rows={3}
-                      disabled={interactionSubmitting || interactionAccepted}
+                      disabled={interactionSubmitting}
                       style={{ display: 'block', width: '100%', marginTop: 8, boxSizing: 'border-box' }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -1085,7 +1144,7 @@ const MissionRoom = () => {
                       }}
                     />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                      <Link to="/tools" className="link-button">Open Tools configuration</Link>
+                      <Link to={toolSettingsUrl} className="link-button">Open Tools configuration</Link>
                       <Link to="/vault" className="link-button">Open Vault secrets</Link>
                     </div>
                   </>
@@ -1134,12 +1193,11 @@ const MissionRoom = () => {
                   onClick={() => void handleMissionInteractionSubmit()}
                   disabled={
                     interactionSubmitting
-                    || interactionAccepted
                     || (configureInSettings && !interactionConfigurationReady && !hasProvidedCredentials)
                     || (freeTextInput && !interactionResponse.trim())
                   }
                 >
-                  {interactionSubmitting || interactionAccepted
+                  {interactionSubmitting 
                     ? 'Continuing...'
                     : configureInSettings
                       ? 'Save values and continue'
@@ -1148,7 +1206,7 @@ const MissionRoom = () => {
                 {freeTextInput && (
                   <button
                     onClick={() => void handleMissionInteractionSubmit(undefined, { configurationProvided: true })}
-                    disabled={interactionSubmitting || interactionAccepted}
+                    disabled={interactionSubmitting}
                     title="Use when the requested service or configuration was supplied in Tools or Vault"
                   >
                     I configured it — continue
@@ -1176,6 +1234,35 @@ const MissionRoom = () => {
           </section>
         );
       })()}
+
+      {showRetryDialog && (
+        <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
+          <div>
+            <strong style={{ color: '#38bdf8' }}>Retry Mission</strong>
+            <p className="muted" style={{ margin: '4px 0' }}>
+              Provide guidance to help the agents succeed on retry. This will create a new mission with your guidance appended to the original prompt.
+            </p>
+          </div>
+          <textarea
+            placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
+            ref={retryGuidanceRef}
+            rows={3}
+            style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => void handleRetry()} disabled={retrying}>
+              {retrying ? 'Retrying...' : 'Retry Mission'}
+            </button>
+            <button className="secondary" onClick={() => {
+              setShowRetryDialog(false);
+              if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
+            }}>
+              Cancel
+            </button>
+          </div>
+          {sendError && <span className="muted" style={{ color: '#ef4444', marginTop: 8 }}>{sendError}</span>}
+        </div>
+      )}
 
       {pendingApproval && (
         <div
@@ -1389,28 +1476,30 @@ const MissionRoom = () => {
               </div>
             </div>
           </div>
-          <div className="composer">
-            {sendError && <div className="error-banner">{sendError}</div>}
-            <textarea
-              ref={inputRef}
-              value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
-              placeholder="Send messages to the mission (agent outputs stream here)..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              rows={3}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="muted">Cmd/Ctrl+Enter to send</span>
-              <button onClick={sendMessage} disabled={sending}>
-                {sending ? 'Sending...' : 'Send'}
-              </button>
+          {!detail?.output?.outputs?.pendingInteraction && (
+            <div className="composer">
+              {sendError && <div className="error-banner">{sendError}</div>}
+              <textarea
+                ref={inputRef}
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                placeholder="Send messages to the mission (agent outputs stream here)..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                rows={3}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="muted">Cmd/Ctrl+Enter to send</span>
+                <button onClick={sendMessage} disabled={sending || Boolean(detail?.output?.outputs?.pendingInteraction)}>
+                  {sending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1464,12 +1553,25 @@ const MissionRoom = () => {
           <h3>Plan</h3>
           {!plan ? (
             <div className="empty-state">
-              {detail?.status === 'running' || (
-                !['failed', 'completed', 'incomplete', 'canceled'].includes(detail?.status || '') &&
-                missionEvents.some((event) => event.type === 'planner_started')
-              )
-                ? 'The planning agent is developing a plan for this mission. This can take a little while while providers respond.'
-                : 'No plan recorded for this mission.'}
+              {detail?.planLoadError ? (
+                <>
+                  <p>Could not load the mission plan.</p>
+                  <p className="muted" style={{ marginTop: 4 }}>{detail.planLoadError}</p>
+                  <button
+                    onClick={() => void refreshDetail(workflowId)}
+                    style={{ marginTop: 8 }}
+                  >
+                    Refresh plan
+                  </button>
+                </>
+              ) : (
+                detail?.status === 'running' || (
+                  !['failed', 'completed', 'incomplete', 'canceled'].includes(detail?.status || '') &&
+                  missionEvents.some((event) => event.type === 'planner_started')
+                )
+                  ? 'The planning agent is developing a plan for this mission. This can take a little while while providers respond.'
+                  : 'No plan recorded for this mission.'
+              )}
             </div>
           ) : (
             <div className="plan-view">

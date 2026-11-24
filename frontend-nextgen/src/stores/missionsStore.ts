@@ -35,6 +35,9 @@ export interface MissionDetail {
   status: string;
   artifacts?: unknown[];
   artifactLoadError?: string;
+  planLoadError?: string;
+  eventsLoadError?: string;
+  persistedEvents?: FeedEvent[];
   output?: {
     plan?: unknown;
     outputs?: {
@@ -42,6 +45,7 @@ export interface MissionDetail {
       status?: string;
       phaseId?: string;
       reason?: string;
+      gaps?: string[];
       pendingInteraction?: {
         kind: 'user_input' | 'mcp_permission';
         phaseId: string;
@@ -180,7 +184,6 @@ const REFRESH_DEBOUNCE = 2000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let feedUnsub: (() => void) | null = null;
-let processedCount = 0;
 const lastRefreshByMission = new Map<string, number>();
 
 function startPolling() {
@@ -208,8 +211,9 @@ function processFeedEvents(newEvents: FeedEvent[]) {
     status: string;
     extra?: Partial<MissionRow>;
   }> = [];
+  const updatedMissions = new Set<string>();
 
-  for (const evt of newEvents) {
+  for (const evt of [...newEvents].sort((a, b) => b.timestamp - a.timestamp)) {
     const newStatus = STATUS_EVENT_MAP[evt.type as string];
     if (!newStatus) continue;
 
@@ -220,7 +224,9 @@ function processFeedEvents(newEvents: FeedEvent[]) {
       (m) => m.missionId === eventMissionId || m.workflowId === eventMissionId
     );
 
-    if (existing && existing.status !== newStatus) {
+    if (existing && !updatedMissions.has(existing.workflowId)) {
+      updatedMissions.add(existing.workflowId);
+      if (existing.status === newStatus) continue;
       const extra: Partial<MissionRow> = {};
       if (
         newStatus === 'completed' ||
@@ -286,27 +292,25 @@ function processFeedEvents(newEvents: FeedEvent[]) {
 
 function subscribeToFeed() {
   if (feedUnsub) feedUnsub();
-  feedUnsub = useFeedStore.subscribe((state, _prevState) => {
-    if (state.events.length === 0) {
-      processedCount = 0;
-      return;
+  feedUnsub = useFeedStore.subscribe((state, previous) => {
+    if (state.events === previous.events) return;
+    const previousIds = new Set(previous.events.map((event) => event.id));
+    const latestStatusByMission = new Map<string, number>();
+    for (const event of previous.events) {
+      if (!event.missionId || !STATUS_EVENT_MAP[event.type]) continue;
+      const missionId = event.missionId.replace(/^mission-/, '');
+      latestStatusByMission.set(missionId, Math.max(latestStatusByMission.get(missionId) ?? 0, event.timestamp));
     }
-    if (state.events.length > processedCount) {
-      const newEvents = state.events.slice(
-        0,
-        state.events.length - processedCount
-      );
-      processedCount = state.events.length;
-      if (newEvents.length > 0) {
-        processFeedEvents(newEvents);
-      }
-    } else if (state.events.length < processedCount) {
-      processedCount = state.events.length;
-    }
+    const newEvents = state.events.filter((event) => {
+      if (previousIds.has(event.id)) return false;
+      if (!event.missionId || !STATUS_EVENT_MAP[event.type]) return true;
+      return event.timestamp >= (latestStatusByMission.get(event.missionId.replace(/^mission-/, '')) ?? 0);
+    });
+    if (newEvents.length > 0) processFeedEvents(newEvents);
   });
 }
 
-async function loadSupplementary(workflowId: string, data: MissionDetail): Promise<MissionDetail> {
+async function loadSupplementary(workflowId: string, data: MissionDetail, previous?: MissionDetail): Promise<MissionDetail> {
   const missionId = data.missionId || workflowId.replace(/^mission-/, '');
   let enriched = data;
 
@@ -318,9 +322,14 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
     const normalized = raw
       .map((e) => normalize(e))
       .filter((e): e is FeedEvent => e !== null);
+    enriched = { ...enriched, persistedEvents: normalized, eventsLoadError: undefined };
     useFeedStore.getState().addEvents(normalized);
-  } catch {
-    // Events are supplementary; the mission detail remains usable if they are unavailable.
+  } catch (err) {
+    enriched = {
+      ...enriched,
+      persistedEvents: previous?.persistedEvents,
+      eventsLoadError: err instanceof Error ? err.message : 'Failed to load mission events',
+    };
   }
 
   try {
@@ -334,10 +343,14 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
           ...(enriched.output || {}),
           plan,
         },
+        planLoadError: undefined,
       };
     }
-  } catch {
-    // A plan may not have been generated yet.
+  } catch (err) {
+    enriched = {
+      ...enriched,
+      planLoadError: err instanceof Error ? err.message : 'Failed to load mission plan',
+    };
   }
 
   try {
@@ -348,11 +361,13 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
       ...enriched,
       artifacts: result.artifacts || [],
       artifactLoadError: undefined,
+      planLoadError: enriched.planLoadError,
     };
   } catch (err) {
     enriched = {
       ...enriched,
       artifactLoadError: err instanceof Error ? err.message : 'Failed to load mission artifacts',
+      planLoadError: enriched.planLoadError,
     };
   }
 
@@ -426,7 +441,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
       const data = await fetchJSON<MissionDetail>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}`
       );
-      const enriched = await loadSupplementary(workflowId, data);
+      const enriched = await loadSupplementary(workflowId, data, get().details[workflowId]);
       set((s) => ({
         details: { ...s.details, [workflowId]: enriched },
         detailLoading: { ...s.detailLoading, [workflowId]: false },
@@ -459,7 +474,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
       const data = await fetchJSON<MissionDetail>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}`
       );
-      const enriched = await loadSupplementary(workflowId, data);
+      const enriched = await loadSupplementary(workflowId, data, get().details[workflowId]);
       set((s) => ({
         details: { ...s.details, [workflowId]: enriched },
         detailLoading: { ...s.detailLoading, [workflowId]: false },
