@@ -20,6 +20,7 @@ import {
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
 import { extractArtifacts, invalidExpectedArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
@@ -1008,7 +1009,7 @@ export class MissionAgentRuntime {
   ): Promise<{ satisfied: boolean; gaps: string[]; verificationFailed?: boolean }> {
     // Fresh routing session per review so repeated completion-review attempts
     // rotate to new models instead of exhausting the per-session exclusion list.
-    const routingSessionId = `${this.missionId}:completion-review:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const routingSessionId = `${this.missionId}:completion-review:${Date.now()}:${randomBytes(4).toString('hex')}`;
     const agentId = await this.getOrCreateAgent(
       'mission-evaluator',
       MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT,
