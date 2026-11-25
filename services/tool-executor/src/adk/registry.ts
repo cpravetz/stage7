@@ -302,15 +302,3 @@ assistantRegistries.forEach((reg, i) => {
   const key = mapKeys[i];
   if (key) reg.assistant = key.charAt(0).toUpperCase() + key.slice(1);
 });
-
-export function getAssistantByName(name: string): AssistantRegistry | undefined {
-  return assistantRegistries.find(r => r.assistant.toLowerCase() === name.toLowerCase());
-}
-
-export function getAssistantsByObject(object: string): AssistantRegistry[] {
-  return assistantRegistries.filter(r => r.productObject.toLowerCase().includes(object.toLowerCase()));
-}
-
-export function getAssistantsWithSkillCount(minSkills = 1): AssistantRegistry[] {
-  return assistantRegistries.filter(r => r.skills.length >= minSkills);
-}
