@@ -37,7 +37,7 @@ export interface ClassifiedError {
 /**
  * ErrorHandler class — classifies errors and routes them appropriately.
  *
- * Design principles (from docs/assistants design 0915-3.md):
+ * Design principles (from docs/assistants_design_0922_v7.md, the current design doc):
  * 1. Missing tools → permanent error with helpful message
  * 2. Timeouts → transient error, retryable
  * 3. Not-connected → user error, assistant-addressable

@@ -5,7 +5,10 @@
  * so a failure names the rule it broke rather than just saying a folder looks
  * wrong. The validator is deliberately structural: it reads the built blueprint
  * and the source text, never executing a handler, so it can run in CI against a
- * folder nobody has deployed.
+ * folder nobody has deployed. It does exactly that: the `adk:validate` script
+ * (`ts-node src/adk/cli.ts`) runs in CI on every push/PR that touches the
+ * tool-executor or its assistants and fails the build on any error-level
+ * finding; warnings are reported and do not block.
  */
 
 import * as fs from 'fs';
