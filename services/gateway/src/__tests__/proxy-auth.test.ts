@@ -3,9 +3,10 @@ import express from 'express';
 import http from 'http';
 import { AddressInfo } from 'net';
 import proxyRoutes from '../routes/proxy';
-import { isPublicProxyPath } from '../routes/proxy';
+import { createProxyRateLimiter, isPublicProxyPath } from '../routes/proxy';
 import { gatewayProxy } from '../utils/sharedInstances';
 import { TokenPayload } from '@stage7-nextgen/shared';
+import { Request, Response } from 'express';
 
 /**
  * The gateway proxy must not be an unauthenticated pass-through: every
@@ -115,6 +116,18 @@ describe('Gateway proxy authentication', () => {
     const response = await request(app).get('/api/downstream/health');
     expect(response.status).toBe(200);
     expect(downstreamHits).toBe(1);
+    expect(response.headers['ratelimit']).toBeDefined();
+  });
+
+  describe('createProxyRateLimiter', () => {
+    it('stamps RateLimit headers and 429s bursts beyond the limit', async () => {
+      const limited = express();
+      limited.use(createProxyRateLimiter(2));
+      limited.get('/limited', (req: Request, res: Response) => res.json({ ok: true }));
+      expect((await request(limited).get('/limited')).status).toBe(200);
+      expect((await request(limited).get('/limited')).headers['ratelimit']).toContain('limit=2');
+      expect((await request(limited).get('/limited')).status).toBe(429);
+    });
   });
 
   describe('isPublicProxyPath', () => {

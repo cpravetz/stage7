@@ -3,6 +3,7 @@ import { NextGenError } from '../errors';
 import { asyncHandler } from './asyncHandler';
 import { TokenPayload } from '../types/auth';
 import { httpRequest, interServiceTimeoutMs } from '../utils/httpClient';
+import { stripTrailingSlashes } from '../utils/stripTrailingSlashes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -28,7 +29,7 @@ export interface RequireServiceTokenOptions {
 }
 
 function authServiceBaseUrl(explicit?: string): string {
-  return (explicit || process.env.AUTH_URL || 'http://auth:4300').replace(/\/+$/, '');
+  return stripTrailingSlashes(explicit || process.env.AUTH_URL || 'http://auth:4300');
 }
 
 /**

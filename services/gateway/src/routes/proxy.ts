@@ -1,6 +1,7 @@
 import { NextFunction, Router, Request, Response } from 'express';
 import { gatewayProxy } from '../utils/sharedInstances';
-import { asyncHandler, NextGenError, logger, requireServiceToken } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, logger, requireServiceToken, stripTrailingSlashes } from '@stage7-nextgen/shared';
+import rateLimit from 'express-rate-limit';
 
 const router: Router = Router();
 
@@ -18,7 +19,7 @@ const PUBLIC_PROXY_PATHS = new Set([
 ]);
 
 export const isPublicProxyPath = (serviceId: string, resourcePath: string): boolean => {
-  const normalized = resourcePath.replace(/\/+$/, '');
+  const normalized = stripTrailingSlashes(resourcePath);
   if (normalized === 'health') return true;
   return PUBLIC_PROXY_PATHS.has(`${serviceId}/${normalized}`);
 };
@@ -31,6 +32,24 @@ const authGate = (req: Request, res: Response, next: NextFunction): void => {
   }
   requireToken(req, res, next);
 };
+
+/**
+ * Burst protection at the public edge: the gateway is the only externally
+ * reachable surface, and auth-verification traffic is otherwise unbounded.
+ * The default in-memory store suits the single-container deployment; switch
+ * to a shared Redis store if the gateway ever runs multi-instance.
+ */
+export const createProxyRateLimiter = (limit: number): ReturnType<typeof rateLimit> =>
+  rateLimit({
+    windowMs: 60_000,
+    limit,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  });
+
+const proxyLimiter = createProxyRateLimiter(
+  Number(process.env.GATEWAY_RATE_LIMIT_PER_MINUTE || 300),
+);
 
 const rewritePath = (req: any, serviceId: string): string => {
   return `/api${req.url}`;
@@ -72,11 +91,11 @@ const proxyHandler = asyncHandler(async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:service/*', authGate, proxyHandler);
-router.post('/:service/*', authGate, proxyHandler);
-router.put('/:service/*', authGate, proxyHandler);
-router.delete('/:service/*', authGate, proxyHandler);
-router.patch('/:service/*', authGate, proxyHandler);
+router.get('/:service/*', proxyLimiter, authGate, proxyHandler);
+router.post('/:service/*', proxyLimiter, authGate, proxyHandler);
+router.put('/:service/*', proxyLimiter, authGate, proxyHandler);
+router.delete('/:service/*', proxyLimiter, authGate, proxyHandler);
+router.patch('/:service/*', proxyLimiter, authGate, proxyHandler);
 
 router.get('/health', asyncHandler(async (req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'proxy' });
