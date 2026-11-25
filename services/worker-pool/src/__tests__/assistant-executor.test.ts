@@ -1,6 +1,7 @@
 import { AssistantExecutor } from '../services/AssistantExecutor';
 import { KnowledgeService } from '../services/KnowledgeService';
 import { AssistantDefinition, MCPToolCall, logger } from '@stage7-nextgen/shared';
+import type { SpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { validateCatalogIntegrity } from '../routes/assistants';
 import { createTestArtifactsService } from './testArtifactsService';
 
@@ -714,6 +715,74 @@ describe('brain spend-limit refusal propagation (OD-5 finding B)', () => {
       expect(result.success).toBe(false);
       expect(result.spendRefusal).toBeUndefined();
       expect(result.error).toContain('Brain returned 503');
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('executeToolCall spend-refusal surfacing (OD-5 finding B)', () => {
+  const REFUSAL: SpendLimitRefusalPayload = {
+    error: 'SPEND_LIMIT_REACHED',
+    userId: 'usr_owner',
+    period: 'month',
+    limit: 25,
+    spent: 25.03,
+    periodEnd: '2026-12-01T00:00:00.000Z',
+  };
+
+  let executor: AssistantExecutor;
+
+  beforeEach(async () => {
+    executor = new AssistantExecutor(new KnowledgeService(createTestArtifactsService()));
+  });
+
+  function mockToolExecutor(status: number, body: string): () => void {
+    const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+    (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/api/tool-executor/tools/execute')) {
+        return new Response(body, {
+          status,
+          statusText: status === 429 ? 'Too Many Requests' : 'Internal Server Error',
+          headers: { 'Content-Type': 'application/json' },
+        }) as any;
+      }
+      return defaultImpl(url, init);
+    });
+    return () => (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+  }
+
+  it('surfaces the tool-executor 429 contract as spendRefusal', async () => {
+    const restore = mockToolExecutor(429, JSON.stringify(REFUSAL));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toEqual(REFUSAL);
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not fabricate a refusal from a malformed 429 body', async () => {
+    const restore = mockToolExecutor(429, JSON.stringify({ error: 'SPEND_LIMIT_REACHED' }));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.content[0].text).toContain('Tool executor returned 429');
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps non-429 tool-executor failures plain', async () => {
+    const restore = mockToolExecutor(500, JSON.stringify({ success: false, error: 'boom' }));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.content[0].text).toContain('Tool executor returned 500');
     } finally {
       restore();
     }

@@ -1,3 +1,5 @@
+import type { SpendLimitRefusalPayload } from '../config/spendLimits';
+
 export interface MCPTool {
   id?: string;
   name: string;
@@ -24,4 +26,10 @@ export interface MCPToolCall {
 export interface MCPToolResult {
   content: Array<{ type: 'text' | 'error'; text?: string; error?: string }>;
   isError?: boolean;
+  /**
+   * Present when the tool's LLM work was refused by the Brain's spend gate
+   * (OD-5 finding B): the exact 429 contract body, carried so callers can
+   * surface the limit-reached notice instead of a generic error string.
+   */
+  spendRefusal?: SpendLimitRefusalPayload;
 }

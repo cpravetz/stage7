@@ -11,12 +11,11 @@ import skillStoreRoutes from './routes/skill-store';
 import harnessRoutes from './routes/harness';
 import skillCompilationRoutes from './routes/skill-compilation';
 import batchExecutionRoutes from './routes/batch-execution';
-import { Tool, MCPToolDiscoveryRequiredError } from './types';
+import { Tool } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import logger from './utils/logger';
 import { healthRouter } from '@stage7-nextgen/shared';
-import { ToolNotFoundError, ValidationError } from './utils/errors';
-import { renderPermissionPrompt } from './services/ToolPermissionService';
+import { toolExecutorErrorMiddleware } from './utils/errorMiddleware';
 import { PluginGenerator } from './services/PluginGenerator';
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -248,30 +247,7 @@ app.use('/api/skill-store', skillStoreRoutes);
 app.use('/api/tool-executor', harnessRoutes);
 app.use('/api/v1', skillCompilationRoutes);
 
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  if (err instanceof ToolNotFoundError) {
-    return res.status(404).json({ success: false, error: err.message, statusCode: 404 });
-  }
-  if (err instanceof ValidationError) {
-    return res.status(400).json({ success: false, error: err.message, statusCode: 400 });
-  }
-  if (err instanceof MCPToolDiscoveryRequiredError) {
-    return res.status(202).json({
-      success: false,
-      error: err.message,
-      permissionRequired: true,
-      toolId: err.toolId,
-      toolName: err.toolName,
-      capability: err.capability,
-      request: err.permissionRequest,
-      prompt: renderPermissionPrompt(err.permissionRequest),
-      candidate: err.candidate,
-      statusCode: 202,
-    });
-  }
-  logger.error({ err: err?.message || String(err) }, 'Unhandled error in tool-executor');
-  res.status(500).json({ success: false, error: err?.message || 'Tool Executor Internal server error', statusCode: 500 });
-});
+app.use(toolExecutorErrorMiddleware);
 
 const PORT = process.env.PORT || 3500;
 

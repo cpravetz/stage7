@@ -7,6 +7,7 @@ import {
 } from '../types';
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
+import { SpendLimitReachedError } from '../utils/errors';
 import { credentialProvider } from '../services/CredentialProvider';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
 import { allWorkflows } from '../data/skills';
@@ -598,6 +599,15 @@ export class ToolExecutor {
         );
         throw error;
       }
+      if (error instanceof SpendLimitReachedError) {
+        // The Brain refused the tool's LLM completion at the user's spending
+        // cap (OD-5 finding B): rethrow so the route answers 429 with the
+        // exact contract body instead of a generic failed execution.
+        this.events.dispatchOutcomeEvent(
+          tool, 'aborted', 'LLM spending limit reached', opts?.workspaceId, opts?.assistantId, executionId,
+        );
+        throw error;
+      }
 
       const completedAt = new Date();
       const errorMessage = String(redactSecrets(error instanceof Error ? error.message : String(error), secretValues));
@@ -812,6 +822,15 @@ export class ToolExecutor {
           tool, 'aborted', 'awaiting user confirmation', opts?.workspaceId, opts?.assistantId, executionId,
         );
         this.recordWorkspaceApproval(tool, input, executionId, opts);
+        throw error;
+      }
+      if (error instanceof SpendLimitReachedError) {
+        // The Brain refused the tool's LLM completion at the user's spending
+        // cap (OD-5 finding B): rethrow so the route answers 429 with the
+        // exact contract body instead of a generic failed execution.
+        this.events.dispatchOutcomeEvent(
+          tool, 'aborted', 'LLM spending limit reached', opts?.workspaceId, opts?.assistantId, executionId,
+        );
         throw error;
       }
 

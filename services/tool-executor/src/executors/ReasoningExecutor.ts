@@ -1,7 +1,17 @@
 import { Tool } from '../types';
 import logger from '../utils/logger';
-import { httpRequest, llmCallTimeoutMs, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { SpendLimitReachedError } from '../utils/errors';
+import { httpRequest, llmCallTimeoutMs, interServiceTimeoutMs, parseSpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { extractJsonObject } from '../adk/resilience';
+
+/** Parses a response body as JSON; anything unparseable is not a refusal. */
+function parseJsonBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 
@@ -110,6 +120,16 @@ export class ReasoningExecutor {
 
     if (!response.ok) {
       const text = await response.text();
+      if (response.status === 429) {
+        // Preserve the Brain's spend-limit refusal (OD-5 finding B): throw the
+        // typed error so the error middleware answers 429 with the exact
+        // contract body instead of a generic 500. A malformed body is not a
+        // refusal and stays a plain failure.
+        const refusal = parseSpendLimitRefusalPayload(parseJsonBody(text));
+        if (refusal) {
+          throw new SpendLimitReachedError(refusal);
+        }
+      }
       const error = new Error(`Brain returned ${response.status}: ${text.slice(0, 500)}`);
       logger.error({ toolId: tool.id, status: response.status, error: error.message }, 'Brain service returned an error');
       throw error;
