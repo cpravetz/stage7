@@ -1,5 +1,5 @@
 import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
-import { assertVaultBaseUrl, decryptVaultSecret, listVaultSecretNames, storeVaultSecret } from '../utils/vaultClient';
+import { assertVaultBaseUrl, decryptVaultSecret, listVaultSecretNames, storeVaultSecret, vaultBaseUrl } from '../utils/vaultClient';
 
 export interface ToolCredentials {
   [key: string]: string | undefined;
@@ -134,10 +134,13 @@ export class CredentialProvider {
   private cache: Map<string, { value: string; expiresAt: number }> = new Map();
   private readonly TTL_MS = 5 * 60 * 1000;
   /** Cached list of tenant secret names, used for by-name recovery lookups. */
-  private secretNameCache: { names: string[]; expiresAt: number } | undefined;
+  private secretNameCache: { names: string[]; expiresAt: number; vaultUrl: string } | undefined;
 
   async resolve(source: CredentialSource, configuredValues?: Record<string, unknown>, hints?: ResolveHints): Promise<string | undefined> {
-    const cacheKey = source.vaultSecretId || source.configKey || source.envVar || '';
+    // Vault-sourced values (including by-name recoveries) are scoped to the vault
+    // endpoint: pointing VAULT_URL elsewhere must not serve the previous vault's
+    // cached values or secret names.
+    const cacheKey = `${vaultBaseUrl()}::${source.vaultSecretId || source.configKey || source.envVar || ''}`;
     // Config-sourced values are per-Skill and can change without a redeploy, so
     // they are never cached; only vault and env lookups are.
     const cacheable = !source.configKey || source.vaultSecretId != null;
@@ -192,17 +195,18 @@ export class CredentialProvider {
 
   /** Tenant secret names, cached briefly because tools resolve credentials on every run. */
   private async listSecretNames(): Promise<string[]> {
-    if (this.secretNameCache && this.secretNameCache.expiresAt > Date.now()) {
+    const vaultUrl = vaultBaseUrl();
+    if (this.secretNameCache && this.secretNameCache.vaultUrl === vaultUrl && this.secretNameCache.expiresAt > Date.now()) {
       return this.secretNameCache.names;
     }
     try {
       const names = await listVaultSecretNames('system');
-      this.secretNameCache = { names, expiresAt: Date.now() + 30_000 };
+      this.secretNameCache = { names, expiresAt: Date.now() + 30_000, vaultUrl };
       return names;
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed');
     }
-    return this.secretNameCache?.names ?? [];
+    return this.secretNameCache?.vaultUrl === vaultUrl ? this.secretNameCache.names : [];
   }
 
   private invalidateSecretNameCache(): void {

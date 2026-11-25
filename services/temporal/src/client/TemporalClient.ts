@@ -3,7 +3,7 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { logger, Plan, PlanSchema, sanitizeAgentMessage, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema, sanitizeAgentMessage, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs, HeuristicEntry } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
@@ -681,7 +681,7 @@ export class TemporalClient {
                 // Ask brain to distill and persist whatever it returns so the
                 // learning survives mission completion; prompt assembly reads
                 // these entries through the knowledge store.
-                const distillRes = await fetch(`${brainUrl}/api/brain/distillation/trigger`, {
+                const distillRes = await httpRequest(`${brainUrl}/api/brain/distillation/trigger`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({

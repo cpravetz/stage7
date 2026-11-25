@@ -1,6 +1,7 @@
 import http from 'http';
 import express, { NextFunction, Request, Response } from 'express';
 import request from 'supertest';
+import { MongoClient } from 'mongodb';
 
 import artifactsMissionRoutes from '../../services/artifacts/src/routes/missions';
 import artifactsDocumentRoutes from '../../services/artifacts/src/routes/documents';
@@ -62,10 +63,9 @@ describe('Integration: End-to-End Mission Flow', () => {
     brainApp.post('/api/brain/complete', (req, res) => {
       const { prompt, systemPrompt } = req.body || {};
       const isPlanner = systemPrompt?.includes('mission planner');
-      const isWorker = systemPrompt?.includes('executing task');
       const isTaskSelector = systemPrompt?.includes('mission task selector');
       const isPhaseReviewer = systemPrompt?.includes('critical phase reviewer');
-      const isEvaluator = systemPrompt?.includes('objective mission evaluator');
+      const isCompletionReviewer = systemPrompt?.includes('objective mission-completion reviewer');
 
       if (isPhaseReviewer) {
         res.json({ content: JSON.stringify({ satisfied: true, gaps: [], followUpTask: null }) });
@@ -76,8 +76,8 @@ describe('Integration: End-to-End Mission Flow', () => {
         res.json({ content: JSON.stringify({ taskId }) });
         return;
       }
-      if (isEvaluator) {
-        res.json({ content: 'yes' });
+      if (isCompletionReviewer) {
+        res.json({ content: JSON.stringify({ satisfied: true, gaps: [] }) });
         return;
       }
       if (isPlanner) {
@@ -155,26 +155,26 @@ describe('Integration: End-to-End Mission Flow', () => {
         });
       } else {
         // Task-execution brain call (assistant path or brain-direct worker path).
-        // Emit structured markdown with a ## section per expected artifact so the
-        // real extractArtifacts path produces meaningful artifacts instead of a
+        // The prompt carries the deliverable contract on its own "Expected
+        // deliverables:" line; emit a ## section per deliverable so the real
+        // extractArtifacts path records each expected artifact instead of a
         // one-line stub.
-        const isTaskPrompt = /Expected artifacts:/i.test(prompt || '');
-        const artifactMatch = (prompt || '').match(/Expected artifacts:\s*(.*)/i);
-        const artifactList = artifactMatch
-          ? artifactMatch[1].split(/[\s,]+/).filter(Boolean).map((a) => a.replace(/[.,]$/, ''))
-          : [];
-        const base = isWorker ? 'Mock worker output' : 'Mock assistant output';
+        const deliverablesMatch = (prompt || '').match(/Expected deliverables:\s*(.+)/i);
+        const deliverables = (deliverablesMatch?.[1] || '')
+          .split(/,\s+/)
+          .map((entry) => entry.replace(/\s*\(the complete .*?\)\s*$/i, '').replace(/[.,]$/, '').trim())
+          .filter((name) => name && !/^none$/i.test(name));
         let content: string;
-        if (isTaskPrompt && artifactList.length > 0) {
+        if (deliverables.length > 0) {
           content =
-            `${base} for: ${(prompt || '').slice(0, 80)}\n\n` +
-            artifactList.map((a) => `## ${a}\nConcrete content for ${a} produced by the mock brain.`).join('\n\n');
+            `Mock assistant output for: ${(prompt || '').slice(0, 80)}\n\n` +
+            deliverables.map((a) => `## ${a}\nConcrete content for ${a} produced by the mock brain.`).join('\n\n');
         } else {
-          content = `${base} for: ${(prompt || '').slice(0, 100)}`;
+          content = `Mock assistant output for: ${(prompt || '').slice(0, 100)}`;
         }
         res.json({
           content,
-          tokensUsed: isWorker ? 100 : 50,
+          tokensUsed: 50,
         });
       }
     });
@@ -217,6 +217,29 @@ describe('Integration: End-to-End Mission Flow', () => {
     process.env.BRAIN_URL = brainUrl;
     process.env.APPROVAL_POLL_INTERVAL_MS = '500';
     delete process.env.TEMPORAL_ADDRESS;
+
+    // This suite reuses fixed mission and agent IDs. Persisted agent state
+    // embeds execution checkpoints, so checkpoints from a previous run (holding
+    // stale task results) are resumed in place of fresh Brain calls, which
+    // makes the run's outcome depend on prior executions. Reset exactly this
+    // suite's persisted fixtures before the in-process services bootstrap.
+    const cleanupClient = new MongoClient(process.env.MONGO_URI || 'mongodb://mongo:27017', {
+      serverSelectionTimeoutMS: 5000,
+    });
+    try {
+      await cleanupClient.connect();
+      const fixtureDb = cleanupClient.db(process.env.MONGO_DB || 'stage7');
+      const fixtureAgentFilter = {
+        $or: [{ agentId: 'e2e-agent' }, { agentId: { $regex: /^agent-e2e-mission-/ } }],
+      };
+      await fixtureDb.collection('agents').deleteMany(fixtureAgentFilter);
+      await fixtureDb.collection('executionCheckpoints').deleteMany(fixtureAgentFilter);
+      for (const collectionName of ['missions', 'missionPhases', 'missionPlans', 'missionTasks', 'missionEvents']) {
+        await fixtureDb.collection(collectionName).deleteMany({ missionId: 'e2e-mission' });
+      }
+    } finally {
+      await cleanupClient.close();
+    }
 
     const { default: agentRoutes } = await import('../../services/agent-runtime/src/routes/agents');
     agentRuntimeApp.use('/api/agent-runtime', agentRoutes);
@@ -360,7 +383,10 @@ describe('Integration: End-to-End Mission Flow', () => {
       .send({});
 
     expect(agentStateRes.status).toBe(201);
-    expect(agentStateRes.body.status).toBe('running');
+    // startAgent assigns the agent to the mission in an idle-ready state
+    // ('waiting'); 'running' is reserved for agents with an active task
+    // (commit fae490f). Execution happens through task submission, not start.
+    expect(agentStateRes.body.status).toBe('waiting');
 
     const persistenceCheck = await fetch(
       `${artifactsUrl}/api/artifacts/missions/e2e-mission`,
