@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { PersistentWorkerPool } from '../pool/PersistentWorkerPool';
-import { asyncHandler } from '@stage7-nextgen/shared';
-import { WorkerPoolError } from '../utils/errors';
+import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { persistence } from '../utils/sharedInstance';
 
 const router: Router = Router();
@@ -29,7 +28,7 @@ router.get('/workers', asyncHandler(async (req, res) => {
 router.post('/workers', asyncHandler(async (req, res) => {
   const { id, type } = req.body;
   if (!id || !type) {
-    throw WorkerPoolError.badRequest('Missing id or type');
+    throw NextGenError.badRequest('Missing id or type');
   }
   const worker = await pool.registerWorker(id, type);
   res.status(201).json(worker);
@@ -38,7 +37,7 @@ router.post('/workers', asyncHandler(async (req, res) => {
 router.post('/tasks', asyncHandler(async (req, res) => {
   const { type, payload, priority = 0, maxRetries = 3 } = req.body;
   if (!type) {
-    throw WorkerPoolError.badRequest('Missing task type');
+    throw NextGenError.badRequest('Missing task type');
   }
   const taskId = await pool.submit({ type, payload, priority, maxRetries });
   res.status(202).json({ taskId });
@@ -63,7 +62,7 @@ router.post('/workers/:workerId/complete', asyncHandler(async (req, res) => {
   const workerId = req.params.workerId as string;
   const { taskId } = req.body;
   if (!taskId) {
-    throw WorkerPoolError.badRequest('Missing taskId');
+    throw NextGenError.badRequest('Missing taskId');
   }
   await pool.completeTask(workerId, taskId);
   res.json({ completed: true });
@@ -73,10 +72,10 @@ router.post('/workers/:workerId/fail', asyncHandler(async (req, res) => {
   const workerId = req.params.workerId as string;
   const { taskId, error } = req.body;
   if (!taskId) {
-    throw WorkerPoolError.badRequest('Missing taskId');
+    throw NextGenError.badRequest('Missing taskId');
   }
   if (!error || typeof error !== 'string' || !error.trim()) {
-    throw WorkerPoolError.badRequest('Missing error detail for failed task');
+    throw NextGenError.badRequest('Missing error detail for failed task');
   }
   await pool.failTask(workerId, taskId, error.trim());
   res.json({ failed: true });

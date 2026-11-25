@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { asyncHandler } from '@stage7-nextgen/shared';
-import { AuthError } from '../utils/errors';
+import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
 import { LoginRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
@@ -44,16 +43,16 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
   const { email, password, tenantId } = req.body as LoginRequest;
 
   if (!email || !password) {
-    throw AuthError.badRequest('Email and password are required');
+    throw NextGenError.badRequest('Email and password are required');
   }
 
   const user = await userStore.findByEmail(email);
   if (!user) {
-    throw AuthError.unauthorized('Invalid credentials');
+    throw NextGenError.unauthorized('Invalid credentials');
   }
 
   if (tenantId && user.tenantId !== tenantId) {
-    throw AuthError.unauthorized('Invalid tenant');
+    throw NextGenError.unauthorized('Invalid tenant');
   }
 
   const token = tokenService.generateUserToken(user);
@@ -70,12 +69,12 @@ router.post('/service/auth', asyncHandler(async (req: Request, res: Response) =>
   const { serviceId, apiKey } = req.body as ServiceAuthRequest;
 
   if (!serviceId || !apiKey) {
-    throw AuthError.badRequest('serviceId and apiKey are required');
+    throw NextGenError.badRequest('serviceId and apiKey are required');
   }
 
   const service = await serviceStore.findByServiceId(serviceId);
   if (!service || !tokenService.compareApiKey(apiKey, service.apiKeyHash)) {
-    throw AuthError.unauthorized('Invalid service credentials');
+    throw NextGenError.unauthorized('Invalid service credentials');
   }
 
   const token = tokenService.generateServiceToken(service);
@@ -92,17 +91,17 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.body;
 
   if (!token) {
-    throw AuthError.badRequest('Token is required');
+    throw NextGenError.badRequest('Token is required');
   }
 
   const payload = tokenService.verifyToken(token);
   if (!payload) {
-    throw AuthError.unauthorized('Invalid or expired token');
+    throw NextGenError.unauthorized('Invalid or expired token');
   }
 
   const user = await userStore.findById(payload.sub);
   if (!user) {
-    throw AuthError.unauthorized('User not found');
+    throw NextGenError.unauthorized('User not found');
   }
 
   const newToken = tokenService.generateUserToken(user);
@@ -112,13 +111,13 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
 router.get('/verify', asyncHandler(async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    throw AuthError.unauthorized('Missing token');
+    throw NextGenError.unauthorized('Missing token');
   }
 
   const token = authHeader.slice(7);
   const payload = tokenService.verifyToken(token);
   if (!payload) {
-    throw AuthError.unauthorized('Invalid or expired token');
+    throw NextGenError.unauthorized('Invalid or expired token');
   }
 
   res.status(200).json({ success: true, payload });
@@ -129,7 +128,7 @@ router.post('/users/:id/roles', asyncHandler(async (req: Request, res: Response)
   const { role } = req.body;
 
   if (!role) {
-    throw AuthError.badRequest('Role is required');
+    throw NextGenError.badRequest('Role is required');
   }
 
   rbacService.assignRole(userId, role);
@@ -140,12 +139,12 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
   const { email, password, name, tenantId, roles, permissions } = req.body;
 
   if (!email || !password) {
-    throw AuthError.badRequest('Email and password are required');
+    throw NextGenError.badRequest('Email and password are required');
   }
 
   const existing = await userStore.findByEmail(email);
   if (existing) {
-    throw AuthError.badRequest('User already exists');
+    throw NextGenError.badRequest('User already exists');
   }
 
   const user = await userStore.create({
@@ -171,12 +170,12 @@ router.post('/services', asyncHandler(async (req: Request, res: Response) => {
   const { name, serviceId, scopes, apiKey } = req.body;
 
   if (!name || !serviceId) {
-    throw AuthError.badRequest('name and serviceId are required');
+    throw NextGenError.badRequest('name and serviceId are required');
   }
 
   const existing = await serviceStore.findByServiceId(serviceId);
   if (existing) {
-    throw AuthError.badRequest('Service already exists');
+    throw NextGenError.badRequest('Service already exists');
   }
 
   const keyHash = tokenService.hashApiKey(apiKey || `sk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
