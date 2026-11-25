@@ -1,6 +1,7 @@
 import express from 'express'
 import agentsRouter from './routes/agents'
 import { runtime } from './utils/sharedInstance'
+import { brainSettings } from '@stage7-nextgen/shared'
 
 const app: express.Express = express()
 
@@ -21,6 +22,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const PORT = process.env.PORT || 3400
 
 if (require.main === module) {
+  // Keep the Brain settings doc fresh so request deadlines read it without I/O.
+  brainSettings.startPolling()
   app.listen(PORT, () => {
     console.log(`Agent Runtime service listening on port ${PORT} with ${runtime.listAgents().length} agents`)
   })

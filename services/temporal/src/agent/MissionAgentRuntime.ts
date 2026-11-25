@@ -25,7 +25,7 @@ import { BrainClient, BrainValidationError } from '../brain/BrainClient';
 import { extractArtifacts, invalidExpectedArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
-import { missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
+import { agentRuntimeTimeoutMs, missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
 import { buildTaskPrompt } from './TaskPromptBuilder';
 import { missionExecutionEvidenceGaps } from '../types/workflow';
 import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
@@ -255,20 +255,6 @@ export function applyPhaseReview(
 
 function getAgentRuntimeUrl(): string {
   return process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:3400';
-}
-
-/**
- * An agent task runs a full model completion, which can take many minutes.
- * The default must outlast the Brain completion deadline, otherwise the
- * request is aborted while the agent is still working and the mission fails
- * even though the agent eventually succeeds.
- */
-function agentRuntimeTimeoutMs(): number {
-  const configured = Number(process.env.AGENT_RUNTIME_TIMEOUT_MS);
-  if (Number.isFinite(configured) && configured > 0) return configured;
-  const brainDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-  if (Number.isFinite(brainDeadline) && brainDeadline > 0) return brainDeadline + 60_000;
-  return 900_000;
 }
 
 function encodePathSegment(value: string): string {

@@ -3,6 +3,7 @@ import missionRoutes, { temporalClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
 import { startMissionScheduler } from './schedules/missionScheduler';
 import { logger } from '@stage7-nextgen/shared';
+import { brainSettings } from '@stage7-nextgen/shared';
 
 export { TemporalClient } from './client/TemporalClient';
 
@@ -23,6 +24,8 @@ app.use('/api/temporal', missionRoutes);
 const PORT = process.env.PORT || 4100;
 
 if (require.main === module) {
+  // Keep the Brain settings doc fresh so request deadlines read it without I/O.
+  brainSettings.startPolling();
   const server = app.listen(PORT, () => {
     console.log(`Temporal service listening on port ${PORT}`);
   });

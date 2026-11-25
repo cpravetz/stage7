@@ -2,6 +2,8 @@ import { logger } from '@stage7-nextgen/shared';
 import {
   AgentDefinition,
   AgentToolPolicy,
+  brainSettings,
+  resolveBrainSettings,
 } from '@stage7-nextgen/shared';
 
 export interface MissionAgentConfig {
@@ -25,13 +27,17 @@ export function getAgentRuntimeUrl(): string {
  * The default must outlast the Brain completion deadline, otherwise the
  * request is aborted while the agent is still working and the mission fails
  * even though the agent eventually succeeds.
+ *
+ * The Brain completion deadline is resolved settings-doc first, then the
+ * BRAIN_COMPLETION_DEADLINE_MS environment variable, then the shared default.
+ * Reads the last polled snapshot synchronously — the doc is kept fresh by
+ * brainSettings.startPolling() at service boot, never per request.
  */
 export function agentRuntimeTimeoutMs(): number {
   const configured = Number(process.env.AGENT_RUNTIME_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  const brainDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-  if (Number.isFinite(brainDeadline) && brainDeadline > 0) return brainDeadline + 60_000;
-  return 900_000;
+  const { completionDeadlineMs } = resolveBrainSettings(brainSettings.current().overrides, process.env);
+  return completionDeadlineMs + 60_000;
 }
 
 export function encodePathSegment(value: string): string {
