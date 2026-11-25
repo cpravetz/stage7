@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -65,15 +64,27 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = "Executive advisory only: development and career plans are recommendations; do not commit organizational resources or make binding employment decisions without proper authorization.";
 
-      function fail(status, message, title, extra) {
-        const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+      function fail(status: string, message: string, title: string, extra?: Record<string, unknown>) {
+        const base: Record<string, unknown> = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
         if (extra) { for (const key in extra) { base[key] = extra[key]; } }
         return base;
       }
 
       const focusArea = input.focusArea || 'skill-gap';
       let store = ctx.store.load('dev-career', []);
-      const profile = {
+      // `gaps`/`targetRoles` are legacy reads nothing below assigns; typed optional so
+      // the defensive Array.isArray guards keep compiling.
+      const profile: {
+        role: string;
+        level: string;
+        currentSkills: string[];
+        targetSkills: string[];
+        interests: string[];
+        constraints: string[];
+        timeframe: string;
+        gaps?: string[];
+        targetRoles?: string[];
+      } = {
         role: input.role || '',
         level: '',
         currentSkills: Array.isArray(input.currentSkills) ? input.currentSkills : [],
@@ -196,7 +207,7 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
         }
 
         case 'career-planner': {
-          const targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
+          const targetRoles: string[] = Array.isArray(input.targetRoles) ? input.targetRoles : [];
           const timeframe = profile.timeframe || '1-2 years';
 
           if (!targetRoles.length && !profile.role) {
@@ -235,7 +246,7 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
 
         case 'career-roadmap': {
           const targetRole = Array.isArray(profile.targetRoles) && profile.targetRoles.length > 0 ? String(profile.targetRoles[0]) : '';
-          const milestones = Array.isArray(input.milestones) ? input.milestones : [];
+          const milestones: string[] = Array.isArray(input.milestones) ? input.milestones : [];
           const timeframe = profile.timeframe || '1-2 years';
 
           if (!targetRole && !milestones.length) {

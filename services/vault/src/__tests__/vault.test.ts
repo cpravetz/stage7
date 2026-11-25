@@ -56,8 +56,7 @@ describe('Vault', () => {
     it('persists a secret before returning its reference and never returns plaintext metadata', async () => {
       const createResponse = await request(app)
         .post('/api/vault/secrets')
-        .set('X-Tenant-Id', 'tenant-test')
-        .send({ name: 'mission-test-token', plaintext: 'secret-data' });
+        .send({ name: 'mission-test-token', plaintext: 'secret-data', tenantId: 'tenant-test' });
 
       expect([200, 201]).toContain(createResponse.status);
       expect(createResponse.body.id).toBeDefined();
@@ -66,7 +65,7 @@ describe('Vault', () => {
 
       const decryptResponse = await request(app)
         .get(`/api/vault/secrets/${createResponse.body.id}/decrypt`)
-        .set('X-Tenant-Id', 'tenant-test');
+        .query({ tenantId: 'tenant-test' });
 
       expect(decryptResponse.status).toBe(200);
       expect(decryptResponse.body.plaintext).toBe('secret-data');
@@ -79,15 +78,21 @@ describe('Vault', () => {
       expect(response.status).toBe(401);
     });
 
+    it('does not grant tenant context from the X-Tenant-Id header alone', async () => {
+      const response = await request(app)
+        .get('/api/vault/secrets')
+        .set('X-Tenant-Id', 'tenant-a');
+      expect(response.status).toBe(401);
+    });
+
     it('discovers secrets for authenticated tenant context', async () => {
       await request(app)
         .post('/api/vault/secrets')
-        .set('X-Tenant-Id', 'tenant-a')
-        .send({ name: 'disc-secret', plaintext: 'a' });
+        .send({ name: 'disc-secret', plaintext: 'a', tenantId: 'tenant-a' });
 
       const response = await request(app)
         .get('/api/vault/discovery')
-        .set('X-Tenant-Id', 'tenant-a');
+        .query({ tenantId: 'tenant-a' });
 
       expect(response.status).toBe(200);
       expect(response.body.tenantId).toBe('tenant-a');
@@ -98,21 +103,19 @@ describe('Vault', () => {
     it('reconciles duplicate create/ensure attempts durably', async () => {
       const first = await request(app)
         .post('/api/vault/secrets/ensure')
-        .set('X-Tenant-Id', 'tenant-r')
-        .send({ name: 'same-secret', plaintext: 'one' });
+        .send({ name: 'same-secret', plaintext: 'one', tenantId: 'tenant-r' });
       expect([200, 201]).toContain(first.status);
 
       const second = await request(app)
         .post('/api/vault/secrets/ensure')
-        .set('X-Tenant-Id', 'tenant-r')
-        .send({ name: 'same-secret', plaintext: 'two' });
+        .send({ name: 'same-secret', plaintext: 'two', tenantId: 'tenant-r' });
       expect(second.status).toBe(200);
       expect(second.body.id).toBe(first.body.id);
       expect(second.body.existed).toBe(true);
 
       const list = await request(app)
         .get('/api/vault/secrets')
-        .set('X-Tenant-Id', 'tenant-r');
+        .query({ tenantId: 'tenant-r' });
       expect(list.status).toBe(200);
       const matches = list.body.secrets.filter((s: any) => s.name === 'same-secret');
       expect(matches).toHaveLength(1);
@@ -121,11 +124,10 @@ describe('Vault', () => {
     it('isolates secrets by tenant', async () => {
       await request(app)
         .post('/api/vault/secrets')
-        .set('X-Tenant-Id', 'tenant-x')
-        .send({ name: 'scoped', plaintext: 'x' });
+        .send({ name: 'scoped', plaintext: 'x', tenantId: 'tenant-x' });
       const other = await request(app)
         .get('/api/vault/secrets/name/scoped')
-        .set('X-Tenant-Id', 'tenant-y');
+        .query({ tenantId: 'tenant-y' });
       expect(other.status).toBe(404);
     });
   });
