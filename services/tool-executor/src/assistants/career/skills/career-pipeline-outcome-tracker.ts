@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -88,10 +87,10 @@ handler: async function handler(input, ctx) {
     // targetRole against the job identifier.
     let matchedEntry = null;
     if (input.targetRole) {
-    matchedEntry = tracking.find((entry) => entry.identifier === input.targetRole) || null;
+    matchedEntry = tracking.find((entry: any) => entry.identifier === input.targetRole) || null;
     if (!matchedEntry) {
       // Try matching by title/company as a fallback.
-      matchedEntry = tracking.find((entry) => entry.job?.title === input.targetRole || entry.title === input.targetRole || entry.job?.company === input.company || entry.company === input.company) || null;
+      matchedEntry = tracking.find((entry: any) => entry.job?.title === input.targetRole || entry.title === input.targetRole || entry.job?.company === input.company || entry.company === input.company) || null;
     }
     }
     if (!input.targetRole) {
@@ -102,7 +101,7 @@ handler: async function handler(input, ctx) {
     if (tracking.length > 0) {
       lines.push('');
       lines.push('Your current applications:');
-      tracking.slice(0, 20).forEach(function (t) {
+      tracking.slice(0, 20).forEach(function (t: any) {
         lines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
       });
     } else {
@@ -155,7 +154,7 @@ handler: async function handler(input, ctx) {
     lines.push('Pipeline data was loaded, but outcome tracking is not available.');
     lines.push('');
     lines.push('Existing pipeline entries:');
-    tracking.slice(0, 20).forEach(function (t) {
+    tracking.slice(0, 20).forEach(function (t: any) {
       lines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
     });
     return { success: true, status: 'ok', data: { pipeline: pipelineData, outcomes: {}, role: { jobId: matchedEntry ? (matchedEntry.jobId || matchedEntry.id || matchedEntry.identifier) : input.targetRole, jobTitle: matchedEntry ? (matchedEntry.title || matchedEntry.jobTitle || '') : input.targetRole, company: matchedEntry ? (matchedEntry.company || '') : (input.company || '') }, staleFollowUps: pipelineData.staleFollowUps || [], note: 'Pipeline loaded but outcome tracking unavailable', delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() }, error: null, present: [{ id: 'pipeline', title: 'Pipeline & Outcome Tracker', kind: 'text', body: lines.join(NL) }] };
@@ -185,14 +184,14 @@ handler: async function handler(input, ctx) {
     bodyLines.push('');
     if (tracking.length > 0) {
     bodyLines.push('Your Applications:');
-    tracking.slice(0, 50).forEach(function (t) {
+    tracking.slice(0, 50).forEach(function (t: any) {
       const appliedDate = t.appliedAt ? new Date(t.appliedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
       const sal = t.salary ? ' • ' + t.salary : '';
       bodyLines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown') + (appliedDate ? ' (' + appliedDate + ')' : ''));
     });
     bodyLines.push('');
-    const byStatus = {};
-    tracking.forEach(function (t) { const s = t.status || 'unknown'; byStatus[s] = (byStatus[s] || 0) + 1; });
+    const byStatus: Record<string, number> = {};
+    tracking.forEach(function (t: any) { const s = t.status || 'unknown'; byStatus[s] = (byStatus[s] || 0) + 1; });
     bodyLines.push('By Status:');
     Object.keys(byStatus).forEach(function (s) { bodyLines.push('  ' + s + ': ' + byStatus[s]); });
     } else {
@@ -207,7 +206,7 @@ handler: async function handler(input, ctx) {
     const staleFollowUps = pipelineData.staleFollowUps || [];
     if (staleFollowUps.length > 0) {
     const staleLines = ['Follow-ups needed:'];
-    staleFollowUps.forEach(function (t) {
+    staleFollowUps.forEach(function (t: any) {
       staleLines.push('  ' + (t.title || t.role || 'Untitled') + ' at ' + (t.company || 'Unknown') + ' — applied ' + (t.appliedAt ? new Date(t.appliedAt).toLocaleDateString() : 'unknown date'));
     });
     present.push({ id: 'stale', title: 'Stale Follow-ups', kind: 'text', body: staleLines.join(NL) });

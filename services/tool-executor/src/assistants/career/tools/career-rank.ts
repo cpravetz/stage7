@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -90,12 +89,12 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       // cares about but that cannot on its own make a wrong job the right job.
       const CAREER_RANK_WEIGHTS = { role: 0.45, keywords: 0.2, salary: 0.15, location: 0.1, company: 0.1 };
 
-      function asList(value) {
+      function asList(value: any) {
         if (!Array.isArray(value)) return [];
-        return value.map(function (v) { return String(v == null ? '' : v).trim(); }).filter(Boolean);
+        return value.map(function (v: any) { return String(v == null ? '' : v).trim(); }).filter(Boolean);
       }
 
-      function numOrZero(value) {
+      function numOrZero(value: any) {
         const parsed = Number(value);
         return isFinite(parsed) ? parsed : 0;
       }
@@ -106,8 +105,8 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       // then the titles already saved on the profile. Without this the axis only ever
       // saw prefs.targetRoles, so a search typed into the Job Search box could not
       // influence a single score it produced.
-      const roleQueries = [];
-      function pushRoles(values) {
+      const roleQueries: string[] = [];
+      function pushRoles(values: any) {
         for (const value of values) {
           const term = String(value).toLowerCase().trim();
           if (term && roleQueries.indexOf(term) < 0) roleQueries.push(term);
@@ -126,7 +125,7 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       // deliberately NOT stripped: they are the role.
       const SENIORITY = ['senior', 'sr', 'junior', 'jr', 'entry', 'entrylevel', 'graduate', 'intern', 'internship', 'apprentice', 'contract', 'permanent', 'fulltime', 'parttime', 'freelance'];
 
-      function normTokens(value) {
+      function normTokens(value: any) {
         const raw = String(value == null ? '' : value).toLowerCase().split(/[^a-z0-9+#.]+/);
         const out = [];
         for (const token of raw) {
@@ -139,14 +138,14 @@ const CAREER_RANK = createDeclarativeCodeSkill({
         return out;
       }
 
-      function stem(token) {
+      function stem(token: string) {
         return token.length > 3 && /s$/.test(token) ? token.slice(0, -1) : token;
       }
 
       // Derived forms of the same word have to match: "engineering"/"engineer",
       // "managers"/"manager". Equality alone dropped every derived title; a plain
       // substring test was avoided because "ai" would otherwise match "maintain".
-      function tokenMatches(a, b) {
+      function tokenMatches(a: string, b: string) {
         if (a === b) return true;
         const sa = stem(a);
         const sb = stem(b);
@@ -160,11 +159,11 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       // got full credit for sharing a single word with the target and everything else
       // got nothing, which is why the axis could not separate a good match from a bad
       // one even when the profile was filled in.
-      function roleScoreFor(title) {
+      function roleScoreFor(title: any) {
         const titleTokens = normTokens(title);
         if (!titleTokens.length) return { score: 0, match: null, hitTerms: [] };
         const titleNorm = titleTokens.join(' ');
-        let best = { score: 0, match: null, hitTerms: [] };
+        let best: { score: number; match: any; hitTerms: string[] } = { score: 0, match: null, hitTerms: [] };
         for (const query of roleQueries) {
           const queryTokens = normTokens(query);
           if (!queryTokens.length) continue;
@@ -188,7 +187,7 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       // The searched role is also the best description keyword available: a listing
       // whose description really is about engineering is worth more than one that
       // merely says so once in a boilerplate line.
-      const keywordTerms = [];
+      const keywordTerms: string[] = [];
       for (const value of profileKeywords.concat(hasRoleTargets ? roleQueries : [])) {
         for (const token of normTokens(value)) {
           if (keywordTerms.indexOf(token) < 0) keywordTerms.push(token);
@@ -208,7 +207,7 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       const weightSum = Object.keys(weights).reduce(function (sum, key) { return sum + (Number(weights[key]) || 0); }, 0) || 1;
       for (const key of Object.keys(weights)) weights[key] = (Number(weights[key]) || 0) / weightSum;
 
-      function scoreJob(job) {
+      function scoreJob(job: any) {
         const rationale = [];
 
         // Role: the heaviest weight, and the only axis that can separate one listing
@@ -304,14 +303,14 @@ const CAREER_RANK = createDeclarativeCodeSkill({
       const floor = hasRoleTargets
         ? (typeof input.minRoleScore === 'number' ? input.minRoleScore : 0.01)
         : 0;
-      const kept = scored.filter(function (row) {
+      const kept = scored.filter(function (row: any) {
         return !row.excluded && (floor <= 0 || row.roleScore >= floor);
       });
-      const droppedOffTarget = scored.filter(function (row) {
+      const droppedOffTarget = scored.filter(function (row: any) {
         return !row.excluded && (floor > 0 && row.roleScore < floor);
-      }).sort(function (a, b) { return b.score - a.score; });
+      }).sort(function (a: any, b: any) { return b.score - a.score; });
 
-      const ranked = kept.sort(function (a, b) { return b.score - a.score; });
+      const ranked = kept.sort(function (a: any, b: any) { return b.score - a.score; });
       ctx.store.save('rankPath', { ranked: ranked, droppedOffTarget: droppedOffTarget, generatedAt: new Date().toISOString(), weights: weights, roleQueries: roleQueries });
       return {
         success: true,

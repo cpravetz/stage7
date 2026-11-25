@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -43,7 +42,7 @@ const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
       if (pipeline && pipeline.success && pipeline.data) {
         const pipelineData = pipeline.data;
         if (Array.isArray(pipelineData.tracking)) {
-          targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+          targetRoles = pipelineData.tracking.map((entry: any) => entry.jobId || entry.id).filter(Boolean);
         }
       }
     }
@@ -112,7 +111,7 @@ const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
         ? 'No roles could be matched to a job listing.'
         : 'No job listings were selected for this request.';
       const detail = errors.length
-        ? errors.map((e) => '- ' + ((e && (e.identifier || e.id)) || 'role') + ': ' + ((e && e.error) || 'unknown error')).join('\n')
+        ? errors.map((e: any) => '- ' + ((e && (e.identifier || e.id)) || 'role') + ': ' + ((e && e.error) || 'unknown error')).join('\n')
         : '';
       return {
         success: false,
@@ -133,7 +132,7 @@ const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
       };
     }
 
-    const lines = applications.map((a) => {
+    const lines = applications.map((a: any) => {
       const job = (a && a.job) || {};
       const label = [job.title, job.company].filter(Boolean).join(' at ');
       return '- ' + (label || ((a && a.identifier) || 'role')) + ' [' + ((a && a.status) || 'queued') + ']';
@@ -149,7 +148,7 @@ const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
           dryRun ? 'Application Preview (dry run - nothing was submitted)' : 'Applications Submitted',
           lines.join('\n') + '\n\nSubmitted: ' + applications.length +
           (data.trackingPath ? ' | Tracking: ' + data.trackingPath : '') +
-          (errors.length ? '\n\nErrors (' + errors.length + '):\n' + errors.map((e) => '- ' + ((e && (e.identifier || e.id)) || 'role') + ': ' + ((e && e.error) || 'unknown error')).join('\n') : '')
+          (errors.length ? '\n\nErrors (' + errors.length + '):\n' + errors.map((e: any) => '- ' + ((e && (e.identifier || e.id)) || 'role') + ': ' + ((e && e.error) || 'unknown error')).join('\n') : '')
         ),
       ],
     };

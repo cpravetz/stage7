@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -53,7 +52,7 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER = createDeclarativeCodeSkill({
       if (pipeline && pipeline.success && pipeline.data) {
         const pipelineData = pipeline.data;
         if (Array.isArray(pipelineData.tracking)) {
-          targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+          targetRoles = pipelineData.tracking.map((entry: any) => entry.jobId || entry.id).filter(Boolean);
         }
       }
       }

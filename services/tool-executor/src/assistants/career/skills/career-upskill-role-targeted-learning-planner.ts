@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -87,9 +86,9 @@ const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER = createDeclarativeCodeSkill({
         data: { targetRole: targetRole || jobPosting, missingSkills: [], learningPlan: null, delegatedTo: ['career-advisory'], generatedAt: new Date().toISOString() },
       };
       }
-      const targetSkills = Array.isArray(input.targetSkills) ? input.targetSkills.map((skill) => String(skill).toLowerCase()) : [];
+      const targetSkills = Array.isArray(input.targetSkills) ? input.targetSkills.map((skill: any) => String(skill).toLowerCase()) : [];
       const postingText = String(jobPosting || targetRole).toLowerCase();
-      const missingSkills = targetSkills.filter((skill) => !postingText.includes(skill));
+      const missingSkills = targetSkills.filter((skill: any) => !postingText.includes(skill));
       return { success: true, data: { targetRole: targetRole || jobPosting, missingSkills, learningPlan: advisoryData, delegatedTo: ['career-advisory'], generatedAt: new Date().toISOString() } };
     }
   });
