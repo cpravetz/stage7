@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -68,8 +67,8 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = "Executive advisory only: do not commit organizational resources, make binding decisions, or present recommendations as settled fact without explicit approval.";
 
-      function fail(status, message, title, extra) {
-        const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+      function fail(status: string, message: string, title: string, extra?: Record<string, unknown>) {
+        const base: Record<string, unknown> = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
         if (extra) { for (const key in extra) { base[key] = extra[key]; } }
         return base;
       }
@@ -87,16 +86,16 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
       let present;
       switch (focusArea) {
         case 'risk-assessment': {
-          const domains = Array.isArray(input.domains) ? input.domains : ['Strategic', 'Operational', 'Financial', 'Reputational', 'Compliance'];
-          const risks = Array.isArray(input.risks) ? input.risks : [];
+          const domains: string[] = Array.isArray(input.domains) ? input.domains : ['Strategic', 'Operational', 'Financial', 'Reputational', 'Compliance'];
+          const risks: any[] = Array.isArray(input.risks) ? input.risks : [];
 
           if (!risks.length && !Array.isArray(input.domains)) {
             return fail('not-connected', 'Not connected: no risks supplied and no domains specified for assessment', 'Input required');
           }
 
-          function computeScore(risk) {
-            const likelihoodMap = { low: 1, medium: 3, high: 5, critical: 7 };
-            const impactMap = { low: 1, medium: 3, high: 5, critical: 7 };
+          function computeScore(risk: any) {
+            const likelihoodMap: Record<string, number> = { low: 1, medium: 3, high: 5, critical: 7 };
+            const impactMap: Record<string, number> = { low: 1, medium: 3, high: 5, critical: 7 };
             const likelihood = risk && risk.likelihood ? String(risk.likelihood).toLowerCase() : 'medium';
             const impact = risk && risk.impact ? String(risk.impact).toLowerCase() : 'medium';
             const l = likelihoodMap[likelihood] || 3;
@@ -158,14 +157,14 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
         }
 
         case 'scenario-modeler': {
-          const scenarios = Array.isArray(input.scenarios) ? input.scenarios : [];
+          const scenarios: any[] = Array.isArray(input.scenarios) ? input.scenarios : [];
           const baseMetrics = input.baseMetrics && typeof input.baseMetrics === 'object' ? input.baseMetrics : {};
 
           if (!scenarios.length && Object.keys(baseMetrics).length === 0) {
             return fail('not-connected', 'Not connected: no scenarios supplied and no base metrics provided for modeling', 'Input required');
           }
 
-          const modeled = scenarios.length ? scenarios.map(function(s) {
+          const modeled: any[] = scenarios.length ? scenarios.map(function(s) {
             const name = s && s.name ? String(s.name) : (s ? String(s) : 'Unnamed Scenario');
             const assumptions = s && s.assumptions && typeof s.assumptions === 'object' ? s.assumptions : {};
             const probability = s && s.probability !== undefined && s.probability !== null ? Number(s.probability) : null;

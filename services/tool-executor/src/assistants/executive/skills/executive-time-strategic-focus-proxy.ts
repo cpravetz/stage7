@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -68,8 +67,8 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = "Executive time-strategic focus proxy: calendar management is advisory. Do not block or commit resources without explicit executive authorization.";
 
-      function fail(status, message, title, extra) {
-        const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+      function fail(status: string, message: string, title: string, extra?: Record<string, unknown>) {
+        const base: Record<string, unknown> = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
         if (extra) { for (const key in extra) { base[key] = extra[key]; } }
         return base;
       }
@@ -94,7 +93,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
     const action = resolveOperation(input as Record<string, unknown>);
       let store = ctx.store.load('time-strategic-focus', []);
 
-      function parseCalendar(data) {
+      function parseCalendar(data: unknown): any[] {
         if (!data) return [];
         try { return JSON.parse(typeof data === 'string' ? data : JSON.stringify(data)); }
         catch (e) {
@@ -104,7 +103,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
         }
       }
 
-      function formatFocusBlock(block, i) {
+      function formatFocusBlock(block: any, i: number) {
         const start = block.start || block.startTime || 'unspecified';
         const end = block.end || block.endTime || 'unspecified';
         const title = block.title || block.name || 'Focus Block ' + (i + 1);
@@ -117,7 +116,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
       switch (action) {
         case 'analyze': {
           const calendar = parseCalendar(input.calendarData);
-          const focusBlocks = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
+          const focusBlocks: any[] = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
           const timeRange = input.timeRange || '24 hours';
 
           const lines = [
@@ -170,8 +169,8 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
         }
 
         case 'protect-focus': {
-          const focusBlocks = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
-          const proposedFocusBlocks = Array.isArray(input.proposedFocusBlocks) ? input.proposedFocusBlocks : focusBlocks;
+          const focusBlocks: any[] = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
+          const proposedFocusBlocks: any[] = Array.isArray(input.proposedFocusBlocks) ? input.proposedFocusBlocks : focusBlocks;
 
           if (proposedFocusBlocks.length === 0) {
             return fail('not-connected', 'Not connected: no focus blocks or proposed focus blocks provided to protect', 'Input required');
@@ -215,7 +214,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
         case 'resolve-conflict': {
           const conflictId = input.conflictId || '';
           const meetingId = input.meetingId || '';
-          const conflictResolutionRules = Array.isArray(input.conflictResolutionRules) ? input.conflictResolutionRules : ['Strategic work takes precedence', 'Recurring operational meetings move to delegate', 'New meetings require chief of staff screening'];
+          const conflictResolutionRules: string[] = Array.isArray(input.conflictResolutionRules) ? input.conflictResolutionRules : ['Strategic work takes precedence', 'Recurring operational meetings move to delegate', 'New meetings require chief of staff screening'];
           const calendar = parseCalendar(input.calendarData);
 
           if (!conflictId && !meetingId) {
@@ -252,7 +251,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
         }
 
         case 'delegate': {
-          const delegationRules = Array.isArray(input.delegationRules) ? input.delegationRules : ['Operational check-ins -> delegate', 'Vendor syncs -> delegate', 'Status updates -> delegate', 'Strategic planning -> retain'];
+          const delegationRules: string[] = Array.isArray(input.delegationRules) ? input.delegationRules : ['Operational check-ins -> delegate', 'Vendor syncs -> delegate', 'Status updates -> delegate', 'Strategic planning -> retain'];
           const meetingId = input.meetingId || '';
           const calendar = parseCalendar(input.calendarData);
 
@@ -286,9 +285,9 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
 
         case 'optimize': {
           const calendar = parseCalendar(input.calendarData);
-          const focusBlocks = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
+          const focusBlocks: any[] = Array.isArray(input.focusBlocks) ? input.focusBlocks : [];
           const timeRange = input.timeRange || 'week';
-          const delegationRules = Array.isArray(input.delegationRules) ? input.delegationRules : ['Operational check-ins -> delegate', 'Vendor syncs -> delegate', 'Status updates -> delegate'];
+          const delegationRules: string[] = Array.isArray(input.delegationRules) ? input.delegationRules : ['Operational check-ins -> delegate', 'Vendor syncs -> delegate', 'Status updates -> delegate'];
 
           const lines = [
             'Calendar Optimization Plan',

@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -58,8 +57,8 @@ export const FEEDBACK = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = "Executive advisory only: feedback collection and analysis are for development purposes; do not use for compensation, promotion, or disciplinary decisions without proper HR process.";
 
-      function fail(status, message, title, extra) {
-        const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+      function fail(status: string, message: string, title: string, extra?: Record<string, unknown>) {
+        const base: Record<string, unknown> = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
         if (extra) { for (const key in extra) { base[key] = extra[key]; } }
         return base;
       }
@@ -71,9 +70,9 @@ export const FEEDBACK = createDeclarativeCodeSkill({
       let present;
       switch (focusArea) {
         case 'feedback-collector': {
-          const respondents = Array.isArray(input.respondents) ? input.respondents : [];
-          const dimensions = Array.isArray(input.dimensions) ? input.dimensions : ['Leadership', 'Communication', 'Teamwork'];
-          const questions = Array.isArray(input.questions) ? input.questions : [];
+          const respondents: string[] = Array.isArray(input.respondents) ? input.respondents : [];
+          const dimensions: string[] = Array.isArray(input.dimensions) ? input.dimensions : ['Leadership', 'Communication', 'Teamwork'];
+          const questions: string[] = Array.isArray(input.questions) ? input.questions : [];
           const period = input.period || '';
 
           if (!respondents.length && !dimensions.length && !questions.length) {
@@ -117,23 +116,23 @@ export const FEEDBACK = createDeclarativeCodeSkill({
         }
 
         case 'feedback-analysis': {
-          const feedback = Array.isArray(input.feedback) ? input.feedback : [];
-          const themes = Array.isArray(input.themes) ? input.themes : [];
+          const feedback: any[] = Array.isArray(input.feedback) ? input.feedback : [];
+          const themes: string[] = Array.isArray(input.themes) ? input.themes : [];
 
           if (!feedback.length) {
             return fail('not-connected', 'Not connected: no feedback entries provided for analysis', 'Input required');
           }
 
           // Derive themes from feedback text if not provided
-          let derivedThemes = [];
+          let derivedThemes: string[] = [];
           if (!themes.length) {
             const allWords = feedback.map(function(f) {
               const text = f && f.text ? String(f.text) : String(f);
               return text.toLowerCase().match(/\b\w{4,}\b/g) || [];
             }).flat();
-            const freq = {};
+            const freq: Record<string, number> = {};
             allWords.forEach(function(w) { freq[w] = (freq[w] || 0) + 1; });
-            const stopWords = {'this':1,'that':1,'with':1,'from':1,'have':1,'been':1,'were':1,'will':1,'would':1,'could':1,'should':1,'about':1,'their':1,'there':1,'where':1,'when':1,'which':1,'while':1,'after':1,'before':1,'during':1,'under':1,'over':1,'between':1,'among':1,'through':1,'across':1,'into':1,'onto':1,'upon':1,'within':1,'without':1,'against':1,'toward':1,'because':1,'since':1,'although':1,'though':1,'unless':1,'until':1,'whether':1,'either':1,'neither':1,'both':1,'each':1,'every':1,'other':1,'another':1,'such':1,'only':1,'just':1,'still':1,'even':1,'also':1,'then':1,'than':1,'very':1,'much':1,'more':1,'most':1,'many':1,'some':1,'few':1,'several':1,'various':1,'different':1,'similar':1,'same':1,'own':1,'self':1,'its':1,'your':1,'our':1,'his':1,'her':1,'my':1,'me':1,'us':1,'him':1,'them':1};
+            const stopWords: Record<string, number> = {'this':1,'that':1,'with':1,'from':1,'have':1,'been':1,'were':1,'will':1,'would':1,'could':1,'should':1,'about':1,'their':1,'there':1,'where':1,'when':1,'which':1,'while':1,'after':1,'before':1,'during':1,'under':1,'over':1,'between':1,'among':1,'through':1,'across':1,'into':1,'onto':1,'upon':1,'within':1,'without':1,'against':1,'toward':1,'because':1,'since':1,'although':1,'though':1,'unless':1,'until':1,'whether':1,'either':1,'neither':1,'both':1,'each':1,'every':1,'other':1,'another':1,'such':1,'only':1,'just':1,'still':1,'even':1,'also':1,'then':1,'than':1,'very':1,'much':1,'more':1,'most':1,'many':1,'some':1,'few':1,'several':1,'various':1,'different':1,'similar':1,'same':1,'own':1,'self':1,'its':1,'your':1,'our':1,'his':1,'her':1,'my':1,'me':1,'us':1,'him':1,'them':1};
             derivedThemes = Object.keys(freq).filter(function(w) { return !stopWords[w]; }).sort(function(a,b) { return freq[b] - freq[a]; }).slice(0, 10);
           }
 
@@ -174,8 +173,8 @@ export const FEEDBACK = createDeclarativeCodeSkill({
         }
 
         case 'performance-analyzer': {
-          const metrics = Array.isArray(input.metrics) ? input.metrics : [];
-          const kpis = Array.isArray(input.kpis) ? input.kpis : [];
+          const metrics: string[] = Array.isArray(input.metrics) ? input.metrics : [];
+          const kpis: string[] = Array.isArray(input.kpis) ? input.kpis : [];
           const period = input.period || 'quarter';
           const benchmark = input.benchmark || '';
 
