@@ -1,7 +1,8 @@
-import { applyPhaseReview, MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
+import { applyPhaseReview, MissionAgentRuntime, resolveTaskOptimizeFor } from '../src/agent/MissionAgentRuntime'
 import {
   AgentDefinition,
   AgentTask,
+  BRAIN_OPTIMIZE_FOR_CONTEXT_KEY,
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
   DEFAULT_AGENT_EXECUTION_POLICY,
 } from '@stage7-nextgen/shared'
@@ -1503,3 +1504,43 @@ describe('MissionAgentRuntime', () => {
     ])
   })
 })
+
+describe('task routing criterion threading', () => {
+  const routingTask = (fields: Record<string, unknown>) => ({ ...task, ...fields }) as Task;
+
+  it.each([
+    ['high complexity routes as accuracy', { estimatedComplexity: 'high' }, 'accuracy'],
+    ['medium complexity routes as cost', { estimatedComplexity: 'medium' }, 'cost'],
+    ['low complexity routes as cost', { estimatedComplexity: 'low' }, 'cost'],
+    ['legacy task without either field routes as cost', {}, 'cost'],
+    ['explicit criteria wins over high complexity', { estimatedComplexity: 'high', selectionCriteria: 'cost' }, 'cost'],
+    ['explicit creativity is honored', { estimatedComplexity: 'low', selectionCriteria: 'creativity' }, 'creativity'],
+  ])('%s', (_name, fields, expected) => {
+    expect(resolveTaskOptimizeFor(routingTask(fields))).toBe(expected);
+  });
+
+  it('carries the resolved criterion on the task-execution context', async () => {
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
+      output: 'Done', artifacts: [], tokensUsed: 1,
+    })
+
+    await runtime.executeTask(agent.id, routingTask({ estimatedComplexity: 'high', selectionCriteria: 'speed' }), phase, plan)
+
+    const context = execute.mock.calls[0][1].context as Record<string, unknown>
+    expect(context[BRAIN_ROUTING_SESSION_CONTEXT_KEY]).toBe('mission-1:task:phase-1:task-1')
+    expect(context[BRAIN_OPTIMIZE_FOR_CONTEXT_KEY]).toBe('speed')
+  });
+
+  it('maps complexity to the default criterion when no explicit criteria is set', async () => {
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
+      output: 'Done', artifacts: [], tokensUsed: 1,
+    })
+
+    await runtime.executeTask(agent.id, routingTask({ estimatedComplexity: 'medium' }), phase, plan)
+
+    const context = execute.mock.calls[0][1].context as Record<string, unknown>
+    expect(context[BRAIN_OPTIMIZE_FOR_CONTEXT_KEY]).toBe('cost')
+  });
+});
