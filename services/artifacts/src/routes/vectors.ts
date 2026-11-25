@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { artifactsService as service } from '../services/ArtifactsService';
+import { MAX_VECTOR_DIM } from '../services/MongoStore';
 import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 
@@ -12,22 +13,27 @@ router.use(asyncHandler(async (_req, _res, next) => {
   next();
 }));
 
+// Filter values are restricted to primitives: they are compared against
+// document fields, and arbitrary nested objects have no meaning here while
+// giving clients a free place to stash operator-shaped payloads.
+const filterSchema = z.record(z.string().max(64), z.union([z.string().max(512), z.number(), z.boolean()])).optional();
+
 const UpsertVectorSchema = z.object({
-  vector: z.array(z.number()).min(1),
-  model: z.string().optional(),
+  vector: z.array(z.number().finite()).min(1).max(MAX_VECTOR_DIM),
+  model: z.string().max(128).optional(),
   dim: z.number().int().optional(),
-  contentHash: z.string().optional(),
-  collection: z.string().optional(),
-  filter: z.record(z.string(), z.unknown()).optional(),
+  contentHash: z.string().max(256).optional(),
+  collection: z.string().max(128).optional(),
+  filter: filterSchema,
 });
 
 const SearchVectorsSchema = z.object({
-  collection: z.string(),
-  query: z.array(z.number()).min(1),
-  model: z.string().optional(),
-  limit: z.number().int().positive().optional(),
-  filter: z.record(z.string(), z.unknown()).optional(),
-  minScore: z.number().optional(),
+  collection: z.string().max(128),
+  query: z.array(z.number().finite()).min(1).max(MAX_VECTOR_DIM),
+  model: z.string().max(128).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+  filter: filterSchema,
+  minScore: z.number().min(-1).max(1).optional(),
 });
 
 /** Stores or replaces a vector and its model/dim/contentHash metadata. */

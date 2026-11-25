@@ -29,6 +29,33 @@ const MAX_BRAIN_LOG_ENTRIES = 200;
 // re-emits an identical milestone therefore does not duplicate the feed.
 const EVENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
+// Vector ids arrive from HTTP URL params and body fields — a claim, not a
+// fact. Validate before anything reaches a Mongo query; the store enforces
+// this itself so in-process callers cannot bypass it.
+const VECTOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+// Upper bound on embedding dimensions. Caps the cosine loop's iteration
+// count; real embedding models are far below this.
+export const MAX_VECTOR_DIM = 4096;
+
+function assertVectorId(id: string): string {
+  if (typeof id !== 'string' || !VECTOR_ID_PATTERN.test(id)) {
+    throw new Error(`Invalid vector id: ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
+function assertFiniteVector(vector: number[]): number[] {
+  if (
+    !Array.isArray(vector) ||
+    vector.length === 0 ||
+    vector.length > MAX_VECTOR_DIM ||
+    !vector.every((n) => typeof n === 'number' && Number.isFinite(n))
+  ) {
+    throw new Error(`Invalid vector: expected 1..${MAX_VECTOR_DIM} finite numbers`);
+  }
+  return vector;
+}
+
 type VectorDoc = { _id: string; vector: number[] } & VectorUpsertMeta;
 type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
 type StoredBrainPerformanceMetric = BrainPerformanceMetric & { _id?: string };
@@ -231,6 +258,10 @@ export class MongoStore {
   }
 
   async searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
+    // Bounded at the boundary: the cosine loop runs over the query vector's
+    // length, so it must be capped before any iteration. Bad input is a miss,
+    // not a crash.
+    assertFiniteVector(query.query);
     const vectors = await this.vectors.find({}).toArray();
 
     const results: VectorSearchResult[] = [];
@@ -593,6 +624,8 @@ export class MongoStore {
   }
 
   async upsertVector(id: string, vector: number[], meta: VectorUpsertMeta = {}): Promise<void> {
+    assertVectorId(id);
+    assertFiniteVector(vector);
     await this.vectors.replaceOne(
       { _id: id },
       { _id: id, vector, ...meta } as any,
@@ -602,6 +635,7 @@ export class MongoStore {
 
   /** The stored vector and its metadata, or undefined when none exists. */
   async getVector(id: string): Promise<(VectorUpsertMeta & { vector: number[] }) | undefined> {
+    assertVectorId(id);
     const entry = await this.vectors.findOne({ _id: id } as any);
     if (!entry) return undefined;
     const { _id, vector, ...meta } = entry;
@@ -610,6 +644,7 @@ export class MongoStore {
 
   /** Deletes a stored vector. Returns whether one existed. */
   async deleteVector(id: string): Promise<boolean> {
+    assertVectorId(id);
     const result = await this.vectors.deleteOne({ _id: id } as any);
     return result.deletedCount > 0;
   }
