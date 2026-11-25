@@ -39,7 +39,9 @@ interface FakeServers {
   close: () => Promise<void>;
 }
 
-const MINTED_TOKEN = 'svc-token-abc123';
+// Deliberately fake minted-token prefix for the fake auth server below —
+// not a real credential. Naming kept non-secret-like for secret scanners.
+const fakeMintPrefix = 'fake-mint-prefix-for-tests';
 
 async function startFakeServers(): Promise<FakeServers> {
   const requests: CapturedRequest[] = [];
@@ -64,7 +66,7 @@ async function startFakeServers(): Promise<FakeServers> {
     if (req.url === '/api/auth/service/auth') {
       servers.mints += 1;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, token: `${MINTED_TOKEN}-${servers.mints}` }));
+      res.end(JSON.stringify({ success: true, token: `${fakeMintPrefix}-${servers.mints}` }));
       return;
     }
     res.writeHead(404);
@@ -145,7 +147,7 @@ describe('vault client service-token auth', () => {
     expect(names).toEqual(['secret:apiKey']);
     const [request] = vaultRequests();
     expect(request?.url).toBe('/api/vault/secrets');
-    expect(request?.headers.authorization).toBe(`Bearer ${MINTED_TOKEN}-1`);
+    expect(request?.headers.authorization).toBe(`Bearer ${fakeMintPrefix}-1`);
     expect(request?.headers['x-tenant-id']).toBeUndefined();
   });
 
@@ -157,7 +159,7 @@ describe('vault client service-token auth', () => {
     expect(list).toEqual(['secret:apiKey']);
     expect(vaultRequests()).toHaveLength(2);
     for (const request of vaultRequests()) {
-      expect(request.headers.authorization).toBe(`Bearer ${MINTED_TOKEN}-1`);
+      expect(request.headers.authorization).toBe(`Bearer ${fakeMintPrefix}-1`);
       expect(request.headers['x-tenant-id']).toBeUndefined();
     }
     // One mint covers both vault calls.
@@ -171,8 +173,8 @@ describe('vault client service-token auth', () => {
     const [ensure, store] = vaultRequests();
     expect(ensure?.method).toBe('POST');
     expect(JSON.parse(ensure?.body ?? '{}')).toMatchObject({ name: 'secret:apiKey', tenantId: 'system' });
-    expect(ensure?.headers.authorization).toBe(`Bearer ${MINTED_TOKEN}-1`);
-    expect(store?.headers.authorization).toBe(`Bearer ${MINTED_TOKEN}-1`);
+    expect(ensure?.headers.authorization).toBe(`Bearer ${fakeMintPrefix}-1`);
+    expect(store?.headers.authorization).toBe(`Bearer ${fakeMintPrefix}-1`);
     expect(store?.headers['x-tenant-id']).toBeUndefined();
   });
 
