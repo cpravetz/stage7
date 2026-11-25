@@ -22,6 +22,8 @@ export interface AgentExecutorOptions {
 export interface AgentExecutionContext {
   missionId: string
   delegationDepth: number
+  /** Explicit spend attribution, winning over the agent's metadata createdBy. */
+  userId?: string
   missionGoal?: string
   taskObjective?: string
   executionPolicy?: AgentExecutionPolicy

@@ -47,12 +47,18 @@ export class BrainClient {
     history: ChatMessage[],
     maxTokens: number,
     routingSessionId?: string,
+    userId?: string,
   ): Promise<BrainResponse> {
     const base = {
       options: { optimizeFor: 'accuracy' },
       maxTokens,
       temperature: 0.3,
       missionId,
+      // Spend attribution: an explicit request userId wins; otherwise the
+      // mission creator stamped into the agent's metadata carries it (OD-5).
+      userId: userId ?? (typeof definition.metadata?.createdBy === 'string' && definition.metadata.createdBy
+        ? definition.metadata.createdBy
+        : undefined),
       // Entity-memory slot. Without an explicit entityId, missions learn
       // per-assistant: this must mirror the extraction fallback
       // (MissionStageCompletedListener writes entityId = assistantId).

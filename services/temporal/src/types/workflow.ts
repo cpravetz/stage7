@@ -1,5 +1,6 @@
 import {
   MissionArtifact,
+  MissionAttribution,
   Plan,
   Task,
   extractReceiptBinding,
@@ -10,7 +11,7 @@ import {
   type RequiredActionLike,
 } from '@stage7-nextgen/shared';
 
-export interface WorkflowInput {
+export interface WorkflowInput extends MissionAttribution {
   missionId: string;
   tenantId: string;
   assistantId: string;

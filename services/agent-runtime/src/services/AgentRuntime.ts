@@ -448,6 +448,7 @@ export class AgentRuntime {
           result = await this.executor.execute(agent, task, {
             missionId,
             delegationDepth,
+            ...(typeof taskContext.userId === 'string' && taskContext.userId ? { userId: taskContext.userId } : {}),
             ...(retryGuidance ? { retryGuidance } : {}),
             ...(executionPolicy ? { executionPolicy } : {}),
             delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),

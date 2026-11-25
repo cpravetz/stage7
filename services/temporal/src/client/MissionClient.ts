@@ -446,6 +446,7 @@ export class MissionClient {
       missionId: input.missionId,
       tenantId: input.tenantId || "",
       assistantId: input.assistantId || "",
+      createdBy: input.createdBy || undefined,
       prompt: input.prompt || "",
       contextChunks: input.contextChunks || [],
       metadata: input.metadata || {},
@@ -2014,11 +2015,16 @@ export class MissionClient {
     if (!pendingInteraction.question) return 'UNCLEAR';
 
     const brainUrl = getBrainUrl();
+    // Attribute the brain call to the mission's creator so the spend lands on
+    // their ledger; with no persisted creator it falls to Brain's system bucket.
+    const record = await this.getPersistedMissionControlRecord(missionId).catch(() => null);
+    const createdBy = record?.input?.createdBy;
     try {
       const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(createdBy ? { userId: createdBy } : {}),
           prompt: `The mission is waiting for a user response to this question: "${pendingInteraction.question}"
 
 The user replied: "${userMessage}"
