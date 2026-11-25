@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -150,8 +149,8 @@ handler: async function handler(input, ctx) {
     const discoveryFailures = Array.isArray(discoveryData.failures) ? discoveryData.failures : [];
     const listings = Array.isArray(discoveryData.listings) ? discoveryData.listings : [];
 
-    function failureLines(list) {
-    return list.map((f) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' \u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
+    function failureLines(list: any) {
+    return list.map((f: any) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' \u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
     }
 
     if (!discovery || discovery.success === false) {
@@ -209,7 +208,7 @@ handler: async function handler(input, ctx) {
     })();
     const merged = existingListings.slice();
     for (const r of ranked) {
-    const idx = merged.findIndex((m) => m.id === r.id);
+    const idx = merged.findIndex((m: any) => m.id === r.id);
     if (idx >= 0) merged[idx] = Object.assign({}, merged[idx], r); else merged.push(r);
     }
     // Rewrite the same envelope discovery uses, carrying the discovery ledger
@@ -226,9 +225,9 @@ handler: async function handler(input, ctx) {
 
     let autoApplied = null;
     if (typeof input.autoApplyThreshold === 'number') {
-    const qualifying = ranked.filter((job) => (job.score || 0) >= input.autoApplyThreshold);
+    const qualifying = ranked.filter((job: any) => (job.score || 0) >= input.autoApplyThreshold);
     if (qualifying.length) {
-    const applyRes = await ctx.delegate('career-application-execution', { listings: qualifying.map((job) => job.id || job.jobId), dryRun: input.dryRun !== false });
+    const applyRes = await ctx.delegate('career-application-execution', { listings: qualifying.map((job: any) => job.id || job.jobId), dryRun: input.dryRun !== false });
     autoApplied = applyRes && applyRes.success ? applyRes.data : { error: applyRes && applyRes.error ? applyRes.error : 'Auto-apply did not run' };
     } else {
     autoApplied = { note: 'No ranked jobs met the auto-apply threshold' };
@@ -245,7 +244,7 @@ handler: async function handler(input, ctx) {
     const allOffTarget = ranked.length === 0 && droppedOffTarget.length > 0;
     const runStatus = partialDiscovery ? 'partial' : (allOffTarget || discoveryStatus === 'no-match' ? 'no-match' : 'ok');
     const runError = partialDiscovery
-    ? (discoveryError || (discoveryFailures.length + ' of the sources this search consulted could not be retrieved, so this ranking is not a complete answer about the job market: ' + discoveryFailures.map((f) => (f && f.board) || 'unknown source').join(', ') + '.'))
+    ? (discoveryError || (discoveryFailures.length + ' of the sources this search consulted could not be retrieved, so this ranking is not a complete answer about the job market: ' + discoveryFailures.map((f: any) => (f && f.board) || 'unknown source').join(', ') + '.'))
     : null;
     const partialNote = partialDiscovery
     ? 'PARTIAL RESULT. The ' + ranked.length + ' ranked role' + (ranked.length === 1 ? '' : 's') + ' below come only from the job sources that answered. ' + runError + ' Roles on the sources that could not be retrieved are missing from this ranking because they were never read, not because they do not exist.'
@@ -278,7 +277,7 @@ handler: async function handler(input, ctx) {
     // every non-empty run, whatever the status, so a partial run's roles are visible alongside
     // the warning about the sources that never answered.
     const RANKED_LINK_CAP = 200;
-    function rankedLink(job) {
+    function rankedLink(job: any) {
     if (!job) return null;
     const url = String(job.applyUrl || job.sourceUrl || '').trim();
     // http(s) only: these become anchors in the UI.

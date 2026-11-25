@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -80,7 +79,7 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
       updatedAt: new Date().toISOString(),
       };
 
-      const idx = tracking.findIndex((t) => t.applicationId === applicationId || t.jobId === applicationId);
+      const idx = tracking.findIndex((t: any) => t.applicationId === applicationId || t.jobId === applicationId);
       if (idx >= 0) tracking[idx] = Object.assign(tracking[idx], entry);
       else tracking.push(entry);
       ctx.store.save('applications/tracking', tracking);
@@ -112,11 +111,11 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
 
       const stats = {
       total: tracking.length,
-      offers: tracking.filter((t) => t.status === 'offer').length,
-      rejections: tracking.filter((t) => t.status === 'rejection').length,
-      interviews: tracking.filter((t) => t.status === 'interview' || t.status === 'screening').length,
-      noResponse: tracking.filter((t) => t.status === 'no_response').length,
-      responseRate: tracking.length ? (tracking.length - tracking.filter((t) => t.status === 'no_response').length) / tracking.length : 0,
+      offers: tracking.filter((t: any) => t.status === 'offer').length,
+      rejections: tracking.filter((t: any) => t.status === 'rejection').length,
+      interviews: tracking.filter((t: any) => t.status === 'interview' || t.status === 'screening').length,
+      noResponse: tracking.filter((t: any) => t.status === 'no_response').length,
+      responseRate: tracking.length ? (tracking.length - tracking.filter((t: any) => t.status === 'no_response').length) / tracking.length : 0,
       };
       return { success: true, data: { entry, stats, trackingPath: 'applications/tracking', outcomesPath: 'outcomesPath', generatedAt: new Date().toISOString() } };
     }

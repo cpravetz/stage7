@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -69,7 +68,7 @@ const CAREER_NETWORKING_OUTREACH = createDeclarativeCodeSkill({
       return;
       }
 
-      const stageTemplates = {
+      const stageTemplates: Record<string, { subject: string; tone: string }> = {
       cold_outreach: { subject: 'Exploring opportunities at ' + targetCompany, tone: 'professional and concise' },
       follow_up: { subject: 'Following up on my application', tone: 'professional and persistent' },
       thank_you: { subject: 'Thank you for your time', tone: 'warm and appreciative' },

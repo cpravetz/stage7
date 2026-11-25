@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -51,14 +50,14 @@ const CAREER_PIPELINE_REPORT = createDeclarativeCodeSkill({
   handler: async function handler(input, ctx) {
       const tracking = ctx.store.load('applications/tracking', []);
 
-      const byStatus = {};
+      const byStatus: Record<string, number> = {};
       for (const t of tracking) {
       const s = t.status || 'unknown';
       byStatus[s] = (byStatus[s] || 0) + 1;
       }
 
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const staleFollowUps = tracking.filter((t) => {
+      const staleFollowUps = tracking.filter((t: any) => {
         const applied = t.appliedAt ? new Date(t.appliedAt).getTime() : 0;
         return applied && applied < sevenDaysAgo && (t.status === 'submitted' || t.status === 'dry_run');
       });

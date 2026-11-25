@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -246,7 +245,7 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
       if (!rawContent) return [];
       const matches = rawContent.match(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g);
       if (!matches) return [];
-      const vars = matches.map((m) => m.replace(/[\{\}\s]/g, ''));
+      const vars = matches.map((m: string) => m.replace(/[\{\}\s]/g, ''));
       return Array.from(new Set(vars));
     })();
 
