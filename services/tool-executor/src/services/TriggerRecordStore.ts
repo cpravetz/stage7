@@ -19,7 +19,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { httpRequest } from '@stage7-nextgen/shared';
+import { httpRequest, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import type { PersistedTriggerRecord } from '../adk/triggers';
 
@@ -100,7 +100,7 @@ async function artifactsFetch(route: string, init?: { method?: string; body?: st
 
 async function artifactsRequest(route: string, init?: { method?: string; body?: string }): Promise<Response> {
   return await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
     timeoutMs: REMOTE_TIMEOUT_MS,
     ...init,
   });

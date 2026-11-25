@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { httpRequest } from '@stage7-nextgen/shared';
+import { httpRequest, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 
 export interface EntityMemoryInput {
   tenantId: string;
@@ -47,7 +47,7 @@ export class EntityMemoryStore {
     const response = await httpRequest(`${this.artifactsUrl}${path}`, {
       method: init?.method,
       body: init?.body,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       timeoutMs: 10_000,
     });
     if (!response.ok) {

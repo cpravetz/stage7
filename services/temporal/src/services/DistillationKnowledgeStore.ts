@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { HeuristicEntry, StoredKnowledgeEntry, logger } from '@stage7-nextgen/shared';
+import { HeuristicEntry, StoredKnowledgeEntry, logger, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 
 /**
  * Upper bound on `acquired` knowledge entries per assistant. Distillation
@@ -59,7 +59,11 @@ export class DistillationKnowledgeStore {
     const response = await fetch(`${this.artifactsUrl}${path}`, {
       ...init,
       signal: AbortSignal.timeout(10_000),
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(await getServiceAuthorizationHeaders()),
+        ...(init?.headers || {}),
+      },
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 300);

@@ -18,7 +18,7 @@ import { Router, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
-import { httpRequest } from '@stage7-nextgen/shared';
+import { httpRequest, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 
 const router: Router = Router();
@@ -105,7 +105,7 @@ async function artifactsFetch(route: string, init?: { method?: string; body?: st
   if (!ARTIFACTS_URL) return null;
   try {
     const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       timeoutMs: REMOTE_TIMEOUT_MS,
       ...init,
     });

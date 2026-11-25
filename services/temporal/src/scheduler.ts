@@ -1,5 +1,5 @@
 import { TemporalClient } from './client/TemporalClient'
-import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared'
+import { logger, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared'
 
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
 const POLL_MS = Number(process.env.WATCH_SCHEDULER_POLL_MS || '60000')
@@ -16,7 +16,7 @@ export function startWatchScheduler(client: TemporalClient): () => void {
     try {
       const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents/search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
         body: JSON.stringify({ collection: 'watches', limit: 1000 }),
         timeoutMs: interServiceTimeoutMs(),
       })

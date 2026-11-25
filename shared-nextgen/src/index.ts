@@ -11,4 +11,7 @@ export * from './utils/httpClient';
 export * from './utils/agentMessages';
 export * from './errors';
 export * from './middleware/asyncHandler';
+export * from './middleware/auth';
+export * from './utils/serviceAuth';
+export * from './utils/settings';
 export * from './utils/actionReceiptVerifier';

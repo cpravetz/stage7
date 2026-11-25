@@ -12,7 +12,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 
@@ -860,7 +860,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         return { freeModelsOnly: this.llmSettingsCache.freeModelsOnly };
       }
       const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
-      const res = await httpRequest(`${persistenceUrl}/api/artifacts/documents/llm-config`, { method: 'GET', timeoutMs: interServiceTimeoutMs() });
+      const res = await httpRequest(`${persistenceUrl}/api/artifacts/documents/llm-config`, {
+        method: 'GET',
+        headers: await getServiceAuthorizationHeaders(),
+        timeoutMs: interServiceTimeoutMs(),
+      });
       if (!res.ok) {
         // A missing or unreachable llm-config means the "free models only"
         // preference is unknown. Say so, instead of silently routing to paid

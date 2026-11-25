@@ -1,6 +1,6 @@
 import { WorkflowState, AssistantWorkspace, WorkspaceApprovalEntry, WorkspaceExecutionEntry, WorkspaceRevision, StateTransitionEvent, WorkflowStateContract, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
 import { AssistantWorkflow } from '../adk/workflow-common';
-import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 
 // Runtime persistence goes through the MongoDB-backed Artifacts service, not
@@ -19,7 +19,7 @@ async function artifactsFetch(path: string, init?: { method?: string; body?: str
   if (!ARTIFACTS_URL) return null;
   try {
     const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       timeoutMs: interServiceTimeoutMs(),
       ...init,
     });

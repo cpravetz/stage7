@@ -66,6 +66,19 @@ run `npx tsc` there after removing test files from include).
 - Per service: `GET http://localhost:<port>/api/<service>/health`
 - Frontend: `http://localhost:8080` (dashboard shows live service count from the registry)
 
+## Internal service authentication
+
+The artifacts documents router (`/api/artifacts/documents*`) requires a bearer
+token: `requireServiceAuth` (shared-nextgen) forwards it to the auth service's
+`GET /api/auth/verify` (60 s verification cache; missing/invalid token ⇒ 401).
+Internal callers — brain, temporal, and tool-executor documents wrappers —
+exchange `SERVICE_AUTH_ID`/`SERVICE_API_KEY` credentials at
+`POST /api/auth/service/auth` for a one-hour token, refreshed before expiry
+(`getServiceAuthorizationHeaders` in shared-nextgen). The compose
+`auth-bootstrap` step seeds the three service accounts on stack start;
+credentials are templated in `.env.example`. The gateway is unchanged:
+internal S2S calls dial services directly and never traverse it.
+
 ## Environment
 
 `.env.example` is the authoritative template; `env.summary` maps every variable to the
