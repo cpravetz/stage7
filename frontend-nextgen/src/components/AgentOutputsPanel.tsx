@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 import { canonicalAgentRoleKey, interactionQuestionText, missionAgentRoleLabel } from '../utils/missionEvents';
+import { fetchJSON } from '../utils/api';
 
 interface AgentInfo {
   id: string;
@@ -358,9 +359,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
-      if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
-      const data = await res.json();
+      const data = await fetchJSON<unknown>(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!mountedRef.current) return;
       const apiAgents = extractAgents(data).map((a) => ({
         id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,

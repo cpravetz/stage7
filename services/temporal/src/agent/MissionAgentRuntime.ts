@@ -2,6 +2,7 @@ import { logger } from '@stage7-nextgen/shared';
 import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
+  BRAIN_OPTIMIZE_FOR_CONTEXT_KEY,
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
   AgentDefinition,
   AgentState,
@@ -37,6 +38,25 @@ import {
   generateValidPlan,
   missionTaskDependencyIssues,
 } from '../planner/MissionPlanner';
+
+/** Complexity values a task may declare (shared TaskSchema.estimatedComplexity). */
+const COMPLEXITY_VALUES = ['low', 'medium', 'high'] as const;
+/** Model-selection criteria a task may declare (shared TaskSchema.selectionCriteria). */
+const CRITERIA_VALUES = ['cost', 'speed', 'accuracy', 'creativity'] as const;
+
+/**
+ * Resolves the Brain routing criterion for a task: an explicit
+ * `selectionCriteria` always wins; otherwise `estimatedComplexity` maps to a
+ * default (high → accuracy where measured success-rate weighting pays off,
+ * medium/low → cost). Tasks from plans persisted before these fields existed
+ * route as cost.
+ */
+export function resolveTaskOptimizeFor(task: Pick<Task, 'estimatedComplexity' | 'selectionCriteria'>): (typeof CRITERIA_VALUES)[number] {
+  if (task.selectionCriteria && (CRITERIA_VALUES as readonly string[]).includes(task.selectionCriteria)) {
+    return task.selectionCriteria;
+  }
+  return task.estimatedComplexity === 'high' ? 'accuracy' : 'cost';
+}
 
 /**
  * Stable agent identities used across all mission control activities.
@@ -1251,6 +1271,7 @@ export class MissionAgentRuntime {
       context: {
         ...(missionGoal ? { missionGoal, taskObjective: `${task.title}\n${task.description}` } : {}),
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
+        [BRAIN_OPTIMIZE_FOR_CONTEXT_KEY]: resolveTaskOptimizeFor(task),
         ...(continuation?.pendingInteraction.question
           ? {
               priorUserQuestion: continuation.pendingInteraction.question,

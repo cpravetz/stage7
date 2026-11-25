@@ -7,18 +7,9 @@ export class CircuitBreaker {
   private nextAttempt = 0;
 
   constructor(
-    private threshold: number = 5,
-    private cooldownMs: number = 30000,
+    private readonly threshold: number = 5,
+    private readonly cooldownMs: number = 30000,
   ) {}
-
-  /**
-   * Applies new threshold/cooldown settings while preserving the failure
-   * history, so operator changes take effect without resetting the breaker.
-   */
-  configure(threshold: number, cooldownMs: number): void {
-    this.threshold = threshold;
-    this.cooldownMs = cooldownMs;
-  }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === 'open') {

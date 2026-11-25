@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { withAuthHeaders } from '../utils/api';
 
 export interface EntityTool {
   name: string;
@@ -67,7 +68,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   fetchEntities: async () => {
     set({ loading: true, error: null });
     try {
-      const assistantsRes = await fetch('/api/workers/assistants').then((r) => r.json());
+      const assistantsRes = await fetch('/api/workers/assistants', withAuthHeaders()).then((r) => r.json());
       const assistants = (assistantsRes.assistants || []).map((a: Record<string, unknown>) => ({
         ...a,
         type: 'assistant' as const,
@@ -83,7 +84,7 @@ export const useEntityStore = create<EntityState>((set) => ({
   fetchEntity: async (id: string) => {
     set({ loading: true, error: null });
     try {
-      const res = await fetch(`/api/workers/assistants/${id}`);
+      const res = await fetch(`/api/workers/assistants/${id}`, withAuthHeaders());
       if (res.ok) {
         const data = await res.json();
         const assistant = data.assistant || data;

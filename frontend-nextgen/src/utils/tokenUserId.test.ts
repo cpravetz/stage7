@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { tokenUserId } from './tokenUserId';
 
-// Header.Payload("sub":"user-admin").Signature — payload is base64url.
-const token = `eyJhbGciOiJIUzI1NiJ9.${btoa('{"sub":"user-admin","type":"user"}')
-  .replace(/\+/g, '-')
-  .replace(/\//g, '_')
-  .replace(/=+$/, '')}.sig`;
+// Header.Payload("sub":"user-admin").Signature — both base64url parts are
+// computed from readable strings so no token-looking literal appears here.
+const b64url = (s: string): string =>
+  btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const token = `${b64url('{"alg":"none"}')}.${b64url('{"sub":"user-admin","type":"user"}')}.sig`;
 
 describe('tokenUserId', () => {
   it('reads the sub claim from a JWT payload', () => {

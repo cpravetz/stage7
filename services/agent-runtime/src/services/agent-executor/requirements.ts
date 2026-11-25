@@ -1,4 +1,4 @@
-import { BRAIN_ROUTING_SESSION_CONTEXT_KEY, receiptMatchesRequiredAction } from '@stage7-nextgen/shared'
+import { BRAIN_OPTIMIZE_FOR_CONTEXT_KEY, BRAIN_ROUTING_SESSION_CONTEXT_KEY, receiptMatchesRequiredAction } from '@stage7-nextgen/shared'
 import { CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION } from './constants'
 import type { AgentActionOutcome, AgentActionReceipt, RequiredAction } from './types'
 import { asRecord } from './util'
@@ -31,6 +31,8 @@ export interface TaskSpec {
   requiresExternalAction: boolean
   agentLearnings: AgentLearning[]
   routingSessionId?: string
+  /** Per-task Brain routing criterion lifted from `BRAIN_OPTIMIZE_FOR_CONTEXT_KEY`. */
+  optimizeFor?: string
 }
 
 export function parseExpectedArtifacts(value: unknown): string[] {
@@ -123,6 +125,8 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
     ...(requiresExternalAction ? { requiresExternalAction: true } : {}),
   }
   const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
+  const optimizeFor = taskContext[BRAIN_OPTIMIZE_FOR_CONTEXT_KEY]
+  const optimizeForValues = ['cost', 'speed', 'accuracy', 'creativity']
   return {
     prompt,
     missionGoal: typeof taskContext.missionGoal === 'string' && taskContext.missionGoal.trim()
@@ -136,6 +140,9 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
     agentLearnings: parseAgentLearnings(rawAgentLearnings),
     routingSessionId: typeof routingSessionId === 'string' && routingSessionId.trim()
       ? routingSessionId.trim()
+      : undefined,
+    optimizeFor: typeof optimizeFor === 'string' && (optimizeForValues as readonly string[]).includes(optimizeFor)
+      ? optimizeFor
       : undefined,
   }
 }

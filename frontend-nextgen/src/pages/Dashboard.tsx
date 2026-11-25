@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useFeedStore } from '../stores/feedStore';
 import { useMissionsStore } from '../stores/missionsStore';
+import { fetchJSON, withAuthHeaders } from '../utils/api';
 
 interface ServiceInfo {
   id: string;
@@ -39,14 +40,14 @@ const Dashboard = () => {
 
   const loadServices = useCallback(async () => {
     try {
-      const data = await fetch(`/api/gateway/services`).then((r) => r.json());
+      const data = await fetchJSON<{ services?: ServiceInfo[] }>(`/api/gateway/services`);
       const list = (data.services || []) as ServiceInfo[];
       const withHealth = await Promise.all(
         list.map(async (svc) => {
           try {
-            const res = await fetch(`/api/gateway/services/${svc.id}/health`, {
+            const res = await fetch(`/api/gateway/services/${svc.id}/health`, withAuthHeaders({
               method: 'GET',
-            });
+            }));
             if (res.ok) {
               const health = await res.json();
               return {

@@ -940,3 +940,45 @@ describe('LocusFailureTracker', () => {
     expect(tracker.stuck()).toHaveLength(2);
   });
 });
+describe('planner routing fields (estimatedComplexity/selectionCriteria)', () => {
+  it('lists both routing fields in the planner prompt rule 5 and JSON example', () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain('estimatedComplexity');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('selectionCriteria');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('"estimatedComplexity":"medium"');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('"selectionCriteria":"cost"');
+  });
+
+  it('defaults missing routing fields deterministically', () => {
+    const plan = validPlan() as any;
+    delete plan.phases[0].tasks[0].estimatedComplexity;
+    delete plan.phases[0].tasks[0].selectionCriteria;
+    const fixed = applyDeterministicFixes(plan, 'Produce deliverable 1');
+    const task = fixed.phases[0].tasks[0];
+    expect(task.estimatedComplexity).toBe('medium');
+    expect(task.selectionCriteria).toBe('cost');
+    expect(validate(fixed, 'Produce deliverable 1')).toEqual([]);
+  });
+
+  it('normalizes invalid enum values so typos never reach Brain remediation', () => {
+    const plan = validPlan() as any;
+    plan.phases[0].tasks[0].estimatedComplexity = 'huge';
+    plan.phases[0].tasks[0].selectionCriteria = 'cheap';
+    const fixed = applyDeterministicFixes(plan, 'Produce deliverable 1');
+    const task = fixed.phases[0].tasks[0];
+    expect(task.estimatedComplexity).toBe('medium');
+    expect(task.selectionCriteria).toBe('cost');
+    // Normalization runs before validation, so a plan that is otherwise valid
+    // produces zero issues — no Brain remediation round trip is warranted.
+    expect(validate(fixed, 'Produce deliverable 1')).toEqual([]);
+  });
+
+  it('keeps valid explicit routing fields untouched', () => {
+    const plan = validPlan() as any;
+    plan.phases[0].tasks[0].estimatedComplexity = 'high';
+    plan.phases[0].tasks[0].selectionCriteria = 'accuracy';
+    const fixed = applyDeterministicFixes(plan, 'Produce deliverable 1');
+    const task = fixed.phases[0].tasks[0];
+    expect(task.estimatedComplexity).toBe('high');
+    expect(task.selectionCriteria).toBe('accuracy');
+  });
+});

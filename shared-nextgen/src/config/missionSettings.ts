@@ -1,8 +1,7 @@
 /**
  * Runtime settings for mission approval waits, stored as the
  * `mission/settings/approval-config` document in the artifacts service and
- * resolved with the environment as fallback — the same pattern as the Tier-1
- * Brain knobs (`brainSettings.ts`).
+ * resolved with the environment as fallback.
  *
  * Recognized document fields (camelCase, all optional):
  * - approvalTimeoutMs: how long a mission phase waits for human approval
