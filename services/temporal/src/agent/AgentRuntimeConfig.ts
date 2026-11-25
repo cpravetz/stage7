@@ -164,6 +164,8 @@ export function extractMissionAgents(value: unknown): AgentDefinition[] {
 }
 
 export class MissionAgentRuntimeApiError extends Error {
+  readonly failureCode?: string;
+
   constructor(
     readonly path: string,
     readonly status: number,
@@ -171,5 +173,16 @@ export class MissionAgentRuntimeApiError extends Error {
   ) {
     super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
     this.name = 'MissionAgentRuntimeApiError';
+    // The agent-runtime error envelope carries an optional machine-readable
+    // failure code (e.g. TRANSIENT_SERVICE_ERROR) used for retry decisions.
+    try {
+      const body: unknown = JSON.parse(details);
+      if (body && typeof body === 'object' && 'failureCode' in body
+        && typeof body.failureCode === 'string' && /^[A-Z_]+$/.test(body.failureCode)) {
+        this.failureCode = body.failureCode;
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
   }
 }

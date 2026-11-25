@@ -86,4 +86,98 @@ export class AgentApi {
       logger.warn({ missionId: this.missionId, error: error instanceof Error ? error.message : String(error) }, 'Failed to stop agents');
     }
   }
+
+  /**
+   * Subscribe to an Agent task's event stream until it completes or fails.
+   * Uses a raw `fetch` (not `httpRequest`) on purpose: an SSE response has no
+   * "headers received" deadline — the connection must stay open for as long
+   * as the task runs, bounded instead by `maxWaitMs`.
+   */
+  async awaitTaskUpdate(agentId: string, taskId: string, maxWaitMs: number): Promise<AgentTask> {
+    const path = this.missionAgentPath(agentId, 'tasks', taskId);
+    const deadline = Date.now() + maxWaitMs;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), maxWaitMs);
+    try {
+      while (Date.now() < deadline) {
+        let taskUpdate: AgentTask | undefined;
+        try {
+          const response = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime${path}/events`, {
+            headers: { Accept: 'text/event-stream' },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const details = await response.text();
+            if (response.status < 500) throw new MissionAgentRuntimeApiError(path, response.status, details);
+            logger.warn(
+              { missionId: this.missionId, agentId, taskId, status: response.status },
+              'Agent task event stream returned a transient error; reconnecting',
+            );
+          } else {
+            taskUpdate = await readTaskEventStream(response);
+          }
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if (error instanceof MissionAgentRuntimeApiError) throw error;
+          logger.warn(
+            { missionId: this.missionId, agentId, taskId, error: error instanceof Error ? error.message : String(error) },
+            'Agent task event stream disconnected; reconnecting',
+          );
+        }
+        if (taskUpdate?.status === 'completed') return taskUpdate;
+        if (taskUpdate?.status === 'failed') throw new Error(taskUpdate.error || `Agent task ${taskId} failed`);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, Math.max(0, deadline - Date.now()))));
+      }
+      throw new Error(`Task ${taskId} timed out after ${maxWaitMs}ms while waiting for an Agent Runtime notification`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+/** Read an agent-runtime SSE task stream until a terminal task update arrives. */
+async function readTaskEventStream(response: Response): Promise<AgentTask | undefined> {
+  if (!response.body) throw new Error('Agent task event stream returned no response body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let dataLines: string[] = [];
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return undefined;
+      buffer += decoder.decode(value, { stream: true });
+
+      let lineEnd = buffer.indexOf('\n');
+      while (lineEnd !== -1) {
+        const line = buffer.slice(0, lineEnd).replace(/\r$/, '');
+        buffer = buffer.slice(lineEnd + 1);
+        if (line === '') {
+          if (dataLines.length > 0) {
+            const parsed: unknown = JSON.parse(dataLines.join('\n'));
+            if (
+              !parsed
+              || typeof parsed !== 'object'
+              || typeof (parsed as Record<string, unknown>).taskId !== 'string'
+              || typeof (parsed as Record<string, unknown>).status !== 'string'
+            ) {
+              throw new Error('Agent task event stream returned an invalid task update');
+            }
+            const task = parsed as AgentTask;
+            if (task.status === 'completed' || task.status === 'failed') {
+              await reader.cancel();
+              return task;
+            }
+            dataLines = [];
+          }
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice('data:'.length).replace(/^ /, ''));
+        }
+        lineEnd = buffer.indexOf('\n');
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }

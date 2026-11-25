@@ -15,17 +15,17 @@ import {
   sanitizeAgentMessage,
   sanitizeAgentMessageList,
   isAgentConversationPayload,
-  describeRequestError,
-  httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
-import { extractArtifacts, invalidExpectedArtifacts } from './TaskResultParser';
+import { AgentApi } from './AgentApi';
+import { BrainComplaintReporter } from './BrainComplaint';
+import { invalidExpectedArtifacts, parseAgentTaskResult, parseActionReceiptsLenient, parseArtifactsLenient, warnExpectedArtifacts, withActionReceiptArtifactLenient } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
-import { agentRuntimeTimeoutMs, missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
+import { missionAgentRoleKey, missionAgentRoleLabel, MissionAgentRuntimeApiError } from './AgentRuntimeConfig';
 import { buildTaskPrompt } from './TaskPromptBuilder';
 import { missionExecutionEvidenceGaps } from '../types/workflow';
 import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
@@ -99,14 +99,7 @@ const MAX_SAFE_AGENT_TASK_RETRIES = 1;
 const MAX_TASK_SELECTION_ATTEMPTS = 3;
 const MAX_PHASE_REVIEW_ATTEMPTS = 3;
 const MAX_COMPLETION_REVIEW_ATTEMPTS = 3;
-const MAX_ACTION_RECEIPTS = 50;
 const MAX_AGENT_TASK_WAIT_MS = 2 * 60 * 60 * 1_000;
-const INTERNAL_ACTION_RECEIPT_ARTIFACT = 'system-action-receipts.json';
-
-function isExecutionOutcomeReport(content: string): boolean {
-  return /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(content)
-    || /^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(content);
-}
 
 function extractMissionAgents(value: unknown): AgentDefinition[] {
   const entries = Array.isArray(value)
@@ -253,14 +246,6 @@ export function applyPhaseReview(
   return { plan: amendedPlan, phase: amendedPhase, satisfied: false, gaps: review.gaps, amendment };
 }
 
-function getAgentRuntimeUrl(): string {
-  return process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:3400';
-}
-
-function encodePathSegment(value: string): string {
-  return encodeURIComponent(value).replace(/%3A/gi, ':');
-}
-
 export interface MissionAgentConfig {
   missionId: string;
   tenantId: string;
@@ -358,28 +343,11 @@ export interface PromptTaskRequest {
   retryGuidance?: string;
 }
 
-class MissionAgentRuntimeApiError extends Error {
-  readonly failureCode?: string;
-
-  constructor(readonly path: string, readonly status: number, details: string) {
-    super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
-    this.name = 'MissionAgentRuntimeApiError';
-    try {
-      const body: unknown = JSON.parse(details);
-      if (body && typeof body === 'object' && 'failureCode' in body
-        && typeof body.failureCode === 'string' && /^[A-Z_]+$/.test(body.failureCode)) {
-        this.failureCode = body.failureCode;
-      }
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
-    }
-  }
-}
-
 export class MissionAgentRuntime {
   private missionId: string;
   private tenantId: string;
-  private agentRuntimeUrl: string;
+  private readonly agentApi: AgentApi;
+  private readonly brainComplaints: BrainComplaintReporter;
   private broadcast: MissionAgentConfig['broadcast'];
   private agentToolPolicies: Map<string, MissionAgentToolGrant>;
   private missionRetryCount: number;
@@ -431,7 +399,8 @@ export class MissionAgentRuntime {
   constructor(config: MissionAgentConfig) {
     this.missionId = config.missionId;
     this.tenantId = config.tenantId;
-    this.agentRuntimeUrl = config.agentRuntimeUrl || getAgentRuntimeUrl();
+    this.agentApi = new AgentApi({ missionId: config.missionId, agentRuntimeUrl: config.agentRuntimeUrl });
+    this.brainComplaints = new BrainComplaintReporter({ missionId: config.missionId });
     this.broadcast = config.broadcast || (async () => {});
     this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
     this.entityId = typeof config.metadata?.entityId === 'string' ? config.metadata.entityId : undefined;
@@ -447,73 +416,8 @@ export class MissionAgentRuntime {
     this.brainClient = new BrainClient(this.createBrainAdapter());
   }
 
-  private async api<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.agentRuntimeUrl}/api/agent-runtime${path}`;
-    let res: Response;
-    try {
-      // `fetch` aborts a request that has not received response headers
-      // within 300 seconds, which kills long running agent tasks and
-      // reports them as an opaque "fetch failed".
-      res = await httpRequest(url, {
-        method: options.method,
-        headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
-        body: options.body as string | undefined,
-        timeoutMs: agentRuntimeTimeoutMs(),
-      });
-    } catch (err) {
-      const message = describeRequestError(err);
-      logger.error({ path, url, err: message }, 'Agent runtime fetch failed');
-      throw new MissionAgentRuntimeApiError(path, 500, message);
-    }
-    if (!res.ok) {
-      const text = await res.text();
-      throw new MissionAgentRuntimeApiError(path, res.status, text);
-    }
-    return res.json() as Promise<T>;
-  }
-
-  private missionAgentsPath(): string {
-    return `/missions/${encodePathSegment(this.missionId)}/agents`;
-  }
-
-  private missionAgentPath(agentId: string, ...segments: string[]): string {
-    return `${this.missionAgentsPath()}/${encodePathSegment(agentId)}${
-      segments.map((segment) => `/${encodePathSegment(segment)}`).join('')
-    }`;
-  }
-
   private async reportBrainComplaint(requestId: string | undefined, reason: string): Promise<void> {
-    if (!requestId) {
-      logger.warn(
-        { missionId: this.missionId, reason },
-        'Cannot report rejected Agent output to Brain without a request ID',
-      );
-      return;
-    }
-
-    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
-    try {
-      const response = await httpRequest(`${brainUrl}/api/brain/complaint`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, reason, missionId: this.missionId }),
-        timeoutMs: 5_000,
-      });
-      if (!response.ok) {
-        const details = await response.text();
-        logger.error(
-          { missionId: this.missionId, requestId, status: response.status, details: details.slice(0, 300) },
-          'Brain rejected a mission Agent output complaint',
-        );
-        return;
-      }
-      logger.info({ missionId: this.missionId, requestId, reason }, 'Mission Agent reported a Brain output complaint');
-    } catch (error) {
-      logger.error(
-        { missionId: this.missionId, requestId, error: error instanceof Error ? error.message : String(error) },
-        'Failed to report a mission Agent output complaint',
-      );
-    }
+    await this.brainComplaints.reportComplaint(requestId, reason);
   }
 
   /**
@@ -526,10 +430,10 @@ export class MissionAgentRuntime {
     if (this.agentCache.has('planner')) return this.agentCache.get('planner')!;
 
     try {
-      const existing = await this.api<AgentDefinition>(this.missionAgentPath(agentId));
+      const existing = await this.agentApi.api<AgentDefinition>(this.agentApi.missionAgentPath(agentId));
       if (existing.id) {
         this.assertToolAccess(existing, 'planner');
-        await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
+        await this.agentApi.api(this.agentApi.missionAgentPath(agentId, 'start'), { method: 'POST' });
         this.agentCache.set('planner', agentId);
         return agentId;
       }
@@ -554,8 +458,8 @@ export class MissionAgentRuntime {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await this.api(this.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
-    await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
+    await this.agentApi.api(this.agentApi.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
+    await this.agentApi.api(this.agentApi.missionAgentPath(agentId, 'start'), { method: 'POST' });
     this.agentCache.set('planner', agentId);
     return agentId;
   }
@@ -1183,12 +1087,12 @@ export class MissionAgentRuntime {
       : '';
     const agentId = `agent-${this.missionId}-${cacheKey}${retryScope}`;
     try {
-      const existing = await this.api<AgentDefinition>(
-        this.missionAgentPath(agentId)
+      const existing = await this.agentApi.api<AgentDefinition>(
+        this.agentApi.missionAgentPath(agentId)
       );
       if (existing.id) {
         this.assertToolAccess(existing, agentRole);
-        await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
+        await this.agentApi.api(this.agentApi.missionAgentPath(agentId, 'start'), { method: 'POST' });
         this.agentCache.set(cacheKey, agentId);
         return agentId;
       }
@@ -1199,7 +1103,7 @@ export class MissionAgentRuntime {
     }
 
     try {
-      const agents = extractMissionAgents(await this.api<unknown>(this.missionAgentsPath()));
+      const agents = extractMissionAgents(await this.agentApi.api<unknown>(this.agentApi.missionAgentsPath()));
       const existingAlias = agents.find((agent) => {
         const roleValues = [
           agent.metadata.agentRole,
@@ -1210,7 +1114,7 @@ export class MissionAgentRuntime {
       });
       if (existingAlias) {
         this.assertToolAccess(existingAlias, agentRole);
-        await this.api(this.missionAgentPath(existingAlias.id, 'start'), { method: 'POST' });
+        await this.agentApi.api(this.agentApi.missionAgentPath(existingAlias.id, 'start'), { method: 'POST' });
         this.agentCache.set(cacheKey, existingAlias.id);
         return existingAlias.id;
       }
@@ -1240,8 +1144,8 @@ export class MissionAgentRuntime {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.api(this.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
-    await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
+    await this.agentApi.api(this.agentApi.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
+    await this.agentApi.api(this.agentApi.missionAgentPath(agentId, 'start'), { method: 'POST' });
     this.agentCache.set(cacheKey, agentId);
     return agentId;
   }
@@ -1404,18 +1308,18 @@ export class MissionAgentRuntime {
       status: 'pending',
     };
 
-    const submitted = await this.api<AgentTask>(
-      this.missionAgentPath(agentId, 'tasks'),
+    const submitted = await this.agentApi.api<AgentTask>(
+      this.agentApi.missionAgentPath(agentId, 'tasks'),
       { method: 'POST', body: JSON.stringify(taskData) }
     );
     this.taskAgentMap.set(submitted.taskId, agentId);
 
-    const executePath = this.missionAgentPath(agentId, 'tasks', submitted.taskId, 'execute');
+    const executePath = this.agentApi.missionAgentPath(agentId, 'tasks', submitted.taskId, 'execute');
     let completed: AgentTask | undefined;
     let recoveredResult: TaskExecutionResult | undefined;
     for (let retry = 0; retry <= MAX_SAFE_AGENT_TASK_RETRIES; retry++) {
       try {
-        completed = await this.api<AgentTask>(executePath, {
+        completed = await this.agentApi.api<AgentTask>(executePath, {
           method: 'POST',
           body: JSON.stringify({
             requireCompletedReceipt: request.requireCompletedReceipt || false,
@@ -1472,10 +1376,10 @@ export class MissionAgentRuntime {
 
     const interruption = this.parseInterruption(output);
     if (interruption) {
-      const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
+      const actionReceipts = parseActionReceiptsLenient(result?.actionReceipts, submitted.taskId);
       return {
         output,
-        artifacts: this.withActionReceiptArtifact([], actionReceipts, submitted.taskId),
+        artifacts: withActionReceiptArtifactLenient([], actionReceipts, submitted.taskId),
         actionReceipts,
         interruption,
         tokensUsed: 0,
@@ -1487,8 +1391,8 @@ export class MissionAgentRuntime {
     }
 
     const expectedArtifacts = request.expectedArtifacts || [];
-    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
-    this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
+    const artifacts = parseArtifactsLenient(result?.artifacts, output, expectedArtifacts, submitted.taskId);
+    warnExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
     // Validate that produced artifacts carry substantive content, not just
     // headings/comments/placeholders. If validation fails, ask the Brain to
     // remediate and re-validate; the task only completes when every expected
@@ -1536,7 +1440,7 @@ export class MissionAgentRuntime {
         `Task "${submitted.taskId}" artifacts were not accepted: ${acceptance.rejected.join(', ')}. Reason: ${acceptance.reason || 'not specified'}.`,
       );
     }
-    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
+    const actionReceipts = parseActionReceiptsLenient(result?.actionReceipts, submitted.taskId);
     const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
     if (reasoning && this.broadcast) {
       await this.broadcast({
@@ -1555,7 +1459,7 @@ export class MissionAgentRuntime {
     return {
       output,
       ...(result?.incompleteReason ? { incompleteReason: result.incompleteReason } : {}),
-      artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, submitted.taskId),
+      artifacts: withActionReceiptArtifactLenient(artifacts, actionReceipts, submitted.taskId),
       actionReceipts,
       tokensUsed,
       model,
@@ -1673,8 +1577,8 @@ export class MissionAgentRuntime {
         logger.warn({ taskId }, 'No agent found for task, cannot mark completed');
         return;
       }
-      await this.api(
-        this.missionAgentPath(agentId, 'tasks', taskId, 'complete'),
+      await this.agentApi.api(
+        this.agentApi.missionAgentPath(agentId, 'tasks', taskId, 'complete'),
         { method: 'POST', body: JSON.stringify({ result }) }
       );
     } catch (err) {
@@ -1689,8 +1593,8 @@ export class MissionAgentRuntime {
         logger.warn({ taskId }, 'No agent found for task, cannot mark failed');
         return;
       }
-      await this.api(
-        this.missionAgentPath(agentId, 'tasks', taskId, 'fail'),
+      await this.agentApi.api(
+        this.agentApi.missionAgentPath(agentId, 'tasks', taskId, 'fail'),
         { method: 'POST', body: JSON.stringify({ error }) }
       );
     } catch (err) {
@@ -1703,311 +1607,28 @@ export class MissionAgentRuntime {
     taskId: string,
     maxWaitMs = MAX_AGENT_TASK_WAIT_MS,
   ): Promise<TaskExecutionResult> {
-    const path = `${this.missionAgentPath(agentId, 'tasks', taskId)}/events`;
-    const deadline = Date.now() + maxWaitMs;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), maxWaitMs);
-    try {
-      while (Date.now() < deadline) {
-        let taskUpdate: AgentTask | undefined;
-        try {
-          const response = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime${path}`, {
-            headers: { Accept: 'text/event-stream' },
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            const details = await response.text();
-            if (response.status < 500) throw new MissionAgentRuntimeApiError(path, response.status, details);
-            logger.warn(
-              { missionId: this.missionId, agentId, taskId, status: response.status },
-              'Agent task event stream returned a transient error; reconnecting',
-            );
-          } else {
-            taskUpdate = await this.readTaskEventStream(response);
-          }
-        } catch (error) {
-          if (controller.signal.aborted) break;
-          if (error instanceof MissionAgentRuntimeApiError) throw error;
-          logger.warn(
-            { missionId: this.missionId, agentId, taskId, error: error instanceof Error ? error.message : String(error) },
-            'Agent task event stream disconnected; reconnecting',
-          );
-        }
-        if (taskUpdate?.status === 'completed') return this.parseTaskResult(taskUpdate);
-        if (taskUpdate?.status === 'failed') throw new Error(taskUpdate.error || `Agent task ${taskId} failed`);
-        await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, Math.max(0, deadline - Date.now()))));
-      }
-      throw new Error(`Task ${taskId} timed out after ${maxWaitMs}ms while waiting for an Agent Runtime notification`);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  private async readTaskEventStream(response: Response): Promise<AgentTask | undefined> {
-    if (!response.body) throw new Error('Agent task event stream returned no response body');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let dataLines: string[] = [];
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) return undefined;
-        buffer += decoder.decode(value, { stream: true });
-
-        let lineEnd = buffer.indexOf('\n');
-        while (lineEnd !== -1) {
-          const line = buffer.slice(0, lineEnd).replace(/\r$/, '');
-          buffer = buffer.slice(lineEnd + 1);
-          if (line === '') {
-            if (dataLines.length > 0) {
-              const parsed: unknown = JSON.parse(dataLines.join('\n'));
-              if (
-                !parsed
-                || typeof parsed !== 'object'
-                || typeof (parsed as Record<string, unknown>).taskId !== 'string'
-                || typeof (parsed as Record<string, unknown>).status !== 'string'
-              ) {
-                throw new Error('Agent task event stream returned an invalid task update');
-              }
-              const task = parsed as AgentTask;
-              if (task.status === 'completed' || task.status === 'failed') {
-                await reader.cancel();
-                return task;
-              }
-              dataLines = [];
-            }
-          } else if (line.startsWith('data:')) {
-            dataLines.push(line.slice('data:'.length).replace(/^ /, ''));
-          }
-          lineEnd = buffer.indexOf('\n');
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+    const taskUpdate = await this.agentApi.awaitTaskUpdate(agentId, taskId, maxWaitMs);
+    return this.parseTaskResult(taskUpdate);
   }
 
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
-    const result = task.result as { output?: unknown; incompleteReason?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown; reasoning?: unknown } | null;
-    const output = String(result?.output || JSON.stringify(result || {}));
-    const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
-      ? task.input as Record<string, unknown>
-      : {};
-    const context = input.context && typeof input.context === 'object' && !Array.isArray(input.context)
-      ? input.context as Record<string, unknown>
-      : {};
-    const expectedArtifacts = this.parseExpectedArtifacts(context.expectedArtifacts, task.taskId);
-    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, task.taskId);
-    this.assertExpectedArtifacts(artifacts, expectedArtifacts, task.taskId);
-    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, task.taskId);
-    const tokensUsed = result?.tokensUsed || 0;
-    const model = result?.model;
-    const provider = result?.provider;
-    const requestId = result?.requestId;
-    const reasoning = typeof result?.reasoning === 'string' && result.reasoning.trim().length > 0
-      ? result.reasoning
-      : undefined;
-    if (reasoning && this.broadcast) {
-      const agentId = this.taskAgentMap.get(task.taskId);
-      const phaseId = typeof context.phaseId === 'string' ? context.phaseId : undefined;
-      if (agentId) {
-        this.broadcast({
-          type: 'monologue',
-          missionId: this.missionId,
-          timestamp: Date.now(),
-          data: {
-            agentId,
-            taskId: task.taskId,
-            phaseId,
-            thought: reasoning,
-            text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
-          },
-        }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), taskId: task.taskId }, 'Failed to broadcast monologue for recovered task result'));
-      }
-    }
-    return {
-      output,
-      ...(typeof result?.incompleteReason === 'string' ? { incompleteReason: result.incompleteReason } : {}),
-      artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, task.taskId),
-      actionReceipts,
-      tokensUsed: Number(tokensUsed) || 0,
-      model: model == null ? undefined : String(model),
-      provider: provider == null ? undefined : String(provider),
-      requestId: requestId == null ? undefined : String(requestId),
-      reasoning,
-    };
-  }
-
-  private parseExpectedArtifacts(value: unknown, taskId: string): string[] {
-    if (value === undefined) return [];
-    if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.trim())) {
-      throw new Error(`Agent task ${taskId} returned invalid expected deliverable names`);
-    }
-    return value.filter((name) => name.toLocaleLowerCase() !== INTERNAL_ACTION_RECEIPT_ARTIFACT);
-  }
-
-  private parseArtifacts(
-    value: unknown,
-    output: string,
-    expected: string[],
-    taskId: string,
-  ): MissionArtifact[] {
-    if (value === undefined || (Array.isArray(value) && value.length === 0)) {
-      return extractArtifacts(output, expected);
-    }
-    if (!Array.isArray(value)) {
-      logger.warn({ taskId }, 'Ignoring malformed Agent artifact metadata and preserving textual task output');
-      return extractArtifacts(output, expected);
-    }
-    return value.flatMap((candidate) => {
-      if (
-        !candidate
-        || typeof candidate !== 'object'
-        || Array.isArray(candidate)
-      ) {
-        logger.warn({ taskId }, 'Ignoring an invalid Agent artifact entry');
-        return [];
-      }
-      const parsed = MissionArtifactSchema.safeParse(candidate);
-      if (!parsed.success) {
-        logger.warn({ taskId, issues: parsed.error.issues }, 'Ignoring an invalid Agent artifact entry');
-        return [];
-      }
-      return [parsed.data];
+    return parseAgentTaskResult(task, {
+      missionId: this.missionId,
+      broadcast: this.broadcast,
+      agentIdForTask: (taskId) => this.taskAgentMap.get(taskId),
     });
-  }
-
-  private assertExpectedArtifacts(
-    artifacts: MissionArtifact[],
-    expected: string[],
-    taskId: string,
-  ): void {
-    const normalize = (value: string) => value.trim().toLocaleLowerCase();
-    const missing = expected.filter((name) => {
-      const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
-      if (!artifact || artifact.purpose === 'execution-outcome' || artifact.status === 'blocked') return true;
-      if (typeof artifact.content === 'string') {
-        return !artifact.content.trim() || isExecutionOutcomeReport(artifact.content);
-      }
-      return artifact.url === undefined && artifact.data === undefined;
-    });
-    if (missing.length > 0) {
-      logger.warn(
-        { taskId, missingArtifacts: missing },
-        'Task completed without all planned deliverable artifacts; preserving its output for phase review and recovery',
-      );
-    }
-  }
-
-  private parseActionReceipts(
-    value: unknown,
-    taskId: string,
-  ): NonNullable<TaskExecutionResult['actionReceipts']> {
-    if (value === undefined) return [];
-    if (!Array.isArray(value)) {
-      logger.warn({ taskId }, 'Ignoring malformed action-receipt metadata; task output remains available for review');
-      return [];
-    }
-    if (value.length > MAX_ACTION_RECEIPTS) {
-      logger.warn({ taskId, receiptCount: value.length }, 'Truncating oversized action-receipt metadata');
-    }
-    return value.slice(0, MAX_ACTION_RECEIPTS).flatMap((candidate) => {
-      if (
-        !candidate
-        || typeof candidate !== 'object'
-        || Array.isArray(candidate)
-      ) {
-        logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
-        return [];
-      }
-      const c = candidate as Record<string, unknown>;
-      if (
-        typeof c.toolId !== 'string'
-        || !c.toolId.trim()
-        || typeof c.isError !== 'boolean'
-        || typeof c.content !== 'string'
-        || (c.actionKey !== undefined && (typeof c.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(c.actionKey)))
-        || (c.fallbackForToolId !== undefined && (typeof c.fallbackForToolId !== 'string' || !c.fallbackForToolId.trim()))
-        || (c.resolvedToolId !== undefined && (typeof c.resolvedToolId !== 'string' || !c.resolvedToolId.trim()))
-        || (c.executionId !== undefined && (typeof c.executionId !== 'string' || !c.executionId.trim()))
-        || (c.operation !== undefined && (typeof c.operation !== 'string' || !c.operation.trim()))
-        || (c.providerRequestId !== undefined && (typeof c.providerRequestId !== 'string' || !c.providerRequestId.trim()))
-        || (c.outcomeKnown !== undefined && typeof c.outcomeKnown !== 'boolean')
-        || (c.binding !== undefined && (typeof c.binding !== 'object' || !c.binding || Array.isArray(c.binding)))
-        || (c.reconciliation !== undefined && (typeof c.reconciliation !== 'object' || !c.reconciliation || Array.isArray(c.reconciliation)))
-        || (c.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(c.outcome)))
-      ) {
-        logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
-        return [];
-      }
-      const content = c.content.slice(0, 4_096);
-      const outcome = (c.outcome as NonNullable<TaskExecutionResult['actionReceipts']>[number]['outcome'] | undefined)
-        || (c.isError ? 'failure' : 'success');
-      return [{
-        toolId: c.toolId,
-        isError: c.isError,
-        content,
-        outcome,
-        ...(typeof c.actionKey === 'string' ? { actionKey: c.actionKey } : {}),
-        ...(typeof c.executionId === 'string' ? { executionId: c.executionId } : {}),
-        ...(typeof c.operation === 'string' ? { operation: c.operation } : {}),
-        ...(typeof c.providerRequestId === 'string' ? { providerRequestId: c.providerRequestId } : {}),
-        ...(typeof c.outcomeKnown === 'boolean' ? { outcomeKnown: c.outcomeKnown } : {}),
-        ...(c.binding && typeof c.binding === 'object' && !Array.isArray(c.binding) ? { binding: c.binding as Record<string, unknown> } : {}),
-        ...(c.reconciliation && typeof c.reconciliation === 'object' && !Array.isArray(c.reconciliation) ? { reconciliation: c.reconciliation as Record<string, unknown> } : {}),
-        ...(typeof c.fallbackForToolId === 'string' ? { fallbackForToolId: c.fallbackForToolId } : {}),
-        ...(typeof c.resolvedToolId === 'string' ? { resolvedToolId: c.resolvedToolId } : {}),
-      }];
-    });
-  }
-
-  private withActionReceiptArtifact(
-    artifacts: MissionArtifact[],
-    actionReceipts: NonNullable<TaskExecutionResult['actionReceipts']>,
-    taskId: string,
-  ): MissionArtifact[] {
-    if (actionReceipts.length === 0) return artifacts;
-    const name = 'system-action-receipts.json';
-    const deliverables = artifacts.filter((artifact) => artifact.name.toLocaleLowerCase() !== name);
-    if (deliverables.length !== artifacts.length) {
-      logger.warn({ taskId }, 'Discarded an Agent artifact that collided with the reserved action-receipt name');
-    }
-    return [
-      ...deliverables,
-      { id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
-    ];
-  }
-
-  private inferType(content: string): string {
-    if (/^\s*\{[\s\S]*\}/m.test(content) && /```json/.test(content)) return 'config';
-    if (/^#\s+/m.test(content)) return 'document';
-    if (/^\s*[-*]\s+/m.test(content)) return 'list';
-    if (/\|.*\|/.test(content)) return 'table';
-    return 'document';
   }
 
   async listAgents(): Promise<AgentDefinition[]> {
-    return this.api<{ agents: AgentDefinition[] }>(`/missions/${this.missionId}/agents`).then((r) => r.agents);
+    return this.agentApi.listAgents();
   }
 
   async getAgentState(agentId: string): Promise<AgentState | undefined> {
-    try {
-      return await this.api<AgentState>(this.missionAgentPath(agentId, 'state'));
-    } catch (error) {
-      if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return undefined;
-      throw error;
-    }
+    return this.agentApi.getAgentState(agentId);
   }
 
   async stopAgent(agentId: string): Promise<void> {
-    try {
-      await this.api(this.missionAgentPath(agentId, 'stop'), { method: 'POST' });
-    } catch (error) {
-      if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return;
-      throw error;
-    }
+    return this.agentApi.stopAgent(agentId);
   }
 
 
@@ -2046,18 +1667,6 @@ export class MissionAgentRuntime {
   }
 
   async stopAllAgents(): Promise<void> {
-    try {
-      await this.api(`/missions/${this.missionId}/agents/stop-all`, { method: 'POST' });
-      return;
-    } catch (error) {
-      // Fallback to stopping individually
-    }
-    try {
-      const agents = await this.listAgents();
-      await Promise.allSettled(agents.map((a) => this.stopAgent(a.id)));
-    } catch (error) {
-      // Best effort - don't fail mission completion if stopping agents fails
-      logger.warn({ missionId: this.missionId, error: error instanceof Error ? error.message : String(error) }, 'Failed to stop agents');
-    }
+    return this.agentApi.stopAllAgents();
   }
 }
