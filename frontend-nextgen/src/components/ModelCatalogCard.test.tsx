@@ -91,4 +91,14 @@ describe('ModelCatalogCard', () => {
     });
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
+
+  it('does not describe the catalog as the routing allow-list (regression tripwire)', async () => {
+    mockedFetchJSON.mockResolvedValue({ models: [] });
+    const { container } = render(<ModelCatalogCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No models are registered yet. Register one below, or check that Brain providers are configured.')).toBeInTheDocument();
+    });
+    expect(container.textContent).not.toContain('allow-list');
+  });
 });

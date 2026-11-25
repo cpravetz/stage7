@@ -1,9 +1,10 @@
-import { httpRequest, latestResolvedBrainSettings, resolveBrainSettings } from '@stage7-nextgen/shared';
+import { httpRequest } from '@stage7-nextgen/shared';
 
-/** Reads the provider fetch timeout from the last resolved settings (doc-first), falling back to the environment. */
+const DEFAULT_PROVIDER_TIMEOUT_MS = 300000;
+
 export function providerTimeoutMs(): number {
-  return latestResolvedBrainSettings()?.providerTimeoutMs
-    ?? resolveBrainSettings(undefined, process.env).providerTimeoutMs;
+  const configured = Number(process.env.BRAIN_PROVIDER_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROVIDER_TIMEOUT_MS;
 }
 
 function toHeaderRecord(headers: HeadersInit | undefined): Record<string, string> | undefined {

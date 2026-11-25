@@ -124,7 +124,11 @@ const ModelCatalogCard = () => {
     <div className="card">
       <h3>Model Catalog</h3>
       <p style={{ color: '#94a3b8', fontSize: 13 }}>
-        Registered models are the routing allow-list: only models here can be selected for completions.
+        The table below is a live view of the Brain's in-memory routing catalog. Every configured
+        provider's models are registered automatically when the Brain starts; an entry added here
+        registers one additional model definition. This list does not restrict what the Brain can
+        select: eligibility is decided per call by the Brain's routing rules (context-window fit,
+        budget, free-models-only preference, formats, capabilities, and cooldowns), not by this list.
         Registrations live in memory and are re-derived from provider catalogs when the Brain restarts.
       </p>
 

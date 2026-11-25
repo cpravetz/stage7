@@ -2,7 +2,7 @@ import express from 'express';
 import missionRoutes, { missionClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
 import { startMissionScheduler } from './schedules/missionScheduler';
-import { brainSettings, healthRouter, logger } from '@stage7-nextgen/shared';
+import { healthRouter, logger } from '@stage7-nextgen/shared';
 
 export { MissionClient } from './client/MissionClient';
 export { TemporalClient } from './client/TemporalClient';
@@ -21,8 +21,6 @@ app.use('/api/temporal', missionRoutes);
 const PORT = process.env.PORT || 4100;
 
 if (require.main === module) {
-  // Keep the Brain settings doc fresh so request deadlines read it without I/O.
-  brainSettings.startPolling();
   const server = app.listen(PORT, () => {
     console.log(`Temporal service listening on port ${PORT}`);
   });
