@@ -12,6 +12,7 @@ import { eventSkills } from '../src/assistants/event/index'
 import { pluginGenerator as routePluginGenerator, toolRegistry as routeToolRegistry } from '../src/utils/sharedInstance'
 import { mcpToolExecutive } from '../src/services/MCPToolExecutive'
 import type { SandboxExecutionDriver } from '../src/runners/SandboxExecutionDriver'
+import { requireIsolationRuntime } from './requireIsolationRuntime'
 
 const app: Application = express()
 app.use(express.json())
@@ -37,6 +38,9 @@ let repairedSourceCode = generatedSourceCode
 const generatedPluginSystemPrompts: string[] = []
 const originalFetch = global.fetch;
 beforeAll(() => {
+  // This suite exercises the real bwrap isolation path; fail fast with the
+  // missing dependency named instead of opaque result.success=false failures.
+  requireIsolationRuntime();
   global.fetch = jest.fn(async (url: any, init: any) => {
     const urlStr = String(url);
     if (urlStr.includes('/api/brain/complete')) {
@@ -44,7 +48,7 @@ beforeAll(() => {
       if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('You are a senior engineer generating production-ready plugins')) {
         generatedPluginSystemPrompts.push(body.systemPrompt);
       }
-      if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('You independently derive')) {
+      if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('Create small, deterministic input/output tests')) {
         return {
           ok: true,
           status: 200,
@@ -1111,7 +1115,7 @@ print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
 
       if (urlString.endsWith('/api/brain/complete')) {
         const promptBody = body;
-        if (promptBody?.systemPrompt && String(promptBody.systemPrompt).includes('You independently derive')) {
+        if (promptBody?.systemPrompt && String(promptBody.systemPrompt).includes('Create small, deterministic input/output tests')) {
           return mockResponse({
             requestId: 'brain_valid_test_contract',
             content: JSON.stringify({
@@ -1153,7 +1157,7 @@ print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
       const completionRequests = requests.filter(({ url }) => url.endsWith('/api/brain/complete'));
       expect(completionRequests).toHaveLength(3);
       expect(completionRequests[0]?.body?.systemPrompt)
-        .toContain('independently derive a deterministic acceptance contract');
+        .toContain('Create small, deterministic input/output tests');
       expect(completionRequests[2]?.body?.prompt)
         .toContain('could not be used as the plugin JSON object');
       expect(String(completionRequests[2]?.body?.prompt)).toMatch(/configSchema/i);
