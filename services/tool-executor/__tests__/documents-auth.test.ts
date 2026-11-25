@@ -30,6 +30,12 @@ const EVENT: SkillEvent = {
 };
 
 describe('EventLog documents calls carry service auth', () => {
+  // EventLog reads ARTIFACTS_URL lazily inside its fetch path, so setting it
+  // here is enough — the suite passes on a bare `npm test` too.
+  beforeAll(() => {
+    process.env.ARTIFACTS_URL = 'http://artifacts:4200';
+  });
+
   afterEach(() => {
     jest.restoreAllMocks();
   });
