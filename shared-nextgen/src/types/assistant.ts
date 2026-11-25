@@ -98,6 +98,12 @@ export interface StoredKnowledgeEntry extends AssistantKnowledgeEntry {
   assistantId: string | null;
   scope: AssistantKnowledgeScope;
   origin: AssistantKnowledgeOrigin;
+  /**
+   * Distillation's confidence in an acquired entry (0-1, LLM-generated). A
+   * ranking prior only — high-confidence acquired entries rank like tag
+   * matches and surface as lessons in prompts. Absent on authored entries.
+   */
+  confidence?: number;
 }
 
 export interface AssistantDefinition {

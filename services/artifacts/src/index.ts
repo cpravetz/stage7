@@ -3,6 +3,7 @@ import path from 'path';
 import documentRoutes from './routes/documents';
 import missionRoutes from './routes/missions';
 import brainPersistenceRoutes from './routes/brainPersistence';
+import vectorRoutes from './routes/vectors';
 import { artifactsService } from './services/ArtifactsService';
 import { asyncHandler, logger } from '@stage7-nextgen/shared';
 
@@ -22,6 +23,7 @@ app.get('/api/artifacts/health', asyncHandler(async (_req, res) => {
 app.use('/api/artifacts/documents', documentRoutes);
 app.use('/api/artifacts/missions', missionRoutes);
 app.use('/api/artifacts/brain', brainPersistenceRoutes);
+app.use('/api/artifacts/vectors', vectorRoutes);
 
 // Serve local artifact files if configured
 const localDir = process.env.ARTIFACTS_LOCAL_DIR;

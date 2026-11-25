@@ -39,6 +39,24 @@ export interface VectorSearchQuery {
   limit?: number;
   filter?: Record<string, unknown>;
   minScore?: number;
+  /**
+   * Embedding model id the query vector was produced with. When set, vectors
+   * stored under a different model are excluded — cosine across models (or
+   * dimensions) silently returns meaningless scores.
+   */
+  model?: string;
+}
+
+/** Metadata stored alongside an embedding vector. */
+export interface VectorUpsertMeta {
+  model?: string;
+  dim?: number;
+  /** Hash of the embedded content; unchanged hashes skip re-embedding. */
+  contentHash?: string;
+  /** Documents collection the vector's source document lives in. */
+  collection?: string;
+  /** Equality filter on the source document's data, pre-applied at search. */
+  filter?: Record<string, unknown>;
 }
 
 export interface VectorSearchResult {

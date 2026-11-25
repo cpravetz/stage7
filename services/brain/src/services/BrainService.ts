@@ -155,6 +155,10 @@ async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
   }
 }
 
+// How long a probe result (positive or negative) for embedding-model
+// availability is reused before the catalogue is consulted again.
+const EMBEDDING_PROBE_TTL_MS = 5 * 60 * 1000;
+
 export class BrainService {
   private router = new ModelRouter();
   private cache = SemanticCache.getInstance();
@@ -166,6 +170,7 @@ export class BrainService {
   private modelRoutingSessions = new Map<string, ModelRoutingSession>();
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
+  private embeddingProbe: { result: { provider: LLMProvider; modelId: string } | null; expiresAt: number } | null = null;
 
   // Performance tracking - persisted to artifacts service
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
@@ -310,6 +315,35 @@ export class BrainService {
       hasApiKey: p.info.hasApiKey,
       openAICompatible: p.info.openAICompatible,
     }));
+  }
+
+  /**
+   * The embedding-capable provider/model pair, probed with a five-minute
+   * cache so callers do not refresh the model catalogue per request. Null
+   * means no configured provider exposes an embedding model — the normal
+   * local state — and callers degrade to their non-semantic path.
+   */
+  async embeddingCandidate(): Promise<{ provider: LLMProvider; modelId: string } | null> {
+    const now = Date.now();
+    if (this.embeddingProbe && now < this.embeddingProbe.expiresAt) {
+      return this.embeddingProbe.result;
+    }
+    let result: { provider: LLMProvider; modelId: string } | null = null;
+    for (const provider of this.providers) {
+      if (!provider.isAvailable() || typeof provider.embed !== 'function') continue;
+      try {
+        const models = await provider.listModels();
+        const embeddingModel = models.find((m) => m.capabilities.includes('embedding'));
+        if (embeddingModel) {
+          result = { provider, modelId: embeddingModel.id };
+          break;
+        }
+      } catch (err) {
+        logger.warn({ provider: provider.id, err }, 'Embedding model probe failed for provider');
+      }
+    }
+    this.embeddingProbe = { result, expiresAt: now + EMBEDDING_PROBE_TTL_MS };
+    return result;
   }
 
   registerModel(model: ModelDefinition) {

@@ -186,33 +186,51 @@ describe('AssistantExecutor', () => {
       const brain1Content = '{"tool":"get_weather","args":{"location":"NYC"}}';
       const brain2Content = 'The weather in NYC is 72 degrees and sunny. Final answer.';
 
-      (global.fetch as jest.Mock)
-        .mockImplementationOnce(async (_url: any, _init: any) => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ content: brain1Content, model: 'gpt-4o-mini' }),
-          text: async () => '',
-        }) as any)
-        .mockImplementationOnce(async (_url: any, init: any) => {
-          const body = JSON.parse(init.body);
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ status: 'completed', toolId: body.id, output: { message: `Executed ${body.name}`, args: body.input } }),
-            text: async () => '',
-          } as any;
-        })
-        .mockImplementationOnce(async (_url: any, _init: any) => ({
-          ok: true,
-          status: 200,
-          json: async () => ({ content: brain2Content, model: 'gpt-4o-mini' }),
-          text: async () => '',
-        }) as any);
+      // Scripted by URL, not call order: execute() now issues an embeddings
+      // probe before the first brain completion. The default mock is restored
+      // afterwards so later tests keep their once-chains.
+      const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+      let completeCalls = 0;
+      try {
+        (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+          const urlStr = String(url);
+          if (urlStr.includes('/api/brain/embeddings')) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ available: false }),
+              text: async () => '',
+            } as any;
+          }
+          if (urlStr.includes('/api/brain/complete')) {
+            completeCalls += 1;
+            const content = completeCalls === 1 ? brain1Content : brain2Content;
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ content, model: 'gpt-4o-mini' }),
+              text: async () => '',
+            } as any;
+          }
+          if (urlStr.includes('/api/tool-executor/tools/execute')) {
+            const body = JSON.parse(init.body);
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ status: 'completed', toolId: body.id, output: { message: `Executed ${body.name}`, args: body.input } }),
+              text: async () => '',
+            } as any;
+          }
+          return originalFetch(url, init);
+        });
 
-      const result = await executor.execute(definition, 'What is the weather in NYC?');
+        const result = await executor.execute(definition, 'What is the weather in NYC?');
 
-      expect(result.success).toBe(true);
-      expect(result.output).toContain('72 degrees');
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('72 degrees');
+      } finally {
+        (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+      }
     });
 
     it('should self-extend by executing an auto-generated tool on demand', async () => {
@@ -228,7 +246,14 @@ describe('AssistantExecutor', () => {
         updatedAt: new Date(),
       };
 
+      // The embeddings probe precedes the first brain completion, so it gets
+      // the first Once; the remaining three map onto the original sequence.
       (global.fetch as jest.Mock)
+        .mockImplementationOnce(async (_url: any, _init: any) => ({
+          ok: true, status: 200,
+          json: async () => ({ available: false }),
+          text: async () => '',
+        }) as any)
         .mockImplementationOnce(async (_url: any, _init: any) => ({
           ok: true, status: 200,
           json: async () => ({ content: '{"tool":"calculate_taxi_fare","args":{"distance":10}}', model: 'gpt-4o-mini' }),

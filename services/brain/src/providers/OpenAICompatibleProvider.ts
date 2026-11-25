@@ -1,4 +1,4 @@
-import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage, ProviderModel } from './Provider';
+import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage, ProviderModel, EmbeddingRequest, EmbeddingResponse } from './Provider';
 import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
 const FALLBACK_CONTEXT_WINDOW = 0;
@@ -21,6 +21,12 @@ const COMPLETIONS_PATH_CANDIDATES = [
   '/v1/completions',
   '/api/completions',
   '/api/v1/completions',
+];
+
+const EMBEDDINGS_PATH_CANDIDATES = [
+  '/embeddings',
+  '/v1/embeddings',
+  '/api/v1/embeddings',
 ];
 
 function toNumber(value: unknown): number | null {
@@ -269,6 +275,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private listModelsPath?: string;
   private chatCompletionsPath: string;
   private completionsPath: string;
+  private embeddingsPath: string;
   private modelCache: ProviderModel[] | null = null;
 
   constructor(config: OpenAICompatibleConfig) {
@@ -283,6 +290,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.listModelsPath = config.listModelsPath;
     this.chatCompletionsPath = config.chatCompletionsPath || '/chat/completions';
     this.completionsPath = config.completionsPath || '/completions';
+    this.embeddingsPath = '/embeddings';
     this.info = {
       id: config.id,
       name: config.name,
@@ -335,13 +343,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   /** Remembers an endpoint that answered, so later calls go straight to it. */
-  private rememberEndpoint(base: string, path: string, kind: 'chat' | 'completions'): void {
+  private rememberEndpoint(base: string, path: string, kind: 'chat' | 'completions' | 'embeddings'): void {
     if (base !== this.apiBase) {
       this.apiBase = base;
       this.modelCache = null;
       this.info.apiBase = base;
     }
     if (kind === 'chat') this.chatCompletionsPath = path;
+    else if (kind === 'embeddings') this.embeddingsPath = path;
     else this.completionsPath = path;
   }
 
@@ -401,6 +410,52 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const defaults = this.defaultModels.filter((m) => !this.isExcluded(m.id));
     this.modelCache = defaults;
     return defaults;
+  }
+
+  /**
+   * Embeds texts through the provider's OpenAI-compatible embeddings endpoint,
+   * probing the well-known routes when the configured one does not exist and
+   * remembering the route that answered. Throws on failure — the route layer
+   * owns degradation.
+   */
+  async embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    const headers: Record<string, string> = {
+      'Connection': 'close',
+      'Content-Type': 'application/json',
+      ...this.extraHeaders,
+    };
+    if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
+
+    let lastStatus = 0;
+    let lastUrl = '';
+    for (const candidate of this.endpointCandidates(this.embeddingsPath, EMBEDDINGS_PATH_CANDIDATES)) {
+      const attempt = await fetchProvider(candidate.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: req.model, input: req.texts }),
+      });
+      if (attempt.ok) {
+        this.rememberEndpoint(candidate.base, candidate.path, 'embeddings');
+        const data = await attempt.json() as {
+          data?: Array<{ embedding?: number[]; index?: number }>;
+          model?: string;
+        };
+        const vectors: number[][] = [];
+        for (const item of data.data || []) {
+          if (!item.embedding?.length) throw new Error(`Provider returned an embedding without values for input ${item.index}`);
+          vectors[item.index ?? vectors.length] = item.embedding;
+        }
+        if (vectors.length !== req.texts.length) {
+          throw new Error(`Embedding count mismatch: sent ${req.texts.length}, received ${vectors.length}`);
+        }
+        return { model: data.model || req.model, vectors };
+      }
+      lastStatus = attempt.status;
+      lastUrl = candidate.url;
+      // Only "this route does not exist" justifies probing another route.
+      if (lastStatus !== 404 && lastStatus !== 405) break;
+    }
+    throw new Error(`Embeddings request failed (${lastStatus}) at ${lastUrl}`);
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {

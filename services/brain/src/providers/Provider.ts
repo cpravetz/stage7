@@ -48,4 +48,20 @@ export interface LLMProvider {
   isAvailable(): boolean;
   listModels(): Promise<ProviderModel[]>;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
+  /**
+   * Embeds texts, when the provider exposes an embeddings endpoint. Optional:
+   * providers without embedding support simply leave it undefined, and callers
+   * degrade to their non-semantic path.
+   */
+  embed?(req: EmbeddingRequest): Promise<EmbeddingResponse>;
+}
+
+export interface EmbeddingRequest {
+  model: string;
+  texts: string[];
+}
+
+export interface EmbeddingResponse {
+  model: string;
+  vectors: number[][];
 }

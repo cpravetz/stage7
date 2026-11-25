@@ -8,6 +8,7 @@ import {
   BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
+  VectorUpsertMeta,
   MissionState,
   MissionRecoveryLease,
   AgentState,
@@ -28,7 +29,7 @@ const MAX_BRAIN_LOG_ENTRIES = 200;
 // re-emits an identical milestone therefore does not duplicate the feed.
 const EVENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
-type VectorDoc = { _id: string; vector: number[] };
+type VectorDoc = { _id: string; vector: number[] } & VectorUpsertMeta;
 type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
 type StoredBrainPerformanceMetric = BrainPerformanceMetric & { _id?: string };
 
@@ -235,6 +236,12 @@ export class MongoStore {
     const results: VectorSearchResult[] = [];
 
     for (const entry of vectors) {
+      // Never mix models: cosine across models (or dimensions) silently
+      // produces meaningless scores. Vectors stored under a different model —
+      // or without one, from before model tagging existed — are misses.
+      if (query.model && entry.model !== query.model) continue;
+      // Cheap pre-filter on the vector's own metadata before loading documents.
+      if (entry.collection && entry.collection !== query.collection) continue;
       const score = this.cosineSimilarity(query.query, entry.vector);
       if (score >= (query.minScore || 0)) {
         const doc = await this.getDocument(entry._id);
@@ -585,8 +592,26 @@ export class MongoStore {
     return this.missionEvents.find(filter).sort({ timestamp: 1 }).toArray();
   }
 
-  async upsertVector(id: string, vector: number[]): Promise<void> {
-    await this.vectors.replaceOne({ _id: id }, { _id: id, vector } as any, { upsert: true });
+  async upsertVector(id: string, vector: number[], meta: VectorUpsertMeta = {}): Promise<void> {
+    await this.vectors.replaceOne(
+      { _id: id },
+      { _id: id, vector, ...meta } as any,
+      { upsert: true },
+    );
+  }
+
+  /** The stored vector and its metadata, or undefined when none exists. */
+  async getVector(id: string): Promise<(VectorUpsertMeta & { vector: number[] }) | undefined> {
+    const entry = await this.vectors.findOne({ _id: id } as any);
+    if (!entry) return undefined;
+    const { _id, vector, ...meta } = entry;
+    return { vector, ...meta };
+  }
+
+  /** Deletes a stored vector. Returns whether one existed. */
+  async deleteVector(id: string): Promise<boolean> {
+    const result = await this.vectors.deleteOne({ _id: id } as any);
+    return result.deletedCount > 0;
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {

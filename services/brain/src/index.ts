@@ -1,6 +1,7 @@
 import express, { Application } from 'express';
 import brainRoutes from './routes/brain';
 import distillationRoutes from './routes/distillation';
+import embeddingsRoutes from './routes/embeddings';
 import { brainInstance as brain } from './utils/sharedInstance';
 import { logger } from './utils/logger';
 

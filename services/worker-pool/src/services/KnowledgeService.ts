@@ -2,6 +2,9 @@ import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import {
   AssistantKnowledgeEntry,
   StoredKnowledgeEntry,
+  EmbeddingsClient,
+  EmbeddingResult,
+  embeddableContentHash,
   logger,
 } from '@stage7-nextgen/shared';
 import type { KnowledgeEntryWithMeta } from './knowledgeBudget';
@@ -19,7 +22,10 @@ const COLLECTION = 'knowledge';
  * only, `shared` entries go to every assistant and agent.
  */
 export class KnowledgeService {
-  constructor(private artifacts: ArtifactsService) {}
+  constructor(
+    private artifacts: ArtifactsService,
+    private embeddings = new EmbeddingsClient(),
+  ) {}
 
   /**
    * Writes an entry, replacing any existing entry with the same id.
@@ -52,6 +58,7 @@ export class KnowledgeService {
         data: { ...entry },
       });
       logger.debug({ knowledgeId: entry.id, scope: entry.scope }, 'Knowledge entry updated');
+      this.syncVectorForEntry(entry);
       return (updated?.data as unknown as StoredKnowledgeEntry);
     }
 
@@ -62,7 +69,37 @@ export class KnowledgeService {
       data: { ...entry },
     });
     logger.debug({ knowledgeId: entry.id, scope: entry.scope }, 'Knowledge entry published');
+    this.syncVectorForEntry(entry);
     return entry;
+  }
+
+  /**
+   * Embeds the entry and upserts its vector, without ever blocking or failing
+   * the publish that triggered it. An unchanged contentHash skips the embed
+   * entirely — that is what makes the idempotent boot sync free. Best-effort:
+   * a failure leaves the entry lexical-only.
+   */
+  private syncVectorForEntry(entry: StoredKnowledgeEntry): void {
+    void (async () => {
+      try {
+        const contentHash = embeddableContentHash([entry.title, entry.content]);
+        const existing = await this.artifacts.getVector(entry.id);
+        if (existing?.contentHash === contentHash && existing.model) return;
+
+        const result = await this.embeddings.embed([`${entry.title}\n${entry.content}`]);
+        if (!result) return; // no embedding model available — lexical-only
+
+        await this.artifacts.upsertVector(entry.id, result.vectors[0], {
+          model: result.model,
+          dim: result.dim,
+          contentHash,
+          collection: COLLECTION,
+          filter: { scope: entry.scope, assistantId: entry.assistantId ?? null },
+        });
+      } catch (err) {
+        logger.warn({ knowledgeId: entry.id, err }, 'Knowledge vector sync failed; entry remains lexical-only');
+      }
+    })();
   }
 
   /**
@@ -145,6 +182,7 @@ export class KnowledgeService {
       if (stale.origin === 'acquired') continue;
       if (!keep.has(stale.id)) {
         await this.artifacts.deleteDocument(stale.id);
+        await this.artifacts.deleteVector(stale.id).catch(() => undefined);
         logger.info({ knowledgeId: stale.id, assistantId }, 'Removed assistant knowledge entry');
       }
     }
@@ -183,6 +221,39 @@ export class KnowledgeService {
 
   async remove(id: string): Promise<boolean> {
     await this.artifacts.ready();
+    // deleteDocument also removes the vector row; the explicit delete covers a
+    // vector that outlived its document.
+    await this.artifacts.deleteVector(id).catch(() => undefined);
     return this.artifacts.deleteDocument(id);
+  }
+
+  /**
+   * Embeds one text via brain. Null means no embedding model is configured or
+   * the call failed — callers continue on the lexical-only path. Never throws:
+   * an embedding failure must not block an assistant execution.
+   */
+  async embedQuery(text: string): Promise<EmbeddingResult | null> {
+    try {
+      return await this.embeddings.embed([text]);
+    } catch (err) {
+      logger.warn({ err }, 'Knowledge embedding failed; continuing lexical-only');
+      return null;
+    }
+  }
+
+  /**
+   * Cosine scores for the knowledge collection: id → similarity, best first
+   * when sorted. Only vectors stored under the same embedding `model` are
+   * searched, so mixed-model stores degrade to fewer matches, not garbage.
+   */
+  async semanticScores(query: number[], model: string, limit = 50): Promise<Map<string, number>> {
+    await this.artifacts.ready();
+    const results = await this.artifacts.searchVectors({
+      collection: COLLECTION,
+      query,
+      model,
+      limit,
+    });
+    return new Map(results.map((r) => [r.id, r.score]));
   }
 }
