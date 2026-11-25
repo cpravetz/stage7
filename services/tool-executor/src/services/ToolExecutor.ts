@@ -1,4 +1,5 @@
 import { createContextPolicy } from '../adk';
+import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import {
   Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError,
   CrossObjectHandoffError, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction,
@@ -921,10 +922,11 @@ this.pendingCredentialOverrides.set(pending.tool.id, resolvedCredentials);
 if (submission.storeInVault && submission.vaultSecretId) {
 try {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-    await fetch(`${vaultUrl}/secrets/${submission.vaultSecretId}/encrypt`, {
+    await httpRequest(`${vaultUrl}/secrets/${submission.vaultSecretId}/encrypt`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
 body: JSON.stringify({ plaintext: JSON.stringify(submission.credentials) }),
+timeoutMs: interServiceTimeoutMs(),
 });
 logger.info({ executionId, vaultSecretId: submission.vaultSecretId }, 'Credentials stored in Vault');
 } catch (err) {

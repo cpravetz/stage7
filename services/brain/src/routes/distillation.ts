@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getBrainInstance } from '../utils/sharedInstance';
-import { asyncHandler } from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { createDistillationService } from '../services/DistillationService';
 
 const router: Router = Router();

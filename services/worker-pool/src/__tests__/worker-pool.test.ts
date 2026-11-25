@@ -1,6 +1,6 @@
 import { WorkerPool } from '../pool/WorkerPool';
+import { NextGenError } from '@stage7-nextgen/shared';
 import { TaskQueue } from '../queue/TaskQueue';
-import { WorkerPoolError } from '../utils/errors';
 
 jest.mock('../queue/TaskQueue');
 
@@ -104,18 +104,19 @@ describe('TaskQueue', () => {
   });
 });
 
-describe('WorkerPoolError', () => {
+describe('NextGenError', () => {
   it('should create error with status code', () => {
-    const err = WorkerPoolError.badRequest('Invalid input');
+    const err = NextGenError.badRequest('Invalid input');
     expect(err.statusCode).toBe(400);
     expect(err.message).toBe('Invalid input');
   });
 
   it('should serialize to JSON', () => {
-    const err = WorkerPoolError.poolFull();
+    const err = new NextGenError('Worker pool is full', 429);
     expect(err.toJson()).toEqual({
+      success: false,
+      error: 'Worker pool is full',
       statusCode: 429,
-      message: 'Worker pool is full',
       details: undefined,
     });
   });

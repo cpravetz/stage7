@@ -12,6 +12,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { httpRequest } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import type { ExecutionRecord } from '../types';
 
@@ -50,14 +51,12 @@ function readLocal(target: string): ExecutionRecord | null {
   }
 }
 
-async function artifactsFetch(route: string, init?: RequestInit): Promise<any | null> {
+async function artifactsFetch(route: string, init?: { method?: string; body?: string }): Promise<any | null> {
   if (!ARTIFACTS_URL) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
+    const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
       headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
+      timeoutMs: REMOTE_TIMEOUT_MS,
       ...init,
     });
     if (!res.ok) return null;
@@ -66,8 +65,6 @@ async function artifactsFetch(route: string, init?: RequestInit): Promise<any | 
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err), route }, 'Execution record persistence unavailable');
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

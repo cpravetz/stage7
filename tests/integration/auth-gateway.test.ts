@@ -31,7 +31,7 @@ describe('Integration: Auth Service', () => {
         .send({ email: 'wrong@example.com', password: 'password' });
 
       expect(response.status).toBe(401);
-      expect(response.body.message).toBe('Invalid credentials');
+      expect(response.body.error).toBe('Invalid credentials');
     });
 
     it('should reject missing fields', async () => {
@@ -65,7 +65,7 @@ describe('Integration: Auth Service', () => {
         .send({ serviceId: 'svc-1', apiKey: 'wrong-key' });
 
       expect(response.status).toBe(401);
-      expect(response.body.message).toBe('Invalid service credentials');
+      expect(response.body.error).toBe('Invalid service credentials');
     });
   });
 

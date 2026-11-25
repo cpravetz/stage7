@@ -1,4 +1,5 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { assertVaultBaseUrl, decryptVaultSecret, listVaultSecretNames, storeVaultSecret } from '../utils/vaultClient';
 
 export interface ToolCredentials {
   [key: string]: string | undefined;
@@ -194,22 +195,10 @@ export class CredentialProvider {
     if (this.secretNameCache && this.secretNameCache.expiresAt > Date.now()) {
       return this.secretNameCache.names;
     }
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     try {
-      const response = await fetch(`${vaultUrl}/api/vault/secrets`, { headers: { 'X-Tenant-Id': 'system' } });
-      if (response.ok) {
-        const data = await response.json() as unknown;
-        const list = Array.isArray(data)
-          ? data
-          : (data && typeof data === 'object' && Array.isArray((data as { secrets?: unknown[] }).secrets)
-            ? (data as { secrets: unknown[] }).secrets
-            : []);
-        const names = list
-          .map((entry) => (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined))
-          .filter((name): name is string => typeof name === 'string' && name.length > 0);
-        this.secretNameCache = { names, expiresAt: Date.now() + 30_000 };
-        return names;
-      }
+      const names = await listVaultSecretNames('system');
+      this.secretNameCache = { names, expiresAt: Date.now() + 30_000 };
+      return names;
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed');
     }
@@ -248,7 +237,7 @@ export class CredentialProvider {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     try {
       const target = new URL(`/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt`, vaultUrl);
-      const response = await fetch(target.toString(), { headers: { 'X-Tenant-Id': 'system' } });
+      const response = await httpRequest(target.toString(), { headers: { 'X-Tenant-Id': 'system' }, timeoutMs: interServiceTimeoutMs() });
       if (response.ok) {
         const data = await response.json() as { plaintext?: string };
         if (data.plaintext !== undefined) return data.plaintext;
@@ -260,64 +249,24 @@ export class CredentialProvider {
   }
 
   async storeInVault(plaintext: string, tenantId: string, name: string): Promise<string> {
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-    const base = new URL(vaultUrl);
-    if ((base.protocol !== 'http:' && base.protocol !== 'https:') || base.username || base.password) {
-      throw new Error('VAULT_URL must be an HTTP(S) URL without embedded credentials');
-    }
-    const target = new URL('/api/vault/secrets', base);
-    const response = await fetch(target.toString(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, plaintext, tenantId }),
-    });
-    if (!response.ok) {
-      throw new Error(`Vault secret storage failed (${response.status})`);
-    }
-    const secret = await response.json() as { id?: string };
-    if (typeof secret.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(secret.id)) {
-      throw new Error('Vault returned an invalid secret reference');
-    }
+    const secret = await storeVaultSecret(plaintext, tenantId, name);
     return `vault://${secret.id}`;
   }
 
   private async fromVault(secretId: string): Promise<string | undefined> {
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-    let base: URL;
     try {
-      base = new URL(vaultUrl);
-    } catch {
-      logger.warn({ vaultUrl }, 'Invalid VAULT_URL configured');
-      return undefined;
-    }
-    if (base.protocol !== 'http:' && base.protocol !== 'https:') {
-      logger.warn({ vaultUrl }, 'VAULT_URL must use http or https');
-      return undefined;
-    }
-    if (base.username || base.password) {
-      logger.warn({ vaultUrl }, 'VAULT_URL must not embed credentials');
+      assertVaultBaseUrl();
+    } catch (err) {
+      logger.warn({ vaultUrl: process.env.VAULT_URL, err: err instanceof Error ? err.message : String(err) }, 'Vault decrypt failed');
       return undefined;
     }
 
     // Try as secret ID first (UUID format), otherwise try as name
     const isIdFormat = /^[a-zA-Z0-9._-]+$/.test(secretId) && secretId.includes('-'); // rough UUID check
     if (isIdFormat || /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(secretId)) {
-      const target = new URL(`/api/vault/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
-      if (target.origin !== base.origin) {
-        logger.warn({ secretId }, 'Vault URL origin escape attempt');
-        return undefined;
-      }
       try {
-        const res = await fetch(target.toString(), {
-          method: 'GET',
-          headers: {
-            'X-Tenant-Id': 'system',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json() as { plaintext?: string };
-          if (data.plaintext !== undefined) return data.plaintext;
-        }
+        const byId = await decryptVaultSecret({ byId: secretId });
+        if (byId.ok && byId.plaintext !== undefined) return byId.plaintext;
       } catch (err) {
         logger.warn({ secretId, err: err instanceof Error ? err.message : String(err) }, 'Vault request failed');
       }
@@ -325,19 +274,8 @@ export class CredentialProvider {
 
     // Try by name
     try {
-      const target = new URL(`/api/vault/secrets/name/${encodeURIComponent(secretId)}/decrypt`, base);
-      if (target.origin === base.origin) {
-        const res = await fetch(target.toString(), {
-          method: 'GET',
-          headers: {
-            'X-Tenant-Id': 'system',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json() as { plaintext?: string };
-          if (data.plaintext !== undefined) return data.plaintext;
-        }
-      }
+      const byName = await decryptVaultSecret({ byName: secretId });
+      if (byName.ok && byName.plaintext !== undefined) return byName.plaintext;
     } catch (err) {
       logger.warn({ secretId, err: err instanceof Error ? err.message : String(err) }, 'Vault name lookup failed');
     }

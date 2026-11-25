@@ -4,8 +4,13 @@ import {
   MCPToolCall,
   MCPToolResult,
 } from '@stage7-nextgen/shared';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, llmCallTimeoutMs } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
+import {
+  applyKnowledgeBudget,
+  knowledgeQueryTokens,
+  rankKnowledgeEntries,
+} from './knowledgeBudget';
 import type { AssistantLoader } from './AssistantLoader';
 
 export class AssistantExecutor {
@@ -52,14 +57,23 @@ export class AssistantExecutor {
 
     // Knowledge is read from the store on every execution, not carried on the
     // definition, so that entries recorded for this assistant — or shared with
-    // all of them — take effect without redeploying.
-    const knowledge = await this.knowledge.listForAssistant(definition.id);
-    if (knowledge.length === 0) {
+    // all of them — take effect without redeploying. Entries are ranked (tag
+    // match against the assistant/task first, recency second) and capped to a
+    // character budget so a growing store cannot overflow the context window.
+    const knowledgeRecords = await this.knowledge.listForAssistantWithMeta(definition.id);
+    if (knowledgeRecords.length === 0) {
       logger.warn(
         { assistantId: definition.id },
         'Assistant has no knowledge in the store; executing without knowledge block',
       );
     }
+
+    const rankedKnowledge = rankKnowledgeEntries(
+      knowledgeRecords,
+      knowledgeQueryTokens(definition.id, definition.name, prompt),
+    );
+    const budgeted = applyKnowledgeBudget(rankedKnowledge);
+    const knowledge = budgeted.selected.map((r) => r.entry);
 
     // Knowledge content is authored as multi-line markdown in per-assistant
     // files, so each entry is rendered as its own labelled section rather than
@@ -164,7 +178,7 @@ export class AssistantExecutor {
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
       .join('\n\n');
     try {
-      const res = await fetch(`${brainUrl}/api/brain/complete`, {
+      const res = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -173,6 +187,7 @@ export class AssistantExecutor {
           maxTokens: 4096,
           temperature: 0.7,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -228,7 +243,7 @@ export class AssistantExecutor {
       // until now nothing sent them, so the executor built the Skill with empty
       // configuration and every handler read its defaults.
       const config = this.bindingConfig(assistantId, tool.name);
-      const response = await fetch(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
+      const response = await httpRequest(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -241,6 +256,8 @@ export class AssistantExecutor {
           assistantId,
           ...(config ? { externalConfig: config } : {}),
         }),
+        // A skill execution may transit an LLM completion, so it needs the long ceiling.
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (response.status === 428) {
@@ -314,7 +331,7 @@ export class AssistantExecutor {
     logger.info({ toolName, arguments: arguments_, credentialsProvided: Object.keys(credentials).length }, 'Providing credentials for tool');
 
     try {
-      const response = await fetch(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
+      const response = await httpRequest(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -327,6 +344,7 @@ export class AssistantExecutor {
           storeInVault,
           vaultSecretId,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {

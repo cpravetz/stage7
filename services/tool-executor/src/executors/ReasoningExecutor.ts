@@ -1,5 +1,6 @@
 import { Tool } from '../types';
 import logger from '../utils/logger';
+import { httpRequest, llmCallTimeoutMs, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 
@@ -98,10 +99,12 @@ export class ReasoningExecutor {
       options,
     };
 
-    const response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
+    const response = await httpRequest(`${BRAIN_URL}/api/brain/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      // A completion transit runs as long as the provider call behind it.
+      timeoutMs: llmCallTimeoutMs(),
     });
 
     if (!response.ok) {
@@ -199,10 +202,11 @@ export class ReasoningExecutor {
     }`.slice(0, 2_000);
     const missionId = typeof input.missionId === 'string' ? input.missionId : undefined;
     try {
-      const response = await fetch(`${BRAIN_URL}/api/brain/complaint`, {
+      const response = await httpRequest(`${BRAIN_URL}/api/brain/complaint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId: sourceRequestId, reason, missionId }),
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (!response.ok) {
         const details = await response.text();

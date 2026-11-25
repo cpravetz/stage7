@@ -239,17 +239,6 @@ Base URL: `http://localhost:3000`
 | `*` | `/:service/*` | Proxy to backend service |
 | `WS` | `/ws` | WebSocket gateway |
 
-### MCP Runtime API
-
-Base URL: `http://localhost:3300`
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/tools` | Register MCP tool |
-| `DELETE` | `/tools/:name` | Unregister tool |
-| `GET` | `/tools` | List tools |
-| `POST` | `/rpc` | JSON-RPC endpoint (`tools/list`, `tools/call`) |
-
 ### Auth API
 
 Base URL: `http://localhost:4300/api/auth`
@@ -286,7 +275,6 @@ docker compose ps
 # View logs for a specific service
 docker compose logs -f worker-pool
 docker compose logs -f gateway
-docker compose logs -f mcp-runtime
 ```
 
 **Issue: Worker Pool health check failing**
@@ -316,7 +304,6 @@ Solution: Verify Gateway WebSocket is active at `ws://localhost:3000/ws`. Check 
 |---------|----------|
 | Gateway | `http://localhost:3000/health` |
 | Worker Pool | `http://localhost:3200/api/workers/health` |
-| MCP Runtime | `http://localhost:3300/health` |
 | Auth | `http://localhost:4300/api/auth/health` |
 | Vault | `http://localhost:4000/health` |
 | Persistence | `http://localhost:4200/health` |

@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, llmCallTimeoutMs } from '@stage7-nextgen/shared';
 import { PluginGenerationRequest, PluginGenerationResult, Tool } from '../types';
 import { CredentialProvider } from '../services/CredentialProvider';
 import { ToolRegistry } from '../services/ToolRegistry';
@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
+import { listVaultSecretNames as listVaultSecretNamesFromVault } from '../utils/vaultClient';
 
 const TEST_CONTRACT_SYSTEM_PROMPT = `Create small, deterministic input/output tests for the requested tool capability. Do not write an implementation.
 When a mission goal is provided, it defines the scope: the capability must be necessary for that goal and preserve its operation and medium. If it conflicts with the goal, return no cases.
@@ -334,24 +335,10 @@ function missionScope(context: Record<string, unknown> | undefined): string {
  * supplied.
  */
 export async function listVaultSecretNames(): Promise<string[]> {
-  const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
   try {
     // A short deadline keeps a slow or absent Vault from delaying generation: the
     // secret list only sharpens the prompt, and generation must not depend on it.
-    const response = await fetch(`${vaultUrl}/api/vault/secrets`, {
-      headers: { 'X-Tenant-Id': 'system' },
-      signal: AbortSignal.timeout(3_000),
-    });
-    if (!response.ok) return [];
-    const data = await response.json() as unknown;
-    const list = Array.isArray(data)
-      ? data
-      : (data && typeof data === 'object' && Array.isArray((data as { secrets?: unknown[] }).secrets)
-        ? (data as { secrets: unknown[] }).secrets
-        : []);
-    return list
-      .map((entry) => (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined))
-      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+    return await listVaultSecretNamesFromVault('system', 3_000);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed for plugin generation');
     return [];
@@ -544,14 +531,12 @@ export class PluginGenerator {
     }
 
     const brainUrl = (process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '');
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetch(`${brainUrl}/api/brain/complaint`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complaint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId: requestId.trim(), reason: reason.slice(0, 2_000), missionId }),
-        signal: controller.signal,
+        timeoutMs: 5_000,
       });
       if (!response.ok) {
         const details = await response.text();
@@ -570,8 +555,6 @@ export class PluginGenerator {
         { missionId, requestId, error: error instanceof Error ? error.message : String(error) },
         'Failed to report a plugin-generation quality complaint',
       );
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -621,7 +604,7 @@ export class PluginGenerator {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const nonce = `plugin-gen-${attempt}-${Date.now()}`;
       const prompt = `${missionScope(context)}${focusedQuery ?? basePrompt}\nRetry nonce: ${nonce}`;
-      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -630,6 +613,8 @@ export class PluginGenerator {
           options: remediationOptions({ attempt, routingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
+        // Plugin generation is an LLM completion; it needs the long ceiling.
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {
@@ -828,7 +813,7 @@ export class PluginGenerator {
       const contractRoutingSessionId = `contract-gen:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
       const contractNonce = `contract-gen-${Date.now()}`;
       const scope = missionScope(request.context);
-      const contractResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+      const contractResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -837,6 +822,7 @@ export class PluginGenerator {
           options: remediationOptions({ attempt: 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
           missionId,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
       if (!contractResponse.ok) {
         const text = await contractResponse.text();
@@ -873,7 +859,7 @@ export class PluginGenerator {
             requirements: request.requirements || [],
             reason: contractRepairFeedback,
           });
-          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+          const retryResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -882,6 +868,7 @@ export class PluginGenerator {
               options: remediationOptions({ attempt: contractAttempt + 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
               missionId,
             }),
+            timeoutMs: llmCallTimeoutMs(),
           });
           if (!retryResponse.ok) {
             const text = await retryResponse.text();
@@ -936,7 +923,7 @@ export class PluginGenerator {
       const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
       const pluginRoutingSessionId = `plugin-user:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -945,6 +932,7 @@ export class PluginGenerator {
           options: remediationOptions({ attempt: 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {
@@ -976,7 +964,7 @@ export class PluginGenerator {
               previousContent: pluginContent,
             });
           const pluginRetryNonce = `plugin-retry-${pluginAttempt}-${Date.now()}`;
-          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+          const retryResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -985,6 +973,7 @@ export class PluginGenerator {
               options: remediationOptions({ attempt: pluginAttempt + 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
               missionId,
             }),
+            timeoutMs: llmCallTimeoutMs(),
           });
           if (retryResponse.ok) {
             data = await retryResponse.json() as { content?: unknown; requestId?: unknown };

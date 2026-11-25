@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest } from '@stage7-nextgen/shared';
 import type { MissionPhaseOutput } from '../types/workflow';
 import type { Plan } from '@stage7-nextgen/shared';
 import type { WorkflowInput } from '../types/workflow';
@@ -18,10 +18,10 @@ export class MissionStageCompletedListener {
       : input.assistantId || input.missionId;
     const url = `${(process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '')}/api/brain/memory/entity`;
     try {
-      const response = await fetch(url, {
+      const response = await httpRequest(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(35 * 60_000),
+        timeoutMs: 35 * 60_000,
         body: JSON.stringify({
           tenantId: input.tenantId || 'tenant-1',
           entityId,

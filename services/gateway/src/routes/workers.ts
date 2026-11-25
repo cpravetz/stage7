@@ -1,6 +1,6 @@
 import express, { Router, Request, Response } from 'express';
 import httpProxy from 'http-proxy';
-import { asyncHandler, NextGenError, logger } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 
 const WORKER_POOL_URL = process.env.WORKER_POOL_URL || 'http://worker-pool:3200';
 const proxy = httpProxy.createProxyServer({
@@ -25,10 +25,11 @@ router.use((req: Request, res: Response, next: Function) => {
 });
 
 router.post('/assistants', express.json({ limit: '50mb' }), asyncHandler(async (req: Request, res: Response) => {
-  const response = await fetch(`${WORKER_POOL_URL}/api/workers/assistants`, {
+  const response = await httpRequest(`${WORKER_POOL_URL}/api/workers/assistants`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req.body),
+    timeoutMs: interServiceTimeoutMs(),
   });
   const data = await response.json();
   res.status(response.status).json(data);

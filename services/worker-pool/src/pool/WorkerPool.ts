@@ -1,7 +1,7 @@
 import { WorkerTask, WorkerStatus, PoolConfig, DEFAULT_POOL_CONFIG } from '../types/worker';
+import { NextGenError } from '@stage7-nextgen/shared';
 import { TaskQueue } from '../queue/TaskQueue';
 import { logger } from '../utils/logger';
-import { WorkerPoolError } from '../utils/errors';
 
 export class WorkerPool {
   private queue: TaskQueue;
@@ -43,7 +43,7 @@ export class WorkerPool {
 
   async submit(task: Omit<WorkerTask, 'id' | 'status' | 'createdAt' | 'retryCount'>): Promise<string> {
     if (!this.running) {
-      throw WorkerPoolError.internalError('WorkerPool is not running');
+      throw NextGenError.internalError('WorkerPool is not running');
     }
 
     const workerTask: WorkerTask = {

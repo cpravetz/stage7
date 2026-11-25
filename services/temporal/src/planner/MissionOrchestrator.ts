@@ -9,7 +9,7 @@ import {
   Phase,
   Task,
 } from '@stage7-nextgen/shared';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import {
   applyPhaseReview,
   MissionAgentRuntime,
@@ -2160,10 +2160,11 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
     const body = JSON.stringify(plan);
     try {
       logger.info({ missionId: ctx.missionId, url, bodyLength: body.length }, 'Persisting plan to artifacts service');
-      const res = await fetch(url, {
+      const res = await httpRequest(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body,
+        timeoutMs: interServiceTimeoutMs(),
       });
       const text = await res.text();
       logger.info({ missionId: ctx.missionId, status: res.status, responsePreview: text && text.length > 2000 ? text.slice(0, 2000) : text }, 'Persist plan response');
@@ -2187,10 +2188,11 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
     const body = JSON.stringify(update);
     try {
       logger.debug({ missionId: ctx.missionId, phaseId, url, bodyLength: body.length }, 'Updating phase in artifacts service');
-      const res = await fetch(url, {
+      const res = await httpRequest(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body,
+        timeoutMs: interServiceTimeoutMs(),
       });
       const text = await res.text();
       if (!res.ok) {
@@ -2213,10 +2215,11 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
     const body = JSON.stringify({ ...update, phaseId });
     try {
       logger.debug({ missionId: ctx.missionId, phaseId, taskId, url, bodyLength: body.length }, 'Updating task in artifacts service');
-      const res = await fetch(url, {
+      const res = await httpRequest(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body,
+        timeoutMs: interServiceTimeoutMs(),
       });
       const text = await res.text();
       if (!res.ok) {
@@ -2280,10 +2283,11 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
       updatedAt: Date.now(),
     };
     try {
-      const res = await fetch(url, {
+      const res = await httpRequest(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state),
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (!res.ok) {
         const text = await res.text();

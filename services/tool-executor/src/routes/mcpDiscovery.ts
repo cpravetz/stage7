@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express'
-import asyncHandler from '../utils/asyncHandler'
+import { asyncHandler } from '@stage7-nextgen/shared'
 import { z } from 'zod'
 import logger from '../utils/logger'
 import { mcpToolExecutive } from '../services/MCPToolExecutive'

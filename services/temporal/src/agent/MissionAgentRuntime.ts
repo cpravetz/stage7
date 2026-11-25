@@ -506,14 +506,12 @@ export class MissionAgentRuntime {
     }
 
     const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetch(`${brainUrl}/api/brain/complaint`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complaint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId, reason, missionId: this.missionId }),
-        signal: controller.signal,
+        timeoutMs: 5_000,
       });
       if (!response.ok) {
         const details = await response.text();
@@ -529,8 +527,6 @@ export class MissionAgentRuntime {
         { missionId: this.missionId, requestId, error: error instanceof Error ? error.message : String(error) },
         'Failed to report a mission Agent output complaint',
       );
-    } finally {
-      clearTimeout(timeout);
     }
   }
 

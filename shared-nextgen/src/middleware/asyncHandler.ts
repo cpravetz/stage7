@@ -5,13 +5,13 @@ import { logger } from '../utils/logger';
 const production = (): boolean => process.env.NODE_ENV === 'production';
 
 /**
- * Wraps an async route handler so a rejected promise becomes a response instead
+ * Wraps a route handler (sync or async) so a rejected promise becomes a response instead
  * of an unhandled rejection. The failure is always logged with its request
  * context; the response keeps the real message outside production so an opaque
  * 500 can never hide the actual cause.
  */
 export const asyncHandler = (
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
+  fn: (req: Request, res: Response, next: NextFunction) => void | Response | Promise<void | Response>
 ) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch((err: unknown) => {

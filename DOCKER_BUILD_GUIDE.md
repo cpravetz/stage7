@@ -127,7 +127,6 @@ The frontend is then available at `http://localhost:8080`. It is a static nginx 
 | `gateway` | Single HTTP/WS entry point, service registry and proxy | 3000 | 3900 |
 | `brain` | LLM orchestration, provider routing, semantic cache | 3100 | 3100 |
 | `worker-pool` | Assistant catalog, task queue, knowledge sync | 3200 | 3200 |
-| `mcp-runtime` | Model Context Protocol server and tool registry | 3300 | 3300 |
 | `agent-runtime` | Agent execution runtime | 3400 | 3400 |
 | `tool-executor` | Skills, tools, ADK workflows, stores | 3500 | 3500 |
 | `vault` | AES-256-GCM envelope encryption for secrets | 4000 | 4000 |

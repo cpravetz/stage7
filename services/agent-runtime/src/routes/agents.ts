@@ -1,7 +1,6 @@
 import { NextFunction, Router, Request, Response } from 'express'
 import { runtime } from '../utils/sharedInstance'
-import { asyncHandler } from '../utils/asyncHandler'
-import { AppError, BadRequestError, NotFoundError } from '../utils/errors'
+import { asyncHandler, NextGenError } from '@stage7-nextgen/shared'
 import { AgentDefinition, AgentLearningInput, AgentTask, AgentCollaboration, AgentSpecialization } from '../types'
 import { z } from 'zod'
 
@@ -19,17 +18,17 @@ const AgentLearningInputSchema = z.object({
 
 function requireMissionAgent(missionId: string, agentId: string): AgentDefinition {
   const agent = runtime.listAgentsForMission(missionId).find((candidate) => candidate.id === agentId)
-  if (!agent || agent.metadata.missionId !== missionId) throw new NotFoundError('Mission agent')
+  if (!agent || agent.metadata.missionId !== missionId) throw NextGenError.notFound('Mission agent not found')
   const state = runtime.getAgentState(agentId)
   if (state && (state.missionId !== missionId || state.tenantId !== agent.tenantId)) {
-    throw new NotFoundError('Mission agent')
+    throw NextGenError.notFound('Mission agent not found')
   }
   return agent
 }
 
 function requireMissionTask(agentId: string, taskId: string): AgentTask {
   const task = runtime.getTask(taskId)
-  if (!task || task.agentId !== agentId) throw new NotFoundError('Agent task')
+  if (!task || task.agentId !== agentId) throw NextGenError.notFound('Agent task not found')
   return task
 }
 
@@ -40,7 +39,7 @@ router.post('/agents', asyncHandler(async (req: Request, res: Response) => {
 }))
 
 router.delete('/agents/:id', asyncHandler((req: Request, res: Response) => {
-  if (!runtime.unregisterAgent(req.params.id as string)) throw new NotFoundError('Agent')
+  if (!runtime.unregisterAgent(req.params.id as string)) throw NextGenError.notFound('Agent not found')
   res.status(204).send()
 }))
 
@@ -51,7 +50,7 @@ router.post('/agents/:id/start', asyncHandler(async (req: Request, res: Response
 
 router.get('/agents/:id/state', asyncHandler((req: Request, res: Response) => {
   const state = runtime.getAgentState(req.params.id as string)
-  if (!state) throw new NotFoundError('Agent state')
+  if (!state) throw NextGenError.notFound('Agent state not found')
   res.json(state)
 }))
 
@@ -62,7 +61,7 @@ router.post('/agents/:id/tasks', asyncHandler(async (req: Request, res: Response
 
 router.post('/agents/:id/tasks/:taskId/complete', asyncHandler(async (req: Request, res: Response) => {
   const task = runtime.completeTask(req.params.taskId as string, req.body.result)
-  if (!task) throw new NotFoundError('Task')
+  if (!task) throw NextGenError.notFound('Task not found')
   res.json(task)
 }))
 
@@ -72,9 +71,9 @@ router.post('/collaborations', asyncHandler((req: Request, res: Response) => {
 
 router.post('/collaborations/:id/messages', asyncHandler((req: Request, res: Response) => {
   const { from, content } = req.body as { from: string; content: string }
-  if (!from || !content) throw new BadRequestError('from and content are required')
+  if (!from || !content) throw NextGenError.badRequest('from and content are required')
   const collaboration = runtime.sendMessage(req.params.id as string, from, content)
-  if (!collaboration) throw new NotFoundError('Collaboration')
+  if (!collaboration) throw NextGenError.notFound('Collaboration not found')
   res.json(collaboration)
 }))
 
@@ -140,7 +139,7 @@ router.delete('/missions/:missionId/agents/:id', asyncHandler((req: Request, res
   const { id, missionId } = req.params as { id: string; missionId: string }
   requireMissionAgent(missionId, id)
   const deleted = runtime.unregisterAgent(id)
-  if (!deleted) throw new NotFoundError('Agent')
+  if (!deleted) throw NextGenError.notFound('Agent not found')
   res.status(204).send()
 }))
 
@@ -166,7 +165,7 @@ router.get('/missions/:missionId/agents/:id/state', asyncHandler((req: Request, 
   const { id, missionId } = req.params as { id: string; missionId: string }
   requireMissionAgent(missionId, id)
   const state = runtime.getAgentState(id)
-  if (!state) throw new NotFoundError('Agent state')
+  if (!state) throw NextGenError.notFound('Agent state not found')
   res.json(state)
 }))
 
@@ -178,7 +177,7 @@ router.post('/missions/:missionId/agents/:id/learnings', asyncHandler(async (req
     const details = parsed.error.issues
       .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
       .join('; ')
-    throw new BadRequestError(`Invalid Agent learning: ${details}`)
+    throw NextGenError.badRequest(`Invalid Agent learning: ${details}`)
   }
   const input = parsed.data as AgentLearningInput
   const learning = await runtime.recordLearning(id, missionId, input)
@@ -243,7 +242,7 @@ router.post('/missions/:missionId/agents/:id/tasks/:taskId/execute', asyncHandle
   const requireCompletedReceipt = req.body.requireCompletedReceipt === true
   const retryGuidance = req.body.retryGuidance
   if (retryGuidance !== undefined && (typeof retryGuidance !== 'string' || retryGuidance.length > 4_000)) {
-    throw new BadRequestError('Retry guidance must be a string of at most 4000 characters')
+    throw NextGenError.badRequest('Retry guidance must be a string of at most 4000 characters')
   }
   res.json(await runtime.executeTask(id, taskId, requireCompletedReceipt, 0, retryGuidance))
 }))
@@ -254,7 +253,7 @@ router.post('/missions/:missionId/agents/:id/tasks/:taskId/complete', asyncHandl
   requireMissionTask(id, taskId)
   const { result } = req.body as { result?: any }
   const task = await runtime.completeTask(taskId, result)
-  if (!task) throw new NotFoundError('Task')
+  if (!task) throw NextGenError.notFound('Task not found')
   res.json(task)
 }))
 
@@ -263,9 +262,9 @@ router.post('/missions/:missionId/agents/:id/tasks/:taskId/fail', asyncHandler(a
   requireMissionAgent(missionId, id)
   requireMissionTask(id, taskId)
   const { error } = req.body as { error: string }
-  if (!error) throw new BadRequestError('error is required')
+  if (!error) throw NextGenError.badRequest('error is required')
   const task = runtime.failTask(taskId, error)
-  if (!task) throw new NotFoundError('Task')
+  if (!task) throw NextGenError.notFound('Task not found')
   res.json(task)
 }))
 
@@ -278,9 +277,9 @@ router.post('/missions/:missionId/collaborations', asyncHandler((req: Request, r
 
 router.post('/missions/:missionId/collaborations/:id/messages', asyncHandler((req: Request, res: Response) => {
   const { from, content } = req.body as { from: string; content: string }
-  if (!from || !content) throw new BadRequestError('from and content are required')
+  if (!from || !content) throw NextGenError.badRequest('from and content are required')
   const collaboration = runtime.sendMessage(req.params.id as string, from, content)
-  if (!collaboration) throw new NotFoundError('Collaboration')
+  if (!collaboration) throw NextGenError.notFound('Collaboration not found')
   res.json(collaboration)
 }))
 
@@ -300,9 +299,11 @@ router.get('/missions/:missionId/agents/:id/specializations', asyncHandler((req:
 }))
 
 router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const appError = err instanceof AppError
+  // Defense for throws outside asyncHandler-wrapped routes; wrapped routes are
+  // handled by the shared handler, which serializes NextGenError.toJson().
+  const appError = err instanceof NextGenError
     ? err
-    : new AppError(500, err instanceof Error ? err.message : 'Internal server error', false)
+    : new NextGenError(err instanceof Error ? err.message : 'Internal server error', 500)
   const failureCode = err && typeof err === 'object' && 'failureCode' in err
     && typeof err.failureCode === 'string' && /^[A-Z_]+$/.test(err.failureCode)
     ? err.failureCode
