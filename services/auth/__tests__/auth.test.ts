@@ -65,6 +65,57 @@ describe('Auth', () => {
     });
   });
 
+  describe('TokenService secret resolution', () => {
+    afterEach(() => {
+      delete process.env.JWT_SECRET;
+      jest.restoreAllMocks();
+    });
+
+    function freshAuthApp(): express.Application {
+      let router: express.Router | undefined;
+      jest.isolateModules(() => {
+        router = require('../src/routes/auth').default;
+      });
+      const app = express();
+      app.use(express.json());
+      app.use('/api/auth', router as express.Router);
+      return app;
+    }
+
+    it('signs route tokens with JWT_SECRET from the environment when set', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.JWT_SECRET = 'route-level-secret';
+      const app = freshAuthApp();
+
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
+
+      expect(response.status).toBe(200);
+      expect(new TokenService('route-level-secret').verifyToken(response.body.token)).not.toBeNull();
+      // Guards the regression: the token must no longer be signed with the
+      // well-known development default when JWT_SECRET is configured.
+      expect(new TokenService('dev-secret-key').verifyToken(response.body.token)).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('warns once and falls back to the development default when JWT_SECRET is absent', async () => {
+      delete process.env.JWT_SECRET;
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const app = freshAuthApp();
+
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
+
+      expect(response.status).toBe(200);
+      expect(new TokenService('dev-secret-key').verifyToken(response.body.token)).not.toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('JWT_SECRET');
+      expect(String(warn.mock.calls[0][0])).toContain('not deployment-secured');
+    });
+  });
+
   describe('RBACService', () => {
     it('should assign and check permissions', () => {
       const rbac = new RBACService();
@@ -108,7 +159,7 @@ describe('Auth', () => {
         .send({ email: 'wrong@example.com', password: 'password' });
 
       expect(response.status).toBe(401);
-      expect(response.body.message).toBe('Invalid credentials');
+      expect(response.body.error).toBe('Invalid credentials');
     });
 
     it('should reject missing fields', async () => {
