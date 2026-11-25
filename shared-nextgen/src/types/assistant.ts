@@ -1,3 +1,4 @@
+import type { SpendLimitRefusalPayload } from '../config/spendLimits';
 import type { MCPTool } from './mcp';
 
 // ---------------------------------------------------------------------------
@@ -177,4 +178,10 @@ export interface AssistantExecutionResult {
   error?: string;
   tokensUsed?: number;
   durationMs?: number;
+  /**
+   * Present when the run was refused by the Brain's per-user spend gate — the
+   * exact HTTP 429 contract body, preserved so callers (and the frontend)
+   * can surface the limit-reached notice instead of a generic failure.
+   */
+  spendRefusal?: SpendLimitRefusalPayload;
 }
