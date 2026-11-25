@@ -11,7 +11,7 @@ import {
   AgentCollaboration,
   AgentSpecialization,
 } from '../types';
-import { BadRequestError, ConflictError, NotFoundError } from '../utils/errors';
+import { NextGenError } from '@stage7-nextgen/shared';
 import {
   AgentExecutor,
   isResumableDelegationCheckpoint,
@@ -150,7 +150,7 @@ export class PersistentAgentRuntime {
     retryGuidance?: string,
   ): Promise<AgentTask> {
     if (retryGuidance !== undefined && (typeof retryGuidance !== 'string' || retryGuidance.length > 4_000)) {
-      throw new BadRequestError('Retry guidance must be a string of at most 4000 characters');
+      throw NextGenError.badRequest('Retry guidance must be a string of at most 4000 characters');
     }
     const state = this.runtime.getAgentState(agentId);
     if (!state) throw new Error(`Agent ${agentId} has not been started`);
@@ -311,7 +311,7 @@ export class PersistentAgentRuntime {
       || input.confidence < 0
       || input.confidence > 1
     ) {
-      throw new BadRequestError('Agent learning requires bounded guidance and explicit, scoped provenance');
+      throw NextGenError.badRequest('Agent learning requires bounded guidance and explicit, scoped provenance');
     }
 
     await this.persistence.ready();
@@ -321,7 +321,7 @@ export class PersistentAgentRuntime {
     const existing = await this.persistence.getDocument(id);
     if (existing) {
       if (existing.tenantId !== state.tenantId || existing.collection !== 'agent-learnings') {
-        throw new ConflictError(`Agent learning provenance key ${input.sourceRef} is already owned by another scope`);
+        throw new NextGenError(`Agent learning provenance key ${input.sourceRef} is already owned by another scope`, 409);
       }
       const stored = existing.data as unknown as AgentLearning;
       if (
@@ -334,7 +334,7 @@ export class PersistentAgentRuntime {
         || stored.recordedBy !== input.recordedBy.trim()
         || stored.confidence !== input.confidence
       ) {
-        throw new ConflictError(`Agent learning provenance key ${input.sourceRef} cannot be reused with different content`);
+        throw new NextGenError(`Agent learning provenance key ${input.sourceRef} cannot be reused with different content`, 409);
       }
       return stored;
     }
@@ -392,7 +392,7 @@ export class PersistentAgentRuntime {
     const definition = this.runtime.getAgent(agentId);
     const state = this.runtime.getAgentState(agentId);
     if (!definition || !state || state.missionId !== missionId || definition.tenantId !== state.tenantId) {
-      throw new NotFoundError('Mission agent');
+      throw NextGenError.notFound('Mission agent not found');
     }
     return { state, definition };
   }

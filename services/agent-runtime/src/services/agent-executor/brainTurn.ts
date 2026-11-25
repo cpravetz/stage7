@@ -1,8 +1,28 @@
-import { BRAIN_MODEL_SELECTION_RETRY, logger } from '@stage7-nextgen/shared'
+import { BRAIN_MODEL_SELECTION_RETRY, logger, NextGenError } from '@stage7-nextgen/shared'
 import { MAX_MODEL_SELECTION_RETRIES } from './constants'
 import { maxTokensForCall } from './policy'
 import { buildSystemPrompt } from './prompt'
 import { NEXT_TURN, type RunContext, type TurnEnd } from './RunContext'
+
+/**
+ * Classified Brain failure carried to the HTTP layer. The shared asyncHandler
+ * serializes NextGenError through toJson(), so the failureCode the mission
+ * orchestrator adapts on must ride in the response body itself.
+ */
+export class ClassifiedBrainError extends NextGenError {
+  constructor(message: string, readonly failureCode: string) {
+    super(message, 500);
+  }
+
+  toJson(): any {
+    return {
+      success: false as const,
+      error: this.message,
+      statusCode: this.statusCode,
+      failureCode: this.failureCode,
+    };
+  }
+}
 import { MAX_PROMPT_TOOLS, rankToolsForTask, visibleTools } from './toolCatalog'
 import { classifyFailure } from './toolFailures'
 import type { BrainReply, BrainResponse, ToolDescriptor } from './types'
@@ -87,10 +107,7 @@ export async function askBrain(
     }]
     await state.save()
     // Propagate the classified error so the orchestrator can adapt.
-    const classifiedError = new Error(classifiedMessage) as Error & { failureCode?: string; failureAdaptation?: string }
-    classifiedError.failureCode = classified.code
-    classifiedError.failureAdaptation = classified.adaptation
-    throw classifiedError
+    throw new ClassifiedBrainError(classifiedMessage, classified.code)
   }
 
   state.brainCalls++
