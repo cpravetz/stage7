@@ -35,15 +35,6 @@ export { songwritingLowerOrderTools, songwritingSkills, songwritingWorkflow } fr
 export { sportsSkills, sportsWorkflow } from '../../assistants/sports';
 export { supportSkills, supportWorkflow } from '../../assistants/support';
 
-export {
-  assistantRegistries,
-  detectOverlappingSkills,
-  getOverlappingSkills,
-  getRetainedOverlapDecision,
-  getRetainedOverlapDecisionIds,
-  getRetainedOverlapDecisions,
-} from '../../adk/registry';
-
 import { analyticsWorkflow } from '../../assistants/analytics';
 import { careerWorkflow } from '../../assistants/career';
 import { contentWorkflow } from '../../assistants/content';
