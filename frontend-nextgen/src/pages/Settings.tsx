@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { postJSON } from '../utils/api';
+import ModelCatalogCard from '../components/ModelCatalogCard';
 
 type SettingsState = {
   llm: {
@@ -12,11 +13,16 @@ type SettingsState = {
     circuitThreshold?: number;
     circuitCooldownMs?: number;
   };
+  mission: {
+    approvalTimeoutMs?: number;
+    approvalPollIntervalMs?: number;
+  };
 };
 
 const DEFAULT_SETTINGS: SettingsState = {
   llm: { freeModelsOnly: false },
   brain: {},
+  mission: {},
 };
 
 // The Brain settings document id and the fields it recognizes. Blank inputs
@@ -28,6 +34,14 @@ const BRAIN_KNOBS = [
   { key: 'completionDeadlineMs', label: 'Completion Deadline (ms)', placeholder: 'derived from attempt ceiling', max: 7200000, envVar: 'BRAIN_COMPLETION_DEADLINE_MS' },
   { key: 'circuitThreshold', label: 'Circuit Breaker Threshold (failures)', placeholder: 'default 8', max: 1000, envVar: 'BRAIN_CIRCUIT_THRESHOLD' },
   { key: 'circuitCooldownMs', label: 'Circuit Breaker Cooldown (ms)', placeholder: 'default 60000', max: 3600000, envVar: 'BRAIN_CIRCUIT_COOLDOWN_MS' },
+] as const;
+
+// The mission approval settings document id and the fields it recognizes.
+// Same contract as the Brain knobs: a blank input means "no override".
+const MISSION_DOC_ID = 'mission/settings/approval-config';
+const MISSION_KNOBS = [
+  { key: 'approvalTimeoutMs', label: 'Approval Window (ms)', placeholder: 'default 86400000 (24h)', max: 604800000, envVar: 'APPROVAL_TIMEOUT_MS' },
+  { key: 'approvalPollIntervalMs', label: 'Approval Poll Interval (ms)', placeholder: 'default 3000', max: 3600000, envVar: 'APPROVAL_POLL_INTERVAL_MS' },
 ] as const;
 
 function parseBrainKnob(value: unknown): number | undefined {
@@ -74,6 +88,12 @@ const Settings = () => {
             circuitCooldownMs: parseBrainKnob(doc.data.circuitCooldownMs),
           };
         }
+        if (doc.id === MISSION_DOC_ID && doc.data) {
+          next.mission = {
+            approvalTimeoutMs: parseBrainKnob(doc.data.approvalTimeoutMs),
+            approvalPollIntervalMs: parseBrainKnob(doc.data.approvalPollIntervalMs),
+          };
+        }
       }
 
       setSettings(next);
@@ -117,17 +137,38 @@ const Settings = () => {
     setBrainDraft((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveBrain = () => {
+  // Numeric-knob save shared by the Brain and mission cards. Blank or invalid
+  // fields are omitted so an operator clearing an input removes the override
+  // instead of saving an invalid value (document replace semantics).
+  const saveKnobDocument = (
+    docId: string,
+    knobs: ReadonlyArray<{ key: string; max: number }>,
+    draft: Record<string, string>,
+  ) => {
     const data: Record<string, number> = {};
-    for (const knob of BRAIN_KNOBS) {
-      const raw = (brainDraft[knob.key] ?? '').trim();
+    for (const knob of knobs) {
+      const raw = (draft[knob.key] ?? '').trim();
       if (raw === '') continue;
       const parsed = Number(raw);
       if (Number.isInteger(parsed) && parsed > 0 && parsed <= knob.max) {
         data[knob.key] = parsed;
       }
     }
-    saveDocument(BRAIN_DOC_ID, data);
+    saveDocument(docId, data);
+  };
+
+  const handleSaveBrain = () => {
+    saveKnobDocument(BRAIN_DOC_ID, BRAIN_KNOBS, brainDraft);
+  };
+
+  const [missionDraft, setMissionDraft] = useState<Record<string, string>>({});
+
+  const updateMission = (key: string, value: string) => {
+    setMissionDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveMission = () => {
+    saveKnobDocument(MISSION_DOC_ID, MISSION_KNOBS, missionDraft);
   };
 
   
@@ -226,6 +267,38 @@ const Settings = () => {
             </div>
           </form>
         </div>
+
+        <div className="card">
+          <h3>Mission Approvals</h3>
+          <p style={{ color: '#94a3b8', fontSize: 13 }}>
+            How long a mission phase waits for human approval, and how often the approval
+            state is polled. Values here override the environment variables at runtime;
+            leave a field blank to keep the environment value. Applies to missions that
+            start after the save.
+          </p>
+          <form className="form" onSubmit={(e) => { e.preventDefault(); handleSaveMission(); }}>
+            {MISSION_KNOBS.map((knob) => (
+              <label key={knob.key} style={{ ...labelStyle, marginTop: 8 }}>
+                <span style={labelTextStyle}>{knob.label}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={knob.max}
+                  placeholder={`${knob.placeholder} (${knob.envVar})`}
+                  value={missionDraft[knob.key] ?? (settings.mission[knob.key] !== undefined ? String(settings.mission[knob.key]) : '')}
+                  onChange={(e) => updateMission(knob.key, e.target.value)}
+                />
+              </label>
+            ))}
+            <div style={{ marginTop: 12 }}>
+              <button type="submit" disabled={saving === MISSION_DOC_ID}>
+                {saving === MISSION_DOC_ID ? 'Saving...' : 'Save Mission Settings'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <ModelCatalogCard />
       </div>
     </div>
   );
