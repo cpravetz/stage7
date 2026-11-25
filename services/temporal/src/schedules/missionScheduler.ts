@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest } from '@stage7-nextgen/shared';
 import type { TemporalClient } from '../client/TemporalClient';
 import type { WorkflowInput } from '../types/workflow';
 import {
@@ -49,10 +49,10 @@ function artifactsUrl(): string {
 }
 
 async function saveSchedule(schedule: MissionSchedule): Promise<void> {
-  const response = await fetch(`${artifactsUrl()}/api/artifacts/documents`, {
+  const response = await httpRequest(`${artifactsUrl()}/api/artifacts/documents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(10_000),
+    timeoutMs: 10_000,
     body: JSON.stringify({
       id: schedule.scheduleId,
       tenantId: schedule.tenantId || 'tenant-1',
@@ -66,10 +66,10 @@ async function saveSchedule(schedule: MissionSchedule): Promise<void> {
 }
 
 async function searchSchedules(): Promise<MissionSchedule[]> {
-  const response = await fetch(`${artifactsUrl()}/api/artifacts/documents/search`, {
+  const response = await httpRequest(`${artifactsUrl()}/api/artifacts/documents/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(10_000),
+    timeoutMs: 10_000,
     body: JSON.stringify({ collection: COLLECTION, limit: 1000 }),
   });
   if (!response.ok) {

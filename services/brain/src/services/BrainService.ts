@@ -12,7 +12,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 
@@ -636,10 +636,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
                   estimatedCost,
                 },
               };
-              fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}/events`, {
+              httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}/events`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(event),
+                timeoutMs: interServiceTimeoutMs(),
               }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), missionId }, 'Failed to post cost event to artifacts'));
             }
           } catch (e) {
@@ -859,7 +860,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         return { freeModelsOnly: this.llmSettingsCache.freeModelsOnly };
       }
       const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
-      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/llm-config`, { method: 'GET' });
+      const res = await httpRequest(`${persistenceUrl}/api/artifacts/documents/llm-config`, { method: 'GET', timeoutMs: interServiceTimeoutMs() });
       if (!res.ok) {
         // A missing or unreachable llm-config means the "free models only"
         // preference is unknown. Say so, instead of silently routing to paid
@@ -901,7 +902,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const res = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, { method: 'GET' });
+      const res = await httpRequest(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, { method: 'GET', timeoutMs: interServiceTimeoutMs() });
       if (!res.ok) {
         this.performanceMetricsCache = new Map();
         this.performanceCacheFetchedAt = now;
@@ -950,10 +951,11 @@ private async savePerformanceMetric(
 ): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const response = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
+      const response = await httpRequest(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(metric),
+        timeoutMs: interServiceTimeoutMs(),
       });
     if (!response.ok) {
       const details = await response.text();
@@ -971,7 +973,7 @@ private async savePerformanceMetric(
   private async loadBrainLog(): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const res = await fetch(`${persistenceUrl}/api/artifacts/brain/logs`, { method: 'GET' });
+      const res = await httpRequest(`${persistenceUrl}/api/artifacts/brain/logs`, { method: 'GET', timeoutMs: interServiceTimeoutMs() });
       if (!res.ok) return;
       const result = await res.json() as { entries?: BrainLogEntry[] };
       if (Array.isArray(result.entries)) {
@@ -985,10 +987,11 @@ private async savePerformanceMetric(
   private async saveBrainLog(entry: BrainLogEntry): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const response = await fetch(`${persistenceUrl}/api/artifacts/brain/logs`, {
+      const response = await httpRequest(`${persistenceUrl}/api/artifacts/brain/logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (!response.ok) {
         const details = await response.text();
@@ -1073,8 +1076,9 @@ private async savePerformanceMetric(
   async clearPerformanceMetrics(): Promise<void> {
     const emptyMap = new Map<string, ModelPerformanceMetrics>();
     const persistenceUrl = this.getArtifactsUrl();
-    const response = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
+    const response = await httpRequest(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
       method: 'DELETE',
+      timeoutMs: interServiceTimeoutMs(),
     });
     if (!response.ok) {
       const details = await response.text();

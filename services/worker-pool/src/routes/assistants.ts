@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AssistantExecutor } from '../services/AssistantExecutor';
-import { AssistantDefinition, asyncHandler, NextGenError, StoredKnowledgeEntry, AssistantKnowledgeScope, AssistantKnowledgeOrigin, logger } from '@stage7-nextgen/shared';
+import { AssistantDefinition, asyncHandler, NextGenError, StoredKnowledgeEntry, AssistantKnowledgeScope, AssistantKnowledgeOrigin, logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { assistantLoader as loader, assistantExecutor as executor, knowledgeService } from '../utils/sharedInstance';
 import { registerAssistantTools } from '../shared/mcp';
 
@@ -12,7 +12,7 @@ async function validateAssistantTools(tools: any[] | undefined) {
     const name = typeof t === 'string' ? t : t.name;
     if (!name) continue;
     try {
-      const res = await fetch(`${toolExecutorUrl}/api/tool-executor/tools/${encodeURIComponent(name)}`);
+      const res = await httpRequest(`${toolExecutorUrl}/api/tool-executor/tools/${encodeURIComponent(name)}`, { timeoutMs: interServiceTimeoutMs() });
       if (res.status === 404) {
         // not a registered global tool/skill — check for orphaned stub entries
         if (typeof t === 'object' && t !== null) {

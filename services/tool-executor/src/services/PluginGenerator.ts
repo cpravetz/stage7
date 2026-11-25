@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, llmCallTimeoutMs } from '@stage7-nextgen/shared';
 import { PluginGenerationRequest, PluginGenerationResult, Tool } from '../types';
 import { CredentialProvider } from '../services/CredentialProvider';
 import { ToolRegistry } from '../services/ToolRegistry';
@@ -531,14 +531,12 @@ export class PluginGenerator {
     }
 
     const brainUrl = (process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '');
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      const response = await fetch(`${brainUrl}/api/brain/complaint`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complaint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId: requestId.trim(), reason: reason.slice(0, 2_000), missionId }),
-        signal: controller.signal,
+        timeoutMs: 5_000,
       });
       if (!response.ok) {
         const details = await response.text();
@@ -557,8 +555,6 @@ export class PluginGenerator {
         { missionId, requestId, error: error instanceof Error ? error.message : String(error) },
         'Failed to report a plugin-generation quality complaint',
       );
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
@@ -608,7 +604,7 @@ export class PluginGenerator {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const nonce = `plugin-gen-${attempt}-${Date.now()}`;
       const prompt = `${missionScope(context)}${focusedQuery ?? basePrompt}\nRetry nonce: ${nonce}`;
-      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -617,6 +613,8 @@ export class PluginGenerator {
           options: remediationOptions({ attempt, routingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
+        // Plugin generation is an LLM completion; it needs the long ceiling.
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {
@@ -815,7 +813,7 @@ export class PluginGenerator {
       const contractRoutingSessionId = `contract-gen:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
       const contractNonce = `contract-gen-${Date.now()}`;
       const scope = missionScope(request.context);
-      const contractResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+      const contractResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -824,6 +822,7 @@ export class PluginGenerator {
           options: remediationOptions({ attempt: 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
           missionId,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
       if (!contractResponse.ok) {
         const text = await contractResponse.text();
@@ -860,7 +859,7 @@ export class PluginGenerator {
             requirements: request.requirements || [],
             reason: contractRepairFeedback,
           });
-          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+          const retryResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -869,6 +868,7 @@ export class PluginGenerator {
               options: remediationOptions({ attempt: contractAttempt + 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
               missionId,
             }),
+            timeoutMs: llmCallTimeoutMs(),
           });
           if (!retryResponse.ok) {
             const text = await retryResponse.text();
@@ -923,7 +923,7 @@ export class PluginGenerator {
       const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
       const pluginRoutingSessionId = `plugin-user:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -932,6 +932,7 @@ export class PluginGenerator {
           options: remediationOptions({ attempt: 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
           missionId,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {
@@ -963,7 +964,7 @@ export class PluginGenerator {
               previousContent: pluginContent,
             });
           const pluginRetryNonce = `plugin-retry-${pluginAttempt}-${Date.now()}`;
-          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+          const retryResponse = await httpRequest(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -972,6 +973,7 @@ export class PluginGenerator {
               options: remediationOptions({ attempt: pluginAttempt + 1, routingSessionId: pluginRoutingSessionId, maxTokens: 8192, baseTemperature: 0.2 }),
               missionId,
             }),
+            timeoutMs: llmCallTimeoutMs(),
           });
           if (retryResponse.ok) {
             data = await retryResponse.json() as { content?: unknown; requestId?: unknown };

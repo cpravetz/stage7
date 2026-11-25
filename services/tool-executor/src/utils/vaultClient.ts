@@ -1,3 +1,5 @@
+import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+
 /**
  * Canonical vault client: one place for the vault base URL, the tenant
  * convention, and the ensure-on-missing flow. ToolConfig, CredentialProvider,
@@ -59,9 +61,9 @@ export function parseVaultSecretNames(data: unknown): string[] {
 
 /** List tenant secret names. Throws on network failure and non-OK status. */
 export async function listVaultSecretNames(tenantId = 'system', timeoutMs?: number): Promise<string[]> {
-  const response = await fetch(`${vaultBaseUrl()}/api/vault/secrets`, {
+  const response = await httpRequest(`${vaultBaseUrl()}/api/vault/secrets`, {
     headers: vaultTenantHeaders(tenantId),
-    ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    timeoutMs: timeoutMs ?? interServiceTimeoutMs(),
   });
   if (!response.ok) {
     throw new Error(`Vault secret listing failed (${response.status})`);
@@ -93,7 +95,7 @@ export async function decryptVaultSecret(
     // Unreachable for the fixed paths above; kept as a guard if path building changes.
     throw new Error('Vault URL origin escape attempt');
   }
-  const response = await fetch(target.toString(), { headers: vaultTenantHeaders(tenantId) });
+  const response = await httpRequest(target.toString(), { headers: vaultTenantHeaders(tenantId), timeoutMs: interServiceTimeoutMs() });
   if (!response.ok) {
     return { status: response.status, ok: false };
   }
@@ -111,10 +113,11 @@ export async function ensureVaultSecret(
   tenantId: string,
   plaintext = '',
 ): Promise<{ existed?: boolean; name?: string } | undefined> {
-  const response = await fetch(`${vaultBaseUrl()}/api/vault/secrets/ensure`, {
+  const response = await httpRequest(`${vaultBaseUrl()}/api/vault/secrets/ensure`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...vaultTenantHeaders(tenantId) },
     body: JSON.stringify({ name, plaintext, tenantId }),
+    timeoutMs: interServiceTimeoutMs(),
   });
   if (!response.ok) return undefined;
   return (await response.json()) as { existed?: boolean; name?: string };
@@ -127,10 +130,11 @@ export async function ensureVaultSecret(
 export async function storeVaultSecret(plaintext: string, tenantId: string, name: string): Promise<{ id: string }> {
   const base = assertVaultBaseUrl();
   const target = new URL('/api/vault/secrets', base);
-  const response = await fetch(target.toString(), {
+  const response = await httpRequest(target.toString(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...vaultTenantHeaders(tenantId) },
     body: JSON.stringify({ name, plaintext, tenantId }),
+    timeoutMs: interServiceTimeoutMs(),
   });
   if (!response.ok) {
     throw new Error(`Vault secret storage failed (${response.status})`);

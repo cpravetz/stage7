@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { httpRequest } from '@stage7-nextgen/shared';
 
 export interface EntityMemoryInput {
   tenantId: string;
@@ -42,11 +43,12 @@ export class EntityMemoryStore {
     return `entity-memory-${hash}`;
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.artifactsUrl}${path}`, {
-      ...init,
-      signal: AbortSignal.timeout(10_000),
-      headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  private async request<T>(path: string, init?: { method?: string; body?: string }): Promise<T> {
+    const response = await httpRequest(`${this.artifactsUrl}${path}`, {
+      method: init?.method,
+      body: init?.body,
+      headers: { 'Content-Type': 'application/json' },
+      timeoutMs: 10_000,
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 300);
