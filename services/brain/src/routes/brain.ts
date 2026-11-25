@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { CompletionOptions } from '../services/BrainService';
 import { getBrainInstance } from '../utils/sharedInstance';
 import { z } from 'zod';
-import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError, requireServiceToken } from '@stage7-nextgen/shared';
+import { SpendLimitReachedError, getSpendGate, MAX_SPEND_LIMITS } from '../services/SpendGate';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
 import { logger } from '../utils/logger';
 import { EntityMemoryStore } from '../services/EntityMemoryStore';
@@ -83,7 +84,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
   const requestId = `brain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
-  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId, routingSessionId, entityId, assistantId, tenantId, inputFormat, outputFormat } = req.body as {
+  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId, routingSessionId, entityId, assistantId, tenantId, userId, inputFormat, outputFormat } = req.body as {
     prompt: string;
     options?: CompletionOptions;
     systemPrompt?: string;
@@ -95,6 +96,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     entityId?: string;
     assistantId?: string;
     tenantId?: string;
+    userId?: string;
     inputFormat?: string;
     outputFormat?: string;
   };
@@ -114,6 +116,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     entityId: entityId ?? options?.entityId,
     assistantId: assistantId ?? options?.assistantId,
     tenantId: tenantId ?? options?.tenantId,
+    userId: userId ?? options?.userId,
     inputFormat: inputFormat ?? options?.inputFormat,
     outputFormat: outputFormat ?? options?.outputFormat,
   };
@@ -123,6 +126,12 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     res.json(result);
   } catch (error) {
     logger.error({ requestId, durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) }, 'Brain completion request failed');
+    // The spend-limit refusal is a caller-facing contract with its own body,
+    // not a generic error: emit the exact payload the frontend builds on.
+    if (error instanceof SpendLimitReachedError) {
+      res.status(429).json(error.payload);
+      return;
+    }
     throw error;
   }
 }));
@@ -219,5 +228,39 @@ router.post('/complaint', asyncHandler(async (req: any, res: any) => {
 
 // (Validation errors are rejected inside their handlers with
 // NextGenError.badRequest; asyncHandler maps those to 400 responses.)
+
+// Per-user LLM spending limits. The gateway already authenticates proxied
+// traffic; requireServiceToken re-verifies the forwarded bearer token here so
+// "me" is the verified user, never a body-supplied id.
+const spendLimitUpdateSchema = z.object({
+  limit: z.number().finite().positive().max(MAX_SPEND_LIMITS.perUserUsd),
+  period: z.enum(['day', 'week', 'month']),
+});
+
+router.use('/spend-limits', requireServiceToken({ acceptedTypes: ['user'] }), asyncHandler(async (req: any, res: any) => {
+  const gate = getSpendGate();
+  const userId = req.serviceTokenPayload.sub as string;
+  if (req.method === 'GET') {
+    const limit = await gate.getLimit(userId);
+    const usage = await gate.usage(userId);
+    res.json({ limit: limit ?? null, usage: usage ?? null });
+    return;
+  }
+  if (req.method === 'PUT') {
+    const parsed = spendLimitUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw NextGenError.badRequest('Invalid spending limit', { issues: parsed.error.issues });
+    }
+    const saved = await gate.setLimit(userId, parsed.data.limit, parsed.data.period);
+    res.json({ limit: saved });
+    return;
+  }
+  if (req.method === 'DELETE') {
+    await gate.clearLimit(userId);
+    res.json({ cleared: true });
+    return;
+  }
+  throw NextGenError.badRequest(`Method ${req.method} is not supported for spend-limits`);
+}));
 
 export default router;
