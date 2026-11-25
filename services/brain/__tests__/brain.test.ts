@@ -572,7 +572,7 @@ describe('BrainService', () => {
       expect(laterResult.model).toBe('measured-model');
       expect(fetchSpy).toHaveBeenCalledWith(
         expect.stringContaining('/api/artifacts/brain/performance-metrics'),
-        { method: 'GET' },
+        expect.objectContaining({ method: 'GET' }),
       );
     } finally {
       fetchSpy.mockRestore();

@@ -1,3 +1,11 @@
+// The runtime now reads the llm-config settings document for its deadline
+// resolution; these tests assert exact request sequences, so pin the settings
+// read to "no settings" instead of letting it issue real requests.
+jest.mock('@stage7-nextgen/shared', () => ({
+  ...jest.requireActual('@stage7-nextgen/shared'),
+  fetchLlmSettingsDoc: jest.fn(async () => null),
+}))
+
 import { applyPhaseReview, MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
 import {
   AgentDefinition,

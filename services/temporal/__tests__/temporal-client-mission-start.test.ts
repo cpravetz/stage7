@@ -1,3 +1,11 @@
+// The mission client now reads the llm-config settings document for its
+// deadline resolution; these tests assert exact call counts, so pin the
+// settings read to "no settings" instead of letting it issue real requests.
+jest.mock('@stage7-nextgen/shared', () => ({
+  ...jest.requireActual('@stage7-nextgen/shared'),
+  fetchLlmSettingsDoc: jest.fn(async () => null),
+}))
+
 import { isMissionAwaitingInputError, missionStatus, TemporalClient } from '../src/client/TemporalClient'
 import * as missionActivity from '../src/activities/missionActivity'
 

@@ -12,7 +12,8 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders, parseLlmSettings, resolveBrainCompletionDeadlineMs } from '@stage7-nextgen/shared';
+import type { LlmSettings } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 
@@ -143,10 +144,10 @@ function providerAttemptTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 310000;
 }
 
-async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
+async function withProviderTimeout<T>(operation: Promise<T>, timeoutMs: number = providerAttemptTimeoutMs()): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(`Provider attempt timed out after ${providerAttemptTimeoutMs()}ms`)), providerAttemptTimeoutMs());
+    timeout = setTimeout(() => reject(new Error(`Provider attempt timed out after ${timeoutMs}ms`)), timeoutMs);
   });
   try {
     return await Promise.race([operation, deadline]);
@@ -164,8 +165,11 @@ export class BrainService {
   private circuitBreakers: Map<string, CircuitBreaker> = new Map();
   private brainLog: BrainLogEntry[] = [];
   private modelRoutingSessions = new Map<string, ModelRoutingSession>();
-  private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
+  private llmSettingsCache: { settings: LlmSettings; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
+  // Current breaker tuning: env values at boot, updated whenever a TTL
+  // refresh observes changed llm-config values.
+  private circuitConfig = { threshold: 8, cooldownMs: 60000 };
 
   // Performance tracking - persisted to artifacts service
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
@@ -198,6 +202,7 @@ export class BrainService {
     this.providers = buildProviderRegistry();
     const defaultThreshold = Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8;
     const defaultCooldown = Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000; // 60s
+    this.circuitConfig = { threshold: defaultThreshold, cooldownMs: defaultCooldown };
     for (const p of this.providers) {
       this.circuitBreakers.set(p.id, new CircuitBreaker(defaultThreshold, defaultCooldown));
     }
@@ -345,18 +350,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
        if (memoryNudge) systemPrompt = [memoryNudge, systemPrompt].filter(Boolean).join('\n\n');
      }
      const requestId = `brain_${startTime}_${crypto.randomBytes(6).toString('hex')}`;
-     const attemptTimeout = providerAttemptTimeoutMs();
-     // A candidate attempt cannot cost more than the lower of the two
-     // ceilings: the provider fetch timeout fires before the attempt ceiling,
-     // so the completion deadline has to be budgeted against that smaller
-     // cost. Budgeting against the attempt ceiling alone made the deadline
-     // fit fewer candidates than it was meant to, and the leftover budget
-     // then expired between candidates instead of paying for another one.
-     const attemptCostMs = Math.min(attemptTimeout, providerTimeoutMs());
      const maxRetries = 2;
-     const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-     const defaultDeadline = Math.max(attemptTimeout, Math.min(attemptTimeout * 3, 900000));
-     const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : defaultDeadline);
      const promptPreview = prompt.slice(0, 120);
 
      const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
@@ -397,8 +391,24 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     await this.modelCatalogReady;
     this.router.setPerformanceMetrics(await this.loadPerformanceMetrics());
 
-    // Optionally consult llm-config for runtime preference to prefer free models
+    // Optionally consult llm-config for runtime preferences (free-only,
+    // model lists, timeouts, circuit-breaker tuning). Env vars remain the
+    // fallback layer beneath the settings document.
     const settings = await this.loadLlmSettings();
+    const attemptTimeout = settings?.providerAttemptTimeoutMs ?? providerAttemptTimeoutMs();
+    // A candidate attempt cannot cost more than the lower of the two
+    // ceilings: the provider fetch timeout fires before the attempt ceiling,
+    // so the completion deadline has to be budgeted against that smaller
+    // cost. Budgeting against the attempt ceiling alone made the deadline
+    // fit fewer candidates than it was meant to, and the leftover budget
+    // then expired between candidates instead of paying for another one.
+    const attemptCostMs = Math.min(attemptTimeout, settings?.providerTimeoutMs ?? providerTimeoutMs());
+    const completionDeadlineMs = resolveBrainCompletionDeadlineMs({
+      settingsValue: settings?.completionDeadlineMs,
+      attemptTimeoutMs: attemptTimeout,
+      variant: 'brain',
+    });
+    const completionDeadline = startTime + completionDeadlineMs;
 
       const routingOptions = {
         task: prompt,
@@ -406,6 +416,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         estimatedPromptTokens: Math.ceil(((systemPrompt?.length ?? 0) + prompt.length) / 3.5),
         budget: options.budget,
         freeOnly: settings?.freeModelsOnly,
+        preferredModelIds: settings?.preferredModelIds,
+        forbiddenModelIds: settings?.forbiddenModelIds,
         optimizeFor: options.optimizeFor,
         inputFormat: options.inputFormat,
         outputFormat: options.outputFormat,
@@ -435,6 +447,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           eligibleModelCount: eligibleCandidates.length,
           attemptedModelCount: attemptedEligibleModelCount,
           freeModelsOnly: settings?.freeModelsOnly === true,
+          preferredModelIds: settings?.preferredModelIds ?? [],
+          forbiddenModelIds: settings?.forbiddenModelIds ?? [],
         });
         this.addLog({
           type: 'error',
@@ -546,7 +560,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         try {
           attemptedModelIds.add(routingKey);
           attemptedThisCall.add(routingKey);
-          const response: CompletionResponse = await withProviderTimeout(provider.complete(req));
+          const response: CompletionResponse = await withProviderTimeout(provider.complete(req), attemptTimeout);
           if (typeof response.content !== 'string' || response.content.trim().length === 0) {
             const emptyCompletionError = new Error('Provider returned an empty completion');
             lastErr = emptyCompletionError;
@@ -847,17 +861,19 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         attemptedModelCount: attemptedEligibleModelCount,
         remainingModelCount,
         freeModelsOnly: settings?.freeModelsOnly === true,
+        preferredModelIds: settings?.preferredModelIds ?? [],
+        forbiddenModelIds: settings?.forbiddenModelIds ?? [],
         deadlineExpired: Date.now() >= completionDeadline,
       });
     }
     throw new Error(finalErrMsg);
   }
 
-  private async loadLlmSettings(): Promise<{ freeModelsOnly: boolean } | null> {
+  private async loadLlmSettings(): Promise<LlmSettings | null> {
     try {
       const now = Date.now();
       if (this.llmSettingsCache && now - this.llmSettingsCache.fetchedAt < this.LLMS_SETTINGS_TTL_MS) {
-        return { freeModelsOnly: this.llmSettingsCache.freeModelsOnly };
+        return this.llmSettingsCache.settings;
       }
       const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
       const res = await httpRequest(`${persistenceUrl}/api/artifacts/documents/llm-config`, {
@@ -866,24 +882,37 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         timeoutMs: interServiceTimeoutMs(),
       });
       if (!res.ok) {
-        // A missing or unreachable llm-config means the "free models only"
-        // preference is unknown. Say so, instead of silently routing to paid
-        // models while the operator believes the restriction is active.
+        // A missing or unreachable llm-config means every tunable falls back
+        // to its env var. Say so, instead of silently routing with defaults
+        // while the operator believes the settings are active.
         if (res.status === 404) {
-          logger.warn('llm-config not found; model selection is not restricted to free models');
+          logger.warn('llm-config not found; falling back to environment configuration');
         } else {
-          logger.warn({ status: res.status }, 'Failed to read llm-config; model selection is not restricted to free models');
+          logger.warn({ status: res.status }, 'Failed to read llm-config; falling back to environment configuration');
         }
         return null;
       }
       const doc = await res.json() as { id?: string; tenantId?: string; collection?: string; data?: Record<string, unknown> };
-      const free = !!(doc.data && typeof doc.data.freeModelsOnly === 'boolean' ? doc.data.freeModelsOnly : false);
-      this.llmSettingsCache = { freeModelsOnly: free, fetchedAt: now };
-      return { freeModelsOnly: free };
+      const settings = parseLlmSettings(doc?.data);
+      this.llmSettingsCache = { settings, fetchedAt: now };
+      this.applyCircuitBreakerSettings(settings);
+      return settings;
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load llm-config from artifacts');
       return null;
     }
+  }
+
+  // Reconfigures the boot-time breakers when a TTL refresh observes changed
+  // threshold/cooldown values. Without this, the settings would be a silent
+  // no-op for every provider registered before the change: breakers are
+  // constructed once in the constructor.
+  private applyCircuitBreakerSettings(settings: LlmSettings): void {
+    const { circuitThreshold, circuitCooldownMs } = settings;
+    if (this.circuitConfig.threshold === circuitThreshold && this.circuitConfig.cooldownMs === circuitCooldownMs) return;
+    logger.info({ threshold: circuitThreshold, cooldownMs: circuitCooldownMs }, 'Reconfiguring circuit breakers from llm-config settings');
+    this.circuitConfig = { threshold: circuitThreshold, cooldownMs: circuitCooldownMs };
+    for (const breaker of this.circuitBreakers.values()) breaker.configure(circuitThreshold, circuitCooldownMs);
   }
 
   private addLog(entry: Omit<BrainLogEntry, 'timestamp'>) {

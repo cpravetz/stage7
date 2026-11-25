@@ -19,6 +19,7 @@ import {
   AgentExecutionCheckpoint,
 } from './AgentExecutor';
 import { ASK_USER_MARKER } from './agent-executor/constants';
+import { brainRequestTimeoutFromSettings } from './agent-executor/BrainClient';
 
 /**
  * A task that stopped to ask the user a question is recorded as a "completed"
@@ -36,7 +37,7 @@ export class PersistentAgentRuntime {
   private runtime: AgentRuntime;
   private persistence: ArtifactsService;
 
-  constructor(persistence: ArtifactsService, executor: AgentExecutor = new AgentExecutor()) {
+  constructor(persistence: ArtifactsService, executor: AgentExecutor = new AgentExecutor({ brainRequestTimeoutMs: brainRequestTimeoutFromSettings })) {
     this.persistence = persistence;
     this.runtime = new AgentRuntime(
       executor,

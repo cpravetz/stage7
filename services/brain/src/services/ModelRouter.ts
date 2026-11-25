@@ -24,6 +24,10 @@ export interface RoutingOptions {
   estimatedPromptTokens?: number;
   budget?: number;
   freeOnly?: boolean;
+  /** Models that must never be selected; bare ids and `provider:model` keys both match. */
+  forbiddenModelIds?: string[];
+  /** Models ranked ahead of the others; an additive bonus, not an eligibility filter. */
+  preferredModelIds?: string[];
   optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
   excludedModelIds?: Iterable<string>;
   inputFormat?: string;
@@ -207,6 +211,10 @@ export class ModelRouter {
       if (options.freeOnly) {
         if (!(m.costPer1kTokens === 0)) return false;
       }
+      // Forbidden models are an operator policy, not routing-session state:
+      // hard-filtered here so exhaustion metadata never counts them as
+      // attempted (which pre-seeding excludedModelIds would do).
+      if (options.forbiddenModelIds?.includes(m.id) || options.forbiddenModelIds?.includes(`${m.provider}:${m.id}`)) return false;
       if (isExcluded(m)) return false;
       if (options.inputFormat) {
         if (!supportsRequestedFormat(m.inputFormat, options.inputFormat, m.capabilities, 'input')) return false;
@@ -262,9 +270,16 @@ export class ModelRouter {
     return final.length > 0 ? final : scored;
   }
 
-  private scoreModel(model: ModelDefinition, options: { task: string; optimizeFor?: string; freeOnly?: boolean }, requiredCaps: string[]): number {
+  private scoreModel(model: ModelDefinition, options: { task: string; optimizeFor?: string; freeOnly?: boolean; preferredModelIds?: string[] }, requiredCaps: string[]): number {
     const optimizeFor = options.optimizeFor || 'balanced';
     let score = 0;
+
+    // Preferred models bubble to candidates[0] without restricting the
+    // candidate set. The bonus outweighs capability/cost deltas but not an
+    // open circuit: an unavailable preferred model should not be forced.
+    if (options.preferredModelIds?.includes(model.id) || options.preferredModelIds?.includes(`${model.provider}:${model.id}`)) {
+      score += 100;
+    }
 
     // Capability match: +10 per required capability the model has
     const matchedCaps = requiredCaps.filter((cap) => model.capabilities.includes(cap)).length;

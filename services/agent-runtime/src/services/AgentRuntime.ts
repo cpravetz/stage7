@@ -18,6 +18,7 @@ import {
   AgentDelegateRequest,
   parseAgentExecutionCheckpoint,
 } from './AgentExecutor'
+import { brainRequestTimeoutFromSettings } from './agent-executor/BrainClient'
 
 const MAX_AGENTS_PER_MISSION = 16
 
@@ -118,7 +119,7 @@ export class AgentRuntime {
   ) => Promise<AgentTask>
 
   constructor(
-    executor: AgentExecutor = new AgentExecutor(),
+    executor: AgentExecutor = new AgentExecutor({ brainRequestTimeoutMs: brainRequestTimeoutFromSettings }),
     persistAgentState?: (state: AgentState) => Promise<void>,
     saveExecutionCheckpoint?: (agentId: string, taskId: string, checkpoint: AgentExecutionCheckpoint) => Promise<void>,
     startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>,

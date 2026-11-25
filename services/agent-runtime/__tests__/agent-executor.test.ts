@@ -4001,3 +4001,62 @@ describe('AgentExecutor', () => {
       expect((error as Error).message).toMatch(/irreducible preserved context/i)
     }
   })
+
+describe('AgentExecutor brainRequestTimeoutMs resolver', () => {
+  jest.setTimeout(30_000)
+  const hangingBrainFetcher: typeof fetch = async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+    if (url.endsWith('/api/brain/complete')) {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true })
+      })
+    }
+    throw new Error(`Unexpected request: ${url}`)
+  }
+
+  it('validates resolved values with the same bounds as fixed numbers', async () => {
+    await expect(new AgentExecutor({ fetcher: hangingBrainFetcher, brainRequestTimeoutMs: async () => 500 }).execute(
+      definition,
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )).rejects.toThrow('Agent brainRequestTimeoutMs must be an integer between 1000 and')
+  })
+
+  it('resolves the timeout per request, picking up a changed value on the next request', async () => {
+    const previousDeadline = process.env.BRAIN_COMPLETION_DEADLINE_MS
+    const previousAttemptTimeout = process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+    delete process.env.BRAIN_COMPLETION_DEADLINE_MS
+    delete process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+    let requests = 0
+    // First request is capped at 1s; the next one gets the settings-derived 5s.
+    const brainRequestTimeoutMs = async () => {
+      requests += 1
+      return requests === 1 ? 1_000 : 5_000
+    }
+    const fetcher: typeof fetch = hangingBrainFetcher
+    jest.useFakeTimers()
+    try {
+      const executor = new AgentExecutor({ fetcher, brainRequestTimeoutMs })
+
+      const first = executor.execute(definition, task() as AgentTask, { missionId: 'mission-1', delegationDepth: 0 })
+      const firstAssertion = expect(first).rejects.toThrow('Brain request timed out after 1000ms')
+      await jest.advanceTimersByTimeAsync(1_000)
+      await firstAssertion
+
+      const second = executor.execute(definition, task() as AgentTask, { missionId: 'mission-1', delegationDepth: 0 })
+      const secondAssertion = expect(second).rejects.toThrow('Brain request timed out after 5000ms')
+      // The old 1s mark must not abort the second request; it fires at 5s.
+      await jest.advanceTimersByTimeAsync(1_000)
+      await jest.advanceTimersByTimeAsync(4_000)
+      await secondAssertion
+    } finally {
+      jest.useRealTimers()
+      if (previousDeadline === undefined) delete process.env.BRAIN_COMPLETION_DEADLINE_MS
+      else process.env.BRAIN_COMPLETION_DEADLINE_MS = previousDeadline
+      if (previousAttemptTimeout === undefined) delete process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+      else process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = previousAttemptTimeout
+    }
+  })
+})
+

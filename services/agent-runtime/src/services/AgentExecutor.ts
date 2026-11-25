@@ -1,7 +1,7 @@
 import type { AgentDefinition, AgentTask } from '../types'
 import { httpRequest } from '@stage7-nextgen/shared'
 import { ActionExecutor } from './agent-executor/ActionExecutor'
-import { BrainClient, brainRequestTimeoutFromEnvironment } from './agent-executor/BrainClient'
+import { BrainClient, brainRequestTimeoutFromEnvironment, resolveBrainRequestTimeoutMs, validateBrainRequestTimeoutMs } from './agent-executor/BrainClient'
 import { CapabilityResolver } from './agent-executor/CapabilityResolver'
 import type { ExecutorDeps } from './agent-executor/RunContext'
 import { SystemToolClient } from './agent-executor/SystemToolClient'
@@ -48,7 +48,11 @@ export class AgentExecutor {
     const toolExecutorUrl = (options.toolExecutorUrl || process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/$/, '')
     const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.maxDelegationDepth = options.maxDelegationDepth ?? DEFAULT_MAX_DELEGATION_DEPTH
-    const brainRequestTimeoutMs = options.brainRequestTimeoutMs ?? brainRequestTimeoutFromEnvironment()
+    // Default is the synchronous env-derived timeout: resolvers that hit the
+    // network must be passed explicitly (production wiring passes
+    // brainRequestTimeoutFromSettings), so tests and offline construction
+    // never block on a settings fetch.
+    const brainRequestTimeout = options.brainRequestTimeoutMs ?? brainRequestTimeoutFromEnvironment()
     const fetcher = options.fetcher || ((input, init) => fetch(input, init))
     if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 100) {
       throw new Error('Agent maxIterations must be an integer between 1 and 100')
@@ -56,21 +60,19 @@ export class AgentExecutor {
     if (!Number.isInteger(this.maxDelegationDepth) || this.maxDelegationDepth < 0 || this.maxDelegationDepth > 8) {
       throw new Error('Agent maxDelegationDepth must be an integer between 0 and 8')
     }
-    if (
-      !Number.isInteger(brainRequestTimeoutMs)
-      || brainRequestTimeoutMs < 1_000
-      || brainRequestTimeoutMs > MAX_BRAIN_REQUEST_TIMEOUT_MS
-    ) {
-      throw new Error(`Agent brainRequestTimeoutMs must be an integer between 1000 and ${MAX_BRAIN_REQUEST_TIMEOUT_MS}`)
+    if (typeof brainRequestTimeout !== 'function') {
+      // Resolver values are validated per request; a fixed timeout keeps the
+      // constructor-time check.
+      validateBrainRequestTimeoutMs(brainRequestTimeout)
     }
 
-    const brain = new BrainClient(brainUrl, fetcher, brainRequestTimeoutMs)
+    const brain = new BrainClient(brainUrl, fetcher, brainRequestTimeout)
     const catalog = new ToolCatalogClient(toolExecutorUrl, fetcher)
-    const resolveFetcher: typeof fetch = options.fetcher || ((input, init) => httpRequest(String(input), {
+    const resolveFetcher: typeof fetch = options.fetcher || (async (input, init) => httpRequest(String(input), {
       method: init?.method,
       headers: { 'Content-Type': 'application/json' },
       body: typeof init?.body === 'string' ? init.body : undefined,
-      timeoutMs: brainRequestTimeoutMs,
+      timeoutMs: await resolveBrainRequestTimeoutMs(brainRequestTimeout),
       signal: init?.signal || undefined,
     }))
     const resolver = new CapabilityResolver(toolExecutorUrl, resolveFetcher, catalog)

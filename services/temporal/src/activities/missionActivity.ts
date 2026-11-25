@@ -1,6 +1,7 @@
 import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { MissionActivityCheckpoint, WorkflowInput } from '../types/workflow';
+import { waitForApproval as waitForApprovalPhase } from './approvalWait';
 
 interface MissionExecutionOptions {
   checkpoint?: MissionActivityCheckpoint;
@@ -79,33 +80,15 @@ async function executeMissionActivity(
 
   const waitForApproval = async (phaseId: string, question: string): Promise<{ approved: boolean; reason?: string }> => {
     logger.info({ missionId: input.missionId, phaseId, question }, 'Phase awaiting approval');
-    const persistenceUrl = process.env.ARTIFACTS_URL || 'http://artifacts:4200';
-    const startTime = Date.now();
-    const timeout = parseInt(process.env.APPROVAL_TIMEOUT_MS || '0', 10) || 24 * 60 * 60 * 1000;
-    const pollInterval = parseInt(process.env.APPROVAL_POLL_INTERVAL_MS || '3000', 10);
-    let checks = 0;
-    const approvalUrl = `${persistenceUrl}/api/artifacts/missions/${input.missionId}/phases/${phaseId}`;
-    while (Date.now() - startTime < timeout) {
-      await new Promise((r) => setTimeout(r, pollInterval));
-      await options.controlCheckpoint?.();
-      heartbeat();
-      checks++;
-      try {
-        const res = await httpRequest(approvalUrl, { timeoutMs: 5000 });
-        if (res.ok) {
-          const phase = await res.json() as { status: string; rejectionReason?: string };
-          if (phase.status === 'approved') return { approved: true };
-          if (phase.status === 'rejected') return { approved: false, reason: phase.rejectionReason };
-        } else {
-          const text = await res.text();
-          logger.warn({ missionId: input.missionId, phaseId, status: res.status, checks, url: approvalUrl, body: text.slice(0, 200) }, 'Approval poll returned non-ok');
-        }
-      } catch (err) {
-        logger.warn({ missionId: input.missionId, phaseId, checks, url: approvalUrl, err: (err as Error).message, stack: (err as Error).stack?.slice(0, 300) }, 'Approval poll fetch failed');
-      }
-    }
-    logger.warn({ missionId: input.missionId, phaseId, checks, url: approvalUrl }, 'Approval timeout');
-    return { approved: false, reason: 'Approval timeout' };
+    // The approval window and poll interval are captured inside
+    // waitForApprovalPhase BEFORE the poll loop starts: a settings change made
+    // mid-wait never shrinks a running approval window.
+    return waitForApprovalPhase({
+      missionId: input.missionId,
+      phaseId,
+      heartbeat,
+      controlCheckpoint: options.controlCheckpoint,
+    });
   };
 
 const orchestrator = new MissionOrchestrator();

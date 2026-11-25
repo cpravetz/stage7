@@ -1,6 +1,7 @@
 import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
+  fetchLlmSettingsDoc,
   logger,
 } from '@stage7-nextgen/shared'
 import type { AgentDefinition } from '../../types'
@@ -9,6 +10,7 @@ import {
   DEFAULT_BRAIN_COMPLETION_DEADLINE_MS,
   DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS,
   MAX_BRAIN_REQUEST_BYTES,
+  MAX_BRAIN_REQUEST_TIMEOUT_MS,
 } from './constants'
 import { compactBrainRequest } from './requestCompaction'
 import type { BrainErrorResponse, BrainResponse, ChatMessage } from './types'
@@ -25,12 +27,42 @@ export function brainRequestTimeoutFromEnvironment(): number {
   return completionDeadline + BRAIN_RESPONSE_GRACE_MS
 }
 
+/**
+ * Settings-driven resolver: the llm-config completion deadline when the
+ * document is reachable, the env-derived formula otherwise. Async — production
+ * wiring passes this explicitly; tests and offline construction default to the
+ * synchronous env function so they never block on a settings fetch.
+ */
+export async function brainRequestTimeoutFromSettings(): Promise<number> {
+  const artifactsUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200'
+  const settings = await fetchLlmSettingsDoc(artifactsUrl)
+  if (settings?.completionDeadlineMs !== undefined) {
+    return settings.completionDeadlineMs + BRAIN_RESPONSE_GRACE_MS
+  }
+  return brainRequestTimeoutFromEnvironment()
+}
+
+/** The [1s, MAX] window the executor has always enforced, applied to resolved values too. */
+export function validateBrainRequestTimeoutMs(timeoutMs: number): number {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > MAX_BRAIN_REQUEST_TIMEOUT_MS) {
+    throw new Error(`Agent brainRequestTimeoutMs must be an integer between 1000 and ${MAX_BRAIN_REQUEST_TIMEOUT_MS}`)
+  }
+  return timeoutMs
+}
+
+/** Resolves a fixed timeout or a per-request resolver, validating the resolved value. */
+export async function resolveBrainRequestTimeoutMs(
+  timeout: number | (() => Promise<number> | number),
+): Promise<number> {
+  return validateBrainRequestTimeoutMs(typeof timeout === 'function' ? await timeout() : timeout)
+}
+
 /** HTTP client for the Brain service: completions and response-quality complaints. */
 export class BrainClient {
   constructor(
     private readonly brainUrl: string,
     private readonly fetcher: typeof fetch,
-    private readonly requestTimeoutMs: number,
+    private readonly requestTimeoutMs: number | (() => Promise<number> | number),
   ) {}
 
   async complete(
@@ -68,7 +100,10 @@ export class BrainClient {
     }
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    // Resolved per request so a saved deadline change reaches the next
+    // request without restarting the process.
+    const timeoutMs = await resolveBrainRequestTimeoutMs(this.requestTimeoutMs)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
     try {
       response = await this.fetcher(`${this.brainUrl}/api/brain/complete`, {
@@ -80,7 +115,7 @@ export class BrainClient {
     } catch (error) {
       if (controller.signal.aborted) {
         const cause = error instanceof Error ? `: ${error.message}` : '';
-        throw new Error(`Brain request timed out after ${this.requestTimeoutMs}ms${cause}`, { cause: error })
+        throw new Error(`Brain request timed out after ${timeoutMs}ms${cause}`, { cause: error })
       }
       throw error
     } finally {
