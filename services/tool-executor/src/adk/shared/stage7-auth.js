@@ -4,9 +4,11 @@
  * This file is the single source of truth for how a code-tool's `auth` config
  * becomes request headers inside a sandbox. CodeExecutor reads it verbatim and
  * inlines it as the prelude of every JavaScript sandbox script (the same way
- * stage7-runtime.js is copied into the sandbox), so there must be no second,
- * hand-maintained copy of this logic in CodeExecutor.ts. The Python prelude in
- * CodeExecutor.ts mirrors this file's semantics — keep the two in sync.
+ * stage7-runtime.js is copied into the sandbox), declaring a
+ * `__STAGE7_VAULT_TOKEN` global (read via globalThis) just before it. The
+ * Python prelude in CodeExecutor.ts mirrors these semantics — its
+ * per-execution mint plus token injection and this file's token consumption
+ * must stay in sync.
  *
  * Constraints of the sandbox environment:
  * - CommonJS, no imports: the text is inlined into generated scripts and must
@@ -21,7 +23,9 @@ const __STAGE7_DEFAULT_VAULT_URL = 'http://vault:4000';
 
 /**
  * Resolve one auth value. Objects may reference the vault (`vaultSecretId`,
- * decrypted over HTTP with the canonical `X-Tenant-Id` tenant convention) or
+ * decrypted over HTTP with the per-execution service token CodeExecutor
+ * injects as `__STAGE7_VAULT_TOKEN` — the vault authenticates by verified
+ * bearer token only, so absent the token the lookup degrades to '') or
  * the process environment (`envVar` / `configKey`); strings may use `${VAR}`
  * environment references. Everything that cannot be resolved degrades to ''
  * — a missing credential must never throw inside generated tool code.
@@ -31,8 +35,19 @@ async function __resolveAuthValue(val) {
   if (typeof val === 'object') {
     if (val.vaultSecretId) {
       try {
+        const headers = {};
+        // CodeExecutor declares a `__STAGE7_VAULT_TOKEN` global (read via
+        // globalThis so the standalone module never references an undeclared
+        // identifier) just before inlining this file; it is undefined when
+        // the module is required directly (tests, tooling). Either way an
+        // unauthenticated decrypt is rejected by the vault and degrades to ''
+        // like every other unresolvable auth value.
+        const injectedVaultToken = globalThis.__STAGE7_VAULT_TOKEN;
+        if (injectedVaultToken) {
+          headers['Authorization'] = 'Bearer ' + injectedVaultToken;
+        }
         const r = await fetch((process.env.VAULT_URL || __STAGE7_DEFAULT_VAULT_URL) + '/api/vault/secrets/' + val.vaultSecretId + '/decrypt', {
-          headers: { 'X-Tenant-Id': 'system' },
+          headers,
         });
         if (r.ok) {
           const d = await r.json();
