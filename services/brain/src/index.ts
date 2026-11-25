@@ -22,6 +22,10 @@ setTimeout(() => {
 
 app.use('/api/brain', brainRoutes);
 app.use('/api/brain/distillation', distillationRoutes);
+// Mounted separately so it resolves at POST /api/brain/embeddings (the router
+// defines POST '/'). Regression QA finding H1: the import alone left the route
+// 404ing in every deployment, silently degrading hybrid retrieval to lexical-only.
+app.use('/api/brain/embeddings', embeddingsRoutes);
 
 const PORT = process.env.PORT || 3100;
 
