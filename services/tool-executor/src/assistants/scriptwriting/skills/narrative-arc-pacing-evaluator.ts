@@ -62,7 +62,23 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const pageTarget = String(input.pageTarget || '110');
 
       if (!script.trim()) {
-
+        // This guard used to have an empty body, so a blank script fell straight
+        // through to the full analysis against an empty scene map. The handler
+        // also had no return statement anywhere, so both paths finished with
+        // "Execution completed with no output" instead of saying why (0.8, 1.1).
+        return {
+          success: false,
+          error: 'No script was supplied to evaluate.',
+          data: null,
+          present: [
+            {
+              id: 'missing-script',
+              title: 'Nothing to evaluate',
+              kind: 'text',
+              body: 'Paste the script text you want evaluated into the Script field, then run the Skill again.',
+            },
+          ],
+        };
       }
 
       const WORDS_PER_PAGE = 180;
@@ -469,5 +485,18 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       ctx.store.save('narrative-arc-pacing', store);
 
       // The skill owns its report layout; 'present' is the generic block contract.
+      const present = [
+        {
+          id: 'pacing-report',
+          title: 'Narrative Arc & Pacing Evaluation',
+          kind: 'text',
+          body: reportLines.join('\n'),
+        },
+      ];
+      return {
+        success: true,
+        data: { ...evaluation, present },
+        present,
+      };
     }
   });
