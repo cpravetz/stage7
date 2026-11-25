@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
+import { listVaultSecretNames as listVaultSecretNamesFromVault } from '../utils/vaultClient';
 
 const TEST_CONTRACT_SYSTEM_PROMPT = `Create small, deterministic input/output tests for the requested tool capability. Do not write an implementation.
 When a mission goal is provided, it defines the scope: the capability must be necessary for that goal and preserve its operation and medium. If it conflicts with the goal, return no cases.
@@ -334,24 +335,10 @@ function missionScope(context: Record<string, unknown> | undefined): string {
  * supplied.
  */
 export async function listVaultSecretNames(): Promise<string[]> {
-  const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
   try {
     // A short deadline keeps a slow or absent Vault from delaying generation: the
     // secret list only sharpens the prompt, and generation must not depend on it.
-    const response = await fetch(`${vaultUrl}/api/vault/secrets`, {
-      headers: { 'X-Tenant-Id': 'system' },
-      signal: AbortSignal.timeout(3_000),
-    });
-    if (!response.ok) return [];
-    const data = await response.json() as unknown;
-    const list = Array.isArray(data)
-      ? data
-      : (data && typeof data === 'object' && Array.isArray((data as { secrets?: unknown[] }).secrets)
-        ? (data as { secrets: unknown[] }).secrets
-        : []);
-    return list
-      .map((entry) => (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined))
-      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+    return await listVaultSecretNamesFromVault('system', 3_000);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed for plugin generation');
     return [];
