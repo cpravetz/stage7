@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { NextGenError } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 
 export interface AuthenticatedTenantContext {
   tenantId: string;
@@ -25,9 +25,10 @@ function normalizeTenant(value: unknown): string | undefined {
 async function verifyBearerTenant(token: string): Promise<AuthenticatedTenantContext | undefined> {
   const authUrl = (process.env.AUTH_URL || 'http://auth:4300').replace(/\/+$/, '');
   try {
-    const response = await fetch(`${authUrl}/api/auth/verify`, {
+    const response = await httpRequest(`${authUrl}/api/auth/verify`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: interServiceTimeoutMs(),
     });
     if (!response.ok) return undefined;
     const data = await response.json() as { payload?: VerifyPayload; success?: boolean };

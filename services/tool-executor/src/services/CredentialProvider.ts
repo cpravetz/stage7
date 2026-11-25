@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { assertVaultBaseUrl, decryptVaultSecret, listVaultSecretNames, storeVaultSecret } from '../utils/vaultClient';
 
 export interface ToolCredentials {
@@ -237,7 +237,7 @@ export class CredentialProvider {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     try {
       const target = new URL(`/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt`, vaultUrl);
-      const response = await fetch(target.toString(), { headers: { 'X-Tenant-Id': 'system' } });
+      const response = await httpRequest(target.toString(), { headers: { 'X-Tenant-Id': 'system' }, timeoutMs: interServiceTimeoutMs() });
       if (response.ok) {
         const data = await response.json() as { plaintext?: string };
         if (data.plaintext !== undefined) return data.plaintext;

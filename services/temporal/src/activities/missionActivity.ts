@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { MissionActivityCheckpoint, WorkflowInput } from '../types/workflow';
 
@@ -30,10 +30,11 @@ async function executeMissionActivity(
     // feed and the event log never diverge into two ids for one event.
     if (persistenceUrl) {
       try {
-        const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/events`, {
+        const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(event),
+          timeoutMs: interServiceTimeoutMs(),
         });
         if (response.ok) {
           try {
@@ -50,10 +51,11 @@ async function executeMissionActivity(
     // Broadcast live to mission subscribers
     if (!gatewayUrl) return;
     try {
-      await fetch(`${gatewayUrl}/api/gateway/broadcast/mission/${input.missionId}`, {
+      await httpRequest(`${gatewayUrl}/api/gateway/broadcast/mission/${input.missionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(persistedEvent ?? event),
+        timeoutMs: interServiceTimeoutMs(),
       });
     } catch (err) {
       logger.warn({ missionId: input.missionId, err: (err as Error).message }, 'Broadcast failed');
@@ -64,10 +66,11 @@ async function executeMissionActivity(
     const gatewayUrl = process.env.GATEWAY_URL;
     if (!gatewayUrl) return;
     try {
-      await fetch(`${gatewayUrl}/api/gateway/broadcast`, {
+      await httpRequest(`${gatewayUrl}/api/gateway/broadcast`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(event),
+        timeoutMs: interServiceTimeoutMs(),
       });
     } catch (err) {
       logger.warn({ err: (err as Error).message }, 'Broadcast-all failed');
@@ -88,11 +91,7 @@ async function executeMissionActivity(
       heartbeat();
       checks++;
       try {
-        const controller = new AbortController();
-        const fetchPromise = fetch(approvalUrl, { signal: controller.signal });
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        const res = await fetchPromise;
-        clearTimeout(timeoutId);
+        const res = await httpRequest(approvalUrl, { timeoutMs: 5000 });
         if (res.ok) {
           const phase = await res.json() as { status: string; rejectionReason?: string };
           if (phase.status === 'approved') return { approved: true };
@@ -151,7 +150,7 @@ export async function runMissionDirect(
     return executeMissionActivity(input, { checkpoint, controlCheckpoint });
   }
   const persistenceUrl = process.env.ARTIFACTS_URL || 'http://artifacts:4200';
-  const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/events`);
+  const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/events`, { timeoutMs: interServiceTimeoutMs() });
   if (!response.ok) throw new Error(`Failed to load mission user messages from Artifacts (${response.status})`);
   const body: unknown = await response.json();
   if (!body || typeof body !== 'object' || !Array.isArray((body as { events?: unknown }).events)) {

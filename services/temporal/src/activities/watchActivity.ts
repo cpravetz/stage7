@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared'
+import { logger, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs } from '@stage7-nextgen/shared'
 
 /** Where watch run records are stored. */
 export const WATCH_RESULTS_COLLECTION = 'watch-results'
@@ -26,7 +26,7 @@ async function requireOk(res: Response, what: string): Promise<void> {
 async function readWatch(watchId: string): Promise<Record<string, unknown> | null> {
   const base = artifactsUrl()
   if (!base) throw new Error('ARTIFACTS_URL not configured')
-  const res = await fetch(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`)
+  const res = await httpRequest(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, { timeoutMs: interServiceTimeoutMs() })
   if (res.status === 404) return null
   await requireOk(res, `Reading watch ${watchId}`)
   const doc = (await res.json()) as { data?: Record<string, unknown> }
@@ -138,7 +138,7 @@ export async function runWatchActivity(input: { watchId: string }) {
   let execResult: Record<string, unknown> | null = null
   let toolError: string | null = null
   try {
-    const res = await fetch(`${toolExecutorUrl}/api/tool-executor/tools/execute`, {
+    const res = await httpRequest(`${toolExecutorUrl}/api/tool-executor/tools/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Assistant-Id': assistantId },
       // `type` and `isSkill` are required by the execute route before it consults the registry, and
@@ -149,6 +149,8 @@ export async function runWatchActivity(input: { watchId: string }) {
         input: toolInput,
         assistantId,
       }),
+      // A watch skill may transit an LLM completion, so it needs the long ceiling.
+      timeoutMs: llmCallTimeoutMs(),
     })
     execResult = (await res.json()) as Record<string, unknown>
     toolError = toolOutcomeError(skill, res, execResult)
@@ -162,7 +164,7 @@ export async function runWatchActivity(input: { watchId: string }) {
   let persisted = false
   let persistError: string | null = null
   try {
-    const res = await fetch(`${base}/api/artifacts/documents`, {
+    const res = await httpRequest(`${base}/api/artifacts/documents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -171,6 +173,7 @@ export async function runWatchActivity(input: { watchId: string }) {
         collection: WATCH_RESULTS_COLLECTION,
         data: { watchId, runAt, skill, assistantId, success: toolError === null, result: execResult },
       }),
+      timeoutMs: interServiceTimeoutMs(),
     })
     await requireOk(res, 'Persisting watch result')
     persisted = true
@@ -185,7 +188,7 @@ export async function runWatchActivity(input: { watchId: string }) {
   let lastRunRecorded = false
   try {
     const current = (await readWatch(watchId)) || {}
-    const res = await fetch(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, {
+    const res = await httpRequest(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -197,6 +200,7 @@ export async function runWatchActivity(input: { watchId: string }) {
           lastRunError: toolError,
         },
       }),
+      timeoutMs: interServiceTimeoutMs(),
     })
     await requireOk(res, 'Updating watch lastRunAt')
     lastRunRecorded = true

@@ -3,7 +3,7 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { logger, Plan, PlanSchema, sanitizeAgentMessage } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema, sanitizeAgentMessage, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
@@ -236,7 +236,7 @@ async function configuredCredentialReferences(
           `/api/vault/secrets/name/${encodeURIComponent(secretName)}${tenantQuery}`,
           vaultUrl,
         );
-        const response = await fetch(url);
+        const response = await httpRequest(String(url), { timeoutMs: interServiceTimeoutMs() });
         if (!response.ok) continue;
         secret = await response.json() as { id?: unknown };
         break;
@@ -673,12 +673,12 @@ export class TemporalClient {
             const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
             const artifacts = (process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200');
             // Fetch assistant and trigger distillation via Brain service
-            fetch(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(input.assistantId || '')}`)
+            httpRequest(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(input.assistantId || '')}`, { timeoutMs: interServiceTimeoutMs() })
               .then(async (res) => {
                 if (!res.ok) return;
                 const assistant = await res.json();
                 // Ask brain to distill and we can re-save via artifacts; brain service has distillation route
-                await fetch(`${brainUrl}/api/brain/distillation/trigger`, {
+                await httpRequest(`${brainUrl}/api/brain/distillation/trigger`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -686,6 +686,7 @@ export class TemporalClient {
                     tenantId: input.tenantId,
                     missionId: input.missionId,
                   }),
+                  timeoutMs: llmCallTimeoutMs(),
                 });
                 // Optionally re-fetch updated assistant from brain if it persists; brain persists via its own flow? 
                 // Brain's distillation service can be extended to persist via artifacts - but easier: call artifacts to save after brain returns? 
@@ -1035,12 +1036,13 @@ export class TemporalClient {
         request?: { missingCredentials?: Array<{ label?: string; key?: string }> };
       } | undefined;
       try {
-        const response = await fetch(
+        const response = await httpRequest(
         `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ credentials }),
+          timeoutMs: interServiceTimeoutMs(),
         },
       );
       const bodyText = await response.text();
@@ -1099,7 +1101,7 @@ export class TemporalClient {
         throw new Error('The requested permission scope is not available for this tool');
       }
       const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
-      const response = await fetch(
+      const response = await httpRequest(
         `${toolExecutorUrl}/api/tool-executor/mcp/permission/${encodeURIComponent(pendingInteraction.requestId)}/decide`,
         {
           method: 'POST',
@@ -1109,6 +1111,7 @@ export class TemporalClient {
             ...(continuation.permissionScope ? { scope: continuation.permissionScope } : {}),
             decidedBy: 'mission-user',
           }),
+          timeoutMs: interServiceTimeoutMs(),
         },
       );
       const bodyText = await response.text();
@@ -1473,11 +1476,14 @@ export class TemporalClient {
     return PlanSchema.parse(await response.json());
   }
 
-  private async fetchArtifactsWithRetry(url: string, init?: RequestInit): Promise<Response> {
+  private async fetchArtifactsWithRetry(
+    url: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string },
+  ): Promise<Response> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const response = await fetch(url, init);
+        const response = await httpRequest(url, { ...init, timeoutMs: interServiceTimeoutMs() });
         if (response.status < 500 || attempt === 4) return response;
         lastError = new Error(`Artifacts returned HTTP ${response.status}`);
       } catch (error) {
@@ -1597,7 +1603,7 @@ export class TemporalClient {
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;
       if (persistenceUrl) {
-        const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${missionKey}`);
+        const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${missionKey}`, { timeoutMs: interServiceTimeoutMs() });
         if (response.ok) {
           const data: any = await response.json();
           return {
@@ -1624,7 +1630,7 @@ export class TemporalClient {
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;
       if (persistenceUrl) {
-        const response = await fetch(`${persistenceUrl}/api/artifacts/missions`);
+        const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions`, { timeoutMs: interServiceTimeoutMs() });
         if (response.ok) {
           const data: any = await response.json();
           const docs = data.missions || [];
@@ -1656,7 +1662,7 @@ export class TemporalClient {
     if (!persistenceUrl) {
       throw new Error('Mission controls require ARTIFACTS_URL');
     }
-    const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`);
+    const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, { timeoutMs: interServiceTimeoutMs() });
     if (response.status === 404) return null;
     if (!response.ok) {
       throw new Error(`Could not load mission control state (${response.status})`);
@@ -1679,7 +1685,7 @@ export class TemporalClient {
     if (!persistenceUrl) {
       throw new Error('Mission controls require ARTIFACTS_URL');
     }
-    const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
+    const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1689,6 +1695,7 @@ export class TemporalClient {
         ...(output ? { output } : {}),
         updatedAt: Date.now(),
       }),
+      timeoutMs: interServiceTimeoutMs(),
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);
@@ -1783,10 +1790,11 @@ export class TemporalClient {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) return;
     try {
-      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
+      const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pendingDeletion: true, updatedAt: Date.now() }),
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (!response.ok) {
         const details = (await response.text()).slice(0, 500);
@@ -1805,8 +1813,9 @@ export class TemporalClient {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) return;
     try {
-      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
+      const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
         method: 'DELETE',
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (!response.ok && response.status !== 404) {
         const details = (await response.text()).slice(0, 500);
@@ -1838,7 +1847,7 @@ export class TemporalClient {
       return;
     }
     try {
-      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${missionId}/events`, {
+      const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions/${missionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1847,6 +1856,7 @@ export class TemporalClient {
           timestamp: event.timestamp || Date.now(),
           data: event.data || {},
         }),
+        timeoutMs: interServiceTimeoutMs(),
       });
       if (response.ok) {
         try { return await response.json(); } catch { return null; }
@@ -1902,10 +1912,11 @@ export class TemporalClient {
     }
 
     try {
-      await fetch(endpoint, {
+      await httpRequest(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(event),
+        timeoutMs: interServiceTimeoutMs(),
       });
       logger.debug({ event: event.type, missionId }, 'Broadcast mission event');
     } catch (err) {
@@ -1948,7 +1959,7 @@ export class TemporalClient {
       return;
     }
 
-    const response = await fetch(`${persistenceUrl}/api/artifacts/missions`, {
+    const response = await httpRequest(`${persistenceUrl}/api/artifacts/missions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1969,6 +1980,7 @@ export class TemporalClient {
         createdAt: state.createdAt,
         updatedAt: state.updatedAt,
       }),
+      timeoutMs: interServiceTimeoutMs(),
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);
@@ -1991,7 +2003,7 @@ export class TemporalClient {
 
     const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
     try {
-      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+      const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2016,6 +2028,7 @@ Respond with ONLY a JSON object: {"classification": "ANSWER|FEEDBACK|UNCLEAR", "
           temperature: 0.1,
           maxTokens: 200,
         }),
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {

@@ -18,6 +18,7 @@ import { Router, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
+import { httpRequest } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 
 const router: Router = Router();
@@ -100,14 +101,12 @@ function readLocal(target: string): Record<string, unknown> | null {
  * store. Returns null on any failure so callers fall back to local files rather
  * than surfacing an outage to a skill.
  */
-async function artifactsFetch(route: string, init?: RequestInit): Promise<any | null> {
+async function artifactsFetch(route: string, init?: { method?: string; body?: string }): Promise<any | null> {
   if (!ARTIFACTS_URL) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
+    const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
       headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
+      timeoutMs: REMOTE_TIMEOUT_MS,
       ...init,
     });
     if (!res.ok) return null;
@@ -116,8 +115,6 @@ async function artifactsFetch(route: string, init?: RequestInit): Promise<any | 
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err), route }, 'Artifacts persistence unavailable');
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

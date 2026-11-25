@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { asyncHandler } from '@stage7-nextgen/shared'
+import { asyncHandler, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared'
 import logger from '../utils/logger'
 
 const router: Router = Router()
@@ -8,11 +8,12 @@ const router: Router = Router()
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
 const WATCH_COLLECTION = 'watches'
 
-async function artifactsFetch(path: string, init?: RequestInit): Promise<any | null> {
+async function artifactsFetch(path: string, init?: { method?: string; body?: string }): Promise<any | null> {
   if (!ARTIFACTS_URL) return null
   try {
-    const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${path}`, {
+    const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${path}`, {
       headers: { 'Content-Type': 'application/json' },
+      timeoutMs: interServiceTimeoutMs(),
       ...init,
     })
     if (!res.ok) return null

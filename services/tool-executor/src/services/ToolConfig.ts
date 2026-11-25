@@ -1,4 +1,5 @@
 import { Tool, ToolExecution, CredentialRequest, CredentialRequiredError, SchemaRecord } from '../types';
+import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import { credentialProvider, NamedCredentialSource } from './CredentialProvider';
 import { decryptVaultSecret, ensureVaultSecret } from '../utils/vaultClient';
@@ -225,10 +226,11 @@ export class ToolConfigResolver {
     for (const field of missing) {
       try {
         const secretName = ToolConfigResolver.vaultSecretName(field);
-        const ensureRes = await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
+        const ensureRes = await httpRequest(`${vaultUrl}/api/vault/secrets/ensure`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
+          timeoutMs: interServiceTimeoutMs(),
         });
         if (ensureRes.ok) {
           const data = (await ensureRes.json()) as { existed?: boolean; name?: string };

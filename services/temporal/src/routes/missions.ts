@@ -3,7 +3,7 @@ import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
 import { TemporalClient, isMissionAwaitingInputError } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint, MissionPendingInteraction } from '../types/workflow';
-import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, PlanSchema, logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { missionRecurrenceSchema } from '../schedules/missionRecurrence';
 import {
@@ -135,8 +135,9 @@ router.post(
     }
     let progress;
     try {
-      const planResponse = await fetch(
+      const planResponse = await httpRequest(
         `${artifactsBase.origin}/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`,
+        { timeoutMs: interServiceTimeoutMs() },
       );
       if (planResponse.status === 404) {
         // The mission failed before a plan was ever persisted, so there is no

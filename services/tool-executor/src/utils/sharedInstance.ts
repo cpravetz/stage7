@@ -1,4 +1,5 @@
 import path from 'path';
+import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { ToolRegistry } from '../services/ToolRegistry';
 import { ToolStore } from '../services/ToolStore';
 import { ToolExecutor } from '../services/ToolExecutor';
@@ -57,38 +58,32 @@ export const triggerScheduler = new TriggerScheduler({
   getWorkflows: () => allWorkflows,
   execute: (tool, input, opts) => executor.executeOrRequestCredentials(tool, input, undefined, opts),
   runMission: async (scheduled: MissionScheduleDispatch) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch(`${TEMPORAL_HTTP_URL}/api/temporal/missions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          missionId: scheduled.missionId,
-          tenantId: scheduled.tenantId,
-          assistantId: scheduled.assistantId,
-          prompt: scheduled.prompt,
-          contextChunks: scheduled.contextChunks,
-          metadata: {
-            ...scheduled.metadata,
-            scheduled: true,
-            scheduleId: scheduled.scheduleId,
-            scheduledFor: scheduled.scheduledFor,
-          },
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Temporal service rejected scheduled mission (${response.status})`);
-      }
-      const result = await response.json() as { workflowId?: unknown };
-      if (typeof result.workflowId !== 'string') {
-        throw new Error('Temporal service returned no workflowId for scheduled mission');
-      }
-      return { workflowId: result.workflowId };
-    } finally {
-      clearTimeout(timeout);
+    const response = await httpRequest(`${TEMPORAL_HTTP_URL}/api/temporal/missions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeoutMs: interServiceTimeoutMs(),
+      body: JSON.stringify({
+        missionId: scheduled.missionId,
+        tenantId: scheduled.tenantId,
+        assistantId: scheduled.assistantId,
+        prompt: scheduled.prompt,
+        contextChunks: scheduled.contextChunks,
+        metadata: {
+          ...scheduled.metadata,
+          scheduled: true,
+          scheduleId: scheduled.scheduleId,
+          scheduledFor: scheduled.scheduledFor,
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Temporal service rejected scheduled mission (${response.status})`);
     }
+    const result = await response.json() as { workflowId?: unknown };
+    if (typeof result.workflowId !== 'string') {
+      throw new Error('Temporal service returned no workflowId for scheduled mission');
+    }
+    return { workflowId: result.workflowId };
   },
   store: createTriggerRecordStore(),
 });
