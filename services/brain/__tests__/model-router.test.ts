@@ -323,3 +323,34 @@ describe('ModelRouter performance outcomes', () => {
     expect(sorted).toContain('alpha')
   })
 })
+
+describe('ModelRouter threaded per-request optimizeFor', () => {
+  const router = new ModelRouter();
+
+  beforeEach(() => {
+    router.registerModels([
+      model('paid-accurate', 2),
+      model('free-cheap', 0),
+    ]);
+    router.setPerformanceMetrics(new Map([
+      ['provider:paid-accurate', {
+        successRate: 0.95, avgLatencyMs: 0, avgCostPerRequest: 2, totalRequests: 30,
+        totalCost: 60, costRequests: 30, complaintCount: 0, complaintRate: 0,
+      }],
+      ['provider:free-cheap', {
+        successRate: 0.7, avgLatencyMs: 0, avgCostPerRequest: 0, totalRequests: 30,
+        totalCost: 0, costRequests: 30, complaintCount: 0, complaintRate: 0,
+      }],
+    ]));
+  });
+
+  it('ranks differently when the threaded criterion is cost versus accuracy', () => {
+    const costFirst = router.getCandidates({ task: 'chat response', optimizeFor: 'cost' })
+      .map(({ model: candidate }) => candidate.id);
+    const accuracyFirst = router.getCandidates({ task: 'chat response', optimizeFor: 'accuracy' })
+      .map(({ model: candidate }) => candidate.id);
+    expect(costFirst[0]).toBe('free-cheap');
+    expect(accuracyFirst[0]).toBe('paid-accurate');
+    expect(costFirst).not.toEqual(accuracyFirst);
+  });
+});

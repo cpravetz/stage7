@@ -47,9 +47,13 @@ export class BrainClient {
     history: ChatMessage[],
     maxTokens: number,
     routingSessionId?: string,
+    optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity',
   ): Promise<BrainResponse> {
     const base = {
-      options: { optimizeFor: 'accuracy' },
+      // Task threading sets optimizeFor per mission task (planner selectionCriteria /
+      // estimatedComplexity); callers that pass nothing — phase review, completion
+      // review, planner self-completions — keep the historical accuracy routing.
+      options: { optimizeFor: optimizeFor || 'accuracy' },
       maxTokens,
       temperature: 0.3,
       missionId,

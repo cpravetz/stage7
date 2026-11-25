@@ -65,3 +65,33 @@ describe('BrainClient entity-memory slot', () => {
     expect(captured[0].missionId).toBe('mission-9');
   });
 });
+
+describe('BrainClient optimizeFor threading', () => {
+  it('sends the threaded optimizeFor value', async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const client = new BrainClient('http://brain:3100', captureFetcher(captured), 30_000);
+
+    await client.complete(definition({}), 'mission-9', 'sp', history, 1000, 'mission-9:task:phase-1:task-1', 'cost');
+
+    expect(captured[0].options).toEqual({ optimizeFor: 'cost' });
+    expect(captured[0].routingSessionId).toBe('mission-9:task:phase-1:task-1');
+  });
+
+  it('keeps accuracy as the fallback when nothing is threaded (non-mission callers must not regress)', async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const client = new BrainClient('http://brain:3100', captureFetcher(captured), 30_000);
+
+    await client.complete(definition({}), 'mission-9', 'sp', history, 1000);
+
+    expect(captured[0].options).toEqual({ optimizeFor: 'accuracy' });
+  });
+
+  it('treats an undefined criterion the same as no criterion', async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const client = new BrainClient('http://brain:3100', captureFetcher(captured), 30_000);
+
+    await client.complete(definition({}), 'mission-9', 'sp', history, 1000, undefined, undefined);
+
+    expect(captured[0].options).toEqual({ optimizeFor: 'accuracy' });
+  });
+});
