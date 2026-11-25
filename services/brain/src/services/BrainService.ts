@@ -560,7 +560,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         try {
           attemptedModelIds.add(routingKey);
           attemptedThisCall.add(routingKey);
-          const response: CompletionResponse = await withProviderTimeout(provider.complete(req));
+          const response: CompletionResponse = await withProviderTimeout(provider.complete(req), attemptTimeout);
           if (typeof response.content !== 'string' || response.content.trim().length === 0) {
             const emptyCompletionError = new Error('Provider returned an empty completion');
             lastErr = emptyCompletionError;
