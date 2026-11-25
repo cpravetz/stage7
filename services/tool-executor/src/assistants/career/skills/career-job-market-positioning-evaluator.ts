@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -126,15 +125,15 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       const discoveryFailed = !!discovery && discovery.success === false;
       const discoverySignal = discovery ? { status: discoveryStatus || (discovery.success === false ? 'failed' : 'ok'), failures: discoveryFailures, failureCount: discoveryFailures.length, byBoard: discoveryData.byBoard || [] } : null;
 
-      function failureLines(list) {
-      return list.map((f) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' \u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
+      function failureLines(list: any) {
+      return list.map((f: any) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' \u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
       }
-      function discoveryBlock(status, error) {
+      function discoveryBlock(status: any, error: any) {
       const lines = [status === 'blocked' ? 'MARKET POSITIONING HAD NO MARKET DATA' : 'MARKET POSITIONING FAILED', status === 'blocked' ? '=============================' : '=======================', '', error];
       if (discoveryFailures.length) lines.push('', 'Sources attempted:', failureLines(discoveryFailures));
       return { id: 'failure', title: status === 'blocked' ? 'No market data to position against' : 'Market positioning FAILED \u2014 no job source could be retrieved', kind: 'text', body: lines.join('\n') };
       }
-      function partialBlock(error) {
+      function partialBlock(error: any) {
       return {
         id: 'partial',
         title: 'PARTIAL MARKET READ \u2014 ' + discoveryFailures.length + ' source' + (discoveryFailures.length === 1 ? '' : 's') + ' were never read',
@@ -190,7 +189,7 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       const marketSignals = { listingsUsed: listings.length ? 'stored-from-job-discovery' : 'live-lookup', discovery: carriedDiscovery, discoveryStatus: discoveryStatus || (discovery ? 'ok' : null), rank: rank && rank.success ? rank.data : null };
 
       // Extract profile skills for gap analysis
-      const profileSkills = (profile && Array.isArray(profile.skills)) ? profile.skills.map(function (s) { return String(s).toLowerCase(); }) : [];
+      const profileSkills = (profile && Array.isArray(profile.skills)) ? profile.skills.map(function (s: any) { return String(s).toLowerCase(); }) : [];
 
       // Broad keyword set covering tech, marketing, product, and general business
       const SKILL_KEYWORDS = [
@@ -211,8 +210,8 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       ];
 
       const topRoleSkills = new Set();
-      ranked.slice(0, 5).forEach(function (r) {
-        if (r && Array.isArray(r.skills)) r.skills.forEach(function (s) { topRoleSkills.add(String(s).toLowerCase()); });
+      ranked.slice(0, 5).forEach(function (r: any) {
+        if (r && Array.isArray(r.skills)) r.skills.forEach(function (s: any) { topRoleSkills.add(String(s).toLowerCase()); });
         const tokens = new Set(String((r && r.description) || '').toLowerCase().split(/[^a-z0-9+#]+/));
         SKILL_KEYWORDS.forEach(function (kw) { if (tokens.has(kw)) topRoleSkills.add(kw); });
       });
@@ -246,14 +245,14 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       ? null
       : (discoveryError || (runStatus === 'failed'
         ? 'MARKET POSITIONING FAILED. Job discovery did not answer, so no job source could be read and this run produced no market positioning at all. It did not determine that the market is empty.'
-        : discoveryFailures.length + ' of the job sources this market read consulted could not be retrieved, so the positioning below is not a complete answer about the job market: ' + discoveryFailures.map((f) => (f && f.board) || 'unknown source').join(', ') + '.'));
+        : discoveryFailures.length + ' of the job sources this market read consulted could not be retrieved, so the positioning below is not a complete answer about the job market: ' + discoveryFailures.map((f: any) => (f && f.board) || 'unknown source').join(', ') + '.'));
       const positioningLines = [];
       positioningLines.push('Market Positioning');
       positioningLines.push('==================');
       positioningLines.push('');
       positioningLines.push('Roles used for this read: ' + ranked.length + ' (' + marketSignals.listingsUsed + ')');
       if (recommendation.targetComp) positioningLines.push('Target compensation: ' + JSON.stringify(recommendation.targetComp));
-      recommendation.topRoles.forEach(function (r, i) {
+      recommendation.topRoles.forEach(function (r: any, i: number) {
       positioningLines.push((i + 1) + '. ' + (r && (r.title || r.text)) + (r && r.company ? ' at ' + r.company : '') + (r && r.score != null ? ' (fit ' + r.score + ')' : ''));
       });
       if (recommendation.suggestedProfileEdits.length) {

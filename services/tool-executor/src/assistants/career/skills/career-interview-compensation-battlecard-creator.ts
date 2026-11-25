@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -57,14 +56,14 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       : 24000;
       let settled = false;
 
-      function payload(success, status, data, error, present) {
+      function payload(success: any, status: any, data: any, error: any, present: any) {
       return { success: success, status: status, data: data || null, error: error || null, present: present || [] };
       }
 
       // Emits exactly one result and exits immediately, dropping any handle left open
       // by work still in flight. process.exit inside the write callback guarantees
       // stdout is flushed first, which a bare process.exit(0) would not.
-      function emitAndExit(success, status, data, error, present) {
+      function emitAndExit(success: any, status: any, data: any, error: any, present: any) {
       if (settled) return;
       settled = true;
       const out = JSON.stringify(payload(success, status, data, error, present));
@@ -88,7 +87,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // Treating that as failure recorded two working brain calls as missing, fired a
       // redundant direct-brain fallback for each, and pushed the skill past its
       // deadline. Unwrap both shapes, and decide success on presence of usable text.
-      function unwrapDelegated(res) {
+      function unwrapDelegated(res: any) {
       if (!res || typeof res !== 'object') return null;
       if (res.status === 'failed') return null;
       if (res.success === false) return null;
@@ -116,7 +115,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // text is scrubbed before it can reach a presentation card. DELIVERABLE_ONLY_SYSTEM_PROMPT
       // in career-lower-order-tools.ts prevents this at the source; this is the backstop for
       // answers already sitting in the cache.
-      function delegatedText(payload) {
+      function delegatedText(payload: any) {
       if (!payload) return null;
       if (typeof payload === 'string') return cleanDelegatedText(payload);
       if (typeof payload !== 'object') return null;
@@ -129,7 +128,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // "Thinking Process:" block, and a trailing hallucination self-check. Returns null
       // when nothing displayable is left, so a delegation that was only ever a trace is
       // treated as unanswered and still falls through to the direct brain call.
-      function cleanDelegatedText(text) {
+      function cleanDelegatedText(text: any) {
       if (!text) return null;
       let body = text;
       // Leading trace: the paragraph after the marker is the reasoning, and the
@@ -163,7 +162,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // racing them would spend a second pair of brain calls on every healthy run just
       // to discard the slower answer. Sequential costs an extra call only when the
       // delegation actually failed.
-      function resolveTopic(toolId, toolInput, brainPrompt, brainUnwrap) {
+      function resolveTopic(toolId: any, toolInput: any, brainPrompt: any, brainUnwrap: any) {
       return (async function () {
         let raw = null;
         try {
@@ -182,7 +181,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       }
 
       // Caps how long a step is waited on without cancelling it.
-      function withDeadline(promise, ms) {
+      function withDeadline(promise: any, ms: any) {
       return new Promise(function (resolve) {
         let done = false;
         const timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
@@ -197,7 +196,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
       }
 
-      async function callBrain(prompt) {
+      async function callBrain(prompt: any) {
       // Never dial a port that may not be served: with no BRAIN_URL configured the
       // caller falls straight through to the not-connected emit.
       const base = brainBaseUrl();
@@ -213,7 +212,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
           }),
         });
         if (!res.ok) return null;
-        const data = await res.json();
+        const data: any = await res.json();
         return data.content || data.summary || null;
       } catch (e) {
         return null;
@@ -237,12 +236,12 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // A direct brain answer is plain prose, so the question list is split on
       // newlines exactly as the previous sequential fallback did; without this the
       // whole answer renders as one bullet.
-      function brainPrepPayload(t) {
+      function brainPrepPayload(t: any) {
         if (!t) return null;
         const cleaned = cleanDelegatedText(t);
-        return cleaned ? { summary: cleaned, questions: cleaned.split('\n').filter(function (l) { return l.trim().length > 0; }) } : null;
+        return cleaned ? { summary: cleaned, questions: cleaned.split('\n').filter(function (l: string) { return l.trim().length > 0; }) } : null;
       }
-      function brainProsePayload(t) {
+      function brainProsePayload(t: any) {
         return t ? { summary: t } : null;
       }
 
@@ -309,7 +308,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       };
 
       const present = [];
-      present.push({ id: 'interview-questions', title: 'Interview Questions', kind: 'text', body: (typeof questions === 'string' ? questions : questions.map(function (q) { return '- ' + q; }).join(NL)) || '(No questions available.)' });
+      present.push({ id: 'interview-questions', title: 'Interview Questions', kind: 'text', body: (typeof questions === 'string' ? questions : questions.map(function (q: any) { return '- ' + q; }).join(NL)) || '(No questions available.)' });
       if (negotiation) {
       present.push({ id: 'negotiation-script', title: 'Compensation Negotiation', kind: 'text', body: String(negotiation) });
       }
@@ -320,7 +319,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       return { success: true, status: 'ok', data: briefing, error: null, present: present };
       })();
 
-      let budgetTimer = null;
+      let budgetTimer: any = null;
       const budget = new Promise(function (resolve) {
       budgetTimer = setTimeout(function () { resolve('budget-exhausted'); }, SKILL_BUDGET_MS);
       });

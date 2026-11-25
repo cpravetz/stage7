@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
@@ -159,19 +158,19 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // ---------------------------------------------------------------- helpers
 
-    function asList(v) {
+    function asList(v: any) {
       if (v == null) return [];
       if (Array.isArray(v)) return v.filter((x) => x !== null && x !== undefined && String(x).trim() !== '').map(String);
       return String(v).trim() === '' ? [] : [String(v)];
     }
 
-    function numOr(v, dflt) {
+    function numOr(v: any, dflt: any) {
       if (v === null || v === undefined || v === '') return dflt;
       const n = Number(v);
       return Number.isFinite(n) ? n : dflt;
     }
 
-    function isPlainObject(v) {
+    function isPlainObject(v: any) {
       return !!v && typeof v === 'object' && !Array.isArray(v);
     }
 
@@ -179,7 +178,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // shows up in job markup. One decoder, not a per-source private copy: a
     // combined decimal|hex regex that misparses one form as the other is a known
     // failure mode, so decode numeric forms first and separately.
-    const NAMED_ENTITIES = {
+    const NAMED_ENTITIES: Record<string, string> = {
       amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '–',
       mdash: '—', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
       hellip: '…', bull: '•', middot: '·', copy: '©', reg: '®', trade: '™',
@@ -189,7 +188,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       laquo: '«', raquo: '»', times: '×', divide: '÷', plusmn: '±',
     };
 
-    function decodeEntities(input) {
+    function decodeEntities(input: any) {
       if (!input) return '';
       let s = String(input);
       s = s.replace(/&#x([0-9a-f]+);/gi, function (_m, hex) {
@@ -207,7 +206,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return s;
     }
 
-    function stripHtml(html) {
+    function stripHtml(html: any) {
       if (!html) return '';
       return decodeEntities(
         String(html)
@@ -223,7 +222,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // nulls a valid epoch 0, and Date.parse returns NaN for anything unparseable,
     // which is falsy so it happens to work — but the \`0\` case silently drops a real
     // 1970 timestamp. Check Number.isNaN explicitly.
-    function toEpochMs(value) {
+    function toEpochMs(value: any) {
       if (value === null || value === undefined || value === '') return null;
       if (typeof value === 'number') {
         if (!Number.isFinite(value)) return null;
@@ -239,7 +238,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return Number.isNaN(parsed) ? null : parsed;
     }
 
-    function toIsoOrNull(value) {
+    function toIsoOrNull(value: any) {
       const ms = toEpochMs(value);
       if (ms === null) return null;
       try {
@@ -254,7 +253,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // "\uD800" escape survives JSON.parse — the throw would abort the whole page's
     // loop and lose every posting already parsed. Returning null lets the caller
     // drop exactly the one bad posting.
-    function safeSegment(value) {
+    function safeSegment(value: any) {
       if (value === null || value === undefined) return null;
       try {
         return encodeURIComponent(String(value));
@@ -263,11 +262,11 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       }
     }
 
-    function slug(s) {
+    function slug(s: any) {
       return String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '');
     }
 
-    function stableId(prefix, parts) {
+    function stableId(prefix: any, parts: any) {
       let h = 5381;
       const str = parts.join('|').toLowerCase();
       for (let i = 0; i < str.length; i++) {
@@ -276,14 +275,14 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return prefix + '_' + h.toString(36);
     }
 
-    function truncate(s, n) {
+    function truncate(s: any, n: any) {
       const str = String(s == null ? '' : s);
       return str.length > n ? str.slice(0, n) : str;
     }
 
     // Reads the single numeric value out of a free-text salary string
     // ("$120,000 - $150,000 USD", "120k-150k").
-    function parseSalaryText(text) {
+    function parseSalaryText(text: any) {
       if (!text) return null;
       const raw = String(text);
       // The digit classes below carry no backslash on purpose. The emitted program
@@ -309,7 +308,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return { min: Math.min.apply(null, values), max: Math.max.apply(null, values), currency: currency, raw: truncate(raw, 200) };
     }
 
-    function normalizeSalaryRange(range) {
+    function normalizeSalaryRange(range: any) {
       if (!isPlainObject(range)) return null;
       const min = numOr(range.min, null);
       const max = numOr(range.max, null);
@@ -343,7 +342,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-    function sleep(ms) {
+    function sleep(ms: any) {
       if (!(ms > 0)) return Promise.resolve();
       return new Promise((res) => setTimeout(res, ms));
     }
@@ -351,7 +350,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // Exponential backoff with full jitter. Jitter matters: a run that walks many
     // boards in lockstep would otherwise retry in lockstep too, which is exactly
     // the burst pattern a rate limiter is looking for.
-    function retryDelayMs(attempt, retryAfterHeader) {
+    function retryDelayMs(attempt: any, retryAfterHeader: any) {
       if (retryAfterHeader) {
         const secs = Number(retryAfterHeader);
         if (Number.isFinite(secs) && secs >= 0) {
@@ -363,7 +362,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return Math.floor(exp / 2 + Math.random() * (exp / 2));
     }
 
-    function hostnameOf(raw) {
+    function hostnameOf(raw: any) {
       try {
         return new URL(raw).hostname.toLowerCase();
       } catch (e) {
@@ -376,7 +375,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // using \`new URL(raw).origin\`) is deliberate: .origin carries the input's own
     // port through unchanged, which reopens exactly what discarding the path was
     // meant to close. A provider appends its own fixed path to this.
-    function originFromConfigUrl(raw) {
+    function originFromConfigUrl(raw: any) {
       const hostname = hostnameOf(raw);
       if (!hostname) return null;
       return 'https://' + hostname;
@@ -391,7 +390,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     //
     // The leading dot on the suffix test is load-bearing: a bare
     // \`endsWith('vendordomain.com')\` also accepts \`evilvendordomain.com\`.
-    function matchesTenantHost(hostname, vendorDomain) {
+    function matchesTenantHost(hostname: any, vendorDomain: any) {
       if (!hostname || !vendorDomain) return false;
       const host = String(hostname).toLowerCase();
       const domain = String(vendorDomain).toLowerCase().replace(/^[.]+/, '');
@@ -402,12 +401,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return /^[a-z0-9-]+$/.test(tenant);
     }
 
-    function isPrivateHostname(hostname) {
+    function isPrivateHostname(hostname: any) {
       if (!hostname) return true;
       if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) return true;
       if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
         const parts = hostname.split('.').map(Number);
-        if (parts.some((p) => p > 255)) return true;
+        if (parts.some((p: any) => p > 255)) return true;
         if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return true;
         if (parts[0] === 192 && parts[1] === 168) return true;
         if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
@@ -425,7 +424,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // otherwise the response text. On a non-retryable failure it returns
     // immediately with the status the server actually gave, so the ledger can name
     // the real condition (blocked / 404 / 5xx) instead of a catch-all.
-    async function httpRequest(url, options) {
+    async function httpRequest(url: any, options: any) {
       const opts = options || {};
       const method = opts.method || 'GET';
       const expectJson = opts.expectJson !== false;
@@ -452,7 +451,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
           if (isPrivateHostname(hostname)) {
             return { ok: false, status: 0, data: null, error: 'refusing to request a private or internal host (' + hostname + ')' };
           }
-          if (allowedHosts && !allowedHosts.some(function (h) { return hostname === h || matchesTenantHost(hostname, h); })) {
+          if (allowedHosts && !allowedHosts.some(function (h: any) { return hostname === h || matchesTenantHost(hostname, h); })) {
             return { ok: false, status: 0, data: null, error: 'refusing to request off-origin host (' + hostname + ')' };
           }
 
@@ -474,7 +473,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
               signal: controller.signal,
               headers: headers,
             });
-          } catch (err) {
+          } catch (err: any) {
             clearTimeout(timer);
             // Transport-level failure (DNS, refused, aborted, manual-redirect
             // unsupported): the status really is 0 and this really is a network
@@ -542,28 +541,28 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return { ok: false, status: lastStatus, data: null, error: lastError || 'Max retries exceeded' };
     }
 
-    async function httpGet(url, options) {
+    async function httpGet(url: any, options?: any) {
       return await httpRequest(url, Object.assign({ method: 'GET' }, options || {}));
     }
 
-    async function getJson(url, options) {
+    async function getJson(url: any, options?: any) {
       return await httpGet(url, Object.assign({ expectJson: true }, options || {}));
     }
 
-    async function fetchHtml(url, options) {
+    async function fetchHtml(url: any, options?: any) {
       return await httpGet(url, Object.assign({ expectJson: false }, options || {}));
     }
 
     // Some sources (Workday CXS) only serve their search route over POST with a
     // JSON filter body. This shares the same manual-redirect hop logic, so a 3xx is
     // not silently followed on POST either.
-    async function postJson(url, body, options) {
+    async function postJson(url: any, body: any, options?: any) {
       return await httpRequest(url, Object.assign({ method: 'POST', body: body, expectJson: true }, options || {}));
     }
 
     // The single normalized Job shape. \`source\` is the provider id (lowercase, no
     // spaces) so the ledger and the UI can group by it.
-    function makeJob(fields) {
+    function makeJob(fields: any) {
       const title = stripHtml(fields.title || '');
       const company = stripHtml(fields.company || '');
       const location = stripHtml(fields.location || '');
@@ -594,7 +593,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // A row missing title or applyUrl cannot be acted on: the candidate could not
     // apply to it and could not read it. Drop it, never throw — one bad row must
     // not cost the target every other posting on the page.
-    function isUsableJob(job) {
+    function isUsableJob(job: any) {
       return !!job && !!job.title && !!job.applyUrl;
     }
 
@@ -612,8 +611,8 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     //
     // Only applied when the entry supplied a URL. A provider with a fixed literal
     // host and no config input needs nothing.
-    function providerHttpOptions(entry, provider) {
-      const opts = {};
+    function providerHttpOptions(entry: any, provider: any) {
+      const opts: Record<string, any> = {};
       const hosts = [];
       for (const raw of [entry && entry.api, entry && entry.careers_url]) {
         if (typeof raw !== 'string' || !raw) continue;
@@ -633,7 +632,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // a different vendor's careers page: "Deloitte" carries a Workday URL, and the
     // slug "deloitte" would otherwise be probed against Greenhouse. An explicit
     // \`provider:\` field still overrides this — the operator asked for it by name.
-    function providerMayClaim(provider, entry) {
+    function providerMayClaim(provider: any, entry: any) {
       if (!provider || !Array.isArray(provider.vendorDomains) || !provider.vendorDomains.length) return true;
       const supplied = [entry && entry.api, entry && entry.careers_url];
       let sawHost = false;
@@ -642,12 +641,11 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         const h = hostnameOf(raw);
         if (!h) continue;
         sawHost = true;
-        const owned = provider.vendorDomains.some(function (d) {
+        const owned = provider.vendorDomains.some(function (d: any) {
           // String comparison rather than a built RegExp: a dynamic pattern would
           // have to be assembled from a string literal, where the enclosing
           // template literal can eat a backslash escape before the script parses.
           const clean = String(d).toLowerCase().replace(/^[.]+/, '');
-          const h = String(hostname).toLowerCase();
           return h === clean || h.endsWith('.' + clean);
         });
         if (!owned) return false;
@@ -659,7 +657,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // Reads the documented array out of a payload, or returns null so the caller
     // can tell "absent / wrong type" from "present and empty". An absent container
     // is a markup or API change and must surface as a failure, not as zero jobs.
-    function pickArray(payload, keys) {
+    function pickArray(payload: any, keys: any) {
       if (!isPlainObject(payload)) return null;
       for (const key of keys) {
         if (Array.isArray(payload[key])) return payload[key];
@@ -672,12 +670,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const greenhouseProvider = {
       id: 'greenhouse',
       vendorDomains: ['boards-api.greenhouse.io', 'boards.greenhouse.io', 'my.greenhouse.io'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const token = entry && entry.token ? entry.token : slug(entry && (entry.name || entry.company));
         if (!token) return null;
         return 'https://boards-api.greenhouse.io/v1/boards/' + encodeURIComponent(token) + '/jobs';
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = pickArray(payload, ['jobs']);
         if (jobs === null) throw new Error('greenhouse: unexpected response, expected jobs[]');
         const token = entry && entry.token ? entry.token : slug(entry && (entry.name || entry.company));
@@ -709,11 +707,11 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       // Greenhouse omits descriptions from the list endpoint; they live on a
       // per-job detail route. This is the opt-in enrichment path and it is bounded
       // and skipped entirely during a probe.
-      detail: async function (job, entry, ctx) {
+      detail: async function (job: any, entry: any, ctx: any) {
         const token = entry && entry.token ? entry.token : slug(entry && (entry.name || entry.company));
         const raw = String(job.id || '').replace(/^gh_/, '');
         if (!token || !raw) return;
-        const d = await getJson('https://boards-api.greenhouse.io/v1/boards/' + encodeURIComponent(token) + '/jobs/' + encodeURIComponent(raw));
+        const d: any = await getJson('https://boards-api.greenhouse.io/v1/boards/' + encodeURIComponent(token) + '/jobs/' + encodeURIComponent(raw));
         if (d.ok && d.data && d.data.content) job.description = stripHtml(d.data.content);
       },
     };
@@ -723,12 +721,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const ashbyProvider = {
       id: 'ashby',
       vendorDomains: ['api.ashbyhq.com', 'jobs.ashbyhq.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const name = entry && entry.token ? entry.token : slug(entry && (entry.name || entry.company));
         if (!name) return null;
         return 'https://api.ashbyhq.com/posting-api/job-board/' + encodeURIComponent(name) + '?includeCompensation=true';
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = pickArray(payload, ['jobs']);
         if (jobs === null) throw new Error('ashby: unexpected response, expected jobs[]');
         const name = (entry && (entry.company || entry.name)) || '';
@@ -769,12 +767,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const leverProvider = {
       id: 'lever',
       vendorDomains: ['api.lever.co', 'jobs.lever.co'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const name = entry && entry.token ? entry.token : slug(entry && (entry.name || entry.company));
         if (!name) return null;
         return 'https://api.lever.co/v0/postings/' + encodeURIComponent(name) + '?mode=json';
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         // Lever returns a bare top-level array, so this shape is the container to
         // type-check: a non-array here is an envelope change, not an empty board.
         const jobs = Array.isArray(payload) ? payload : null;
@@ -813,7 +811,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       vendorDomains: ['myworkdayjobs.com'],
       // The tenant and site cannot be derived from a bare company slug, so an entry
       // must carry the careers URL (or an explicit api) that carries them.
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         if (!base) return null;
         let u;
@@ -836,11 +834,11 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         };
       },
       // Workday pages through POST with an explicit offset/limit filter body.
-      request: function (base, page, options) {
+      request: function (base: any, page: any, options: any) {
         const perPage = 20;
         return postJson(base, { appliedFacets: {}, limit: perPage, offset: (page - 1) * perPage, searchText: '' }, options);
       },
-      rows: function (payload, entry, ctx) {
+      rows: function (payload: any, entry: any, ctx: any) {
         const envelope = isPlainObject(payload) && isPlainObject(payload.jobPostings) ? payload.jobPostings : null;
         // Workday returns the array under the key "0" of the jobPostings object.
         const rows = envelope ? envelope['0'] : null;
@@ -879,7 +877,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const icimsProvider = {
       id: 'icims',
       vendorDomains: ['icims.com', 'icims.na'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         if (!base) return null;
         let u;
@@ -896,25 +894,25 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
           tenant: tenant,
         };
       },
-      rows: function (payload, entry, ctx) {
+      rows: function (payload: any, entry: any, ctx: any) {
         if (!isPlainObject(payload)) throw new Error('icims: unexpected response, expected an object');
         const items = Array.isArray(payload.items) ? payload.items : null;
         if (items === null) {
           if (Array.isArray(payload)) return payload.map(function (j) { return icimsRow(j, entry, ctx); });
           throw new Error('icims: unexpected response, expected items[]');
         }
-        return items.map(function (j) { return icimsRow(j, entry, ctx); });
+        return items.map(function (j: any) { return icimsRow(j, entry, ctx); });
       },
       paginated: true,
-      pageUrl: function (base, page) {
+      pageUrl: function (base: any, page: any) {
         return base.replace(/page=\d+/, 'page=' + page);
       },
-      pageCountFrom: function (payload) {
+      pageCountFrom: function (payload: any) {
         return payload && numOr(payload.total, 0);
       },
     };
 
-    function icimsRow(j, entry, ctx) {
+    function icimsRow(j: any, entry: any, ctx: any) {
       const title = j.jobTitle || j.title || '';
       const url = j.url || (ctx.icimsBase ? ctx.icimsBase + '/jobs/' + (j.id || '') : '');
       return makeJob({
@@ -937,12 +935,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const smartRecruitersProvider = {
       id: 'smartrecruiters',
       vendorDomains: ['api.smartrecruiters.com', 'careers.smartrecruiters.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const key = entry && (entry.token || entry.company || entry.name);
         if (!key) return null;
         return { url: 'https://api.smartrecruiters.com/v1/companies/' + encodeURIComponent(String(key)) + '/postings?limit=100', key: String(key) };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = pickArray(payload, ['content']);
         if (jobs === null) throw new Error('smartrecruiters: unexpected response, expected content[]');
         return jobs.map(function (j) {
@@ -976,7 +974,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const bambooProvider = {
       id: 'bamboohr',
       vendorDomains: ['bamboohr.com', 'api.bamboohr.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         if (!token) return null;
@@ -994,7 +992,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         const hostPart = host || (subdomain + '.bamboohr.com');
         return { url: 'https://api.bamboohr.com/api/gateway.php/' + encodeURIComponent(subdomain) + '/v1/positions/' + encodeURIComponent(hostPart), subdomain: subdomain };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = pickArray(payload, ['positions']);
         if (jobs === null) throw new Error('bamboohr: unexpected response, expected positions[]');
         return jobs.map(function (j) {
@@ -1023,7 +1021,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const breezyProvider = {
       id: 'breezy',
       vendorDomains: ['breezy.hr'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && (entry.token || slug(entry && (entry.company || entry.name)));
         if (!token) return null;
@@ -1034,7 +1032,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { url: 'https://' + encodeURIComponent(subdomain) + '.breezy.hr/json/' + encodeURIComponent(subdomain), subdomain: subdomain };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = Array.isArray(payload) ? payload : null;
         if (jobs === null) throw new Error('breezy: unexpected response, expected a jobs array at the top level');
         const name = (entry && (entry.company || entry.name)) || '';
@@ -1062,7 +1060,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const jobviteProvider = {
       id: 'jobvite',
       vendorDomains: ['jobvite.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         if (!base && !token) return null;
@@ -1077,7 +1075,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { url: 'https://' + host + '/api/jobs', host: host };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         if (!isPlainObject(payload)) throw new Error('jobvite: unexpected response, expected an object');
         const jobs = pickArray(payload, ['jobs']);
         if (jobs === null) throw new Error('jobvite: unexpected response, expected jobs[]');
@@ -1110,14 +1108,14 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const successFactorsProvider = {
       id: 'successfactors',
       vendorDomains: ['successfactors.com', 'sapsf.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.careers_url || entry.api);
         if (!base) return null;
         const h = hostnameOf(base);
         if (!h) return null;
         return { url: 'https://' + h + '/search/?q=&locationsearch=', host: h };
       },
-      rows: function (html, entry, ctx) {
+      rows: function (html: any, entry: any, ctx: any) {
         if (typeof html !== 'string') throw new Error('successfactors: unexpected response, expected HTML');
         // JSON-LD JobPosting blocks are the stable, machine-readable surface here.
         const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -1175,19 +1173,19 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const oracleProvider = {
       id: 'oracle',
       vendorDomains: ['oracle.com', 'oraclecloud.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.careers_url || entry.api);
         const host = base ? hostnameOf(base) : null;
         if (!host) return null;
         return { url: 'https://' + host + '/oracle/careers/search?limit=100', host: host };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const items = isPlainObject(payload)
           ? (Array.isArray(payload.items) ? payload.items : (Array.isArray(payload.jobPostings) ? payload.jobPostings : null))
           : null;
         if (items === null) throw new Error('oracle: unexpected response, expected items[] or jobPostings[]');
         const name = (entry && (entry.company || entry.name)) || '';
-        return items.map(function (j) {
+        return items.map(function (j: any) {
           const p = isPlainObject(j.jobPostingInfo) ? j.jobPostingInfo : j;
           const title = p.title || j.title || '';
           const id = j.id || j.jobReqId || '';
@@ -1212,7 +1210,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const recruiteeProvider = {
       id: 'recruitee',
       vendorDomains: ['recruitee.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         let host = base ? hostnameOf(base) : null;
@@ -1223,7 +1221,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { url: 'https://' + host + '/api/offers/', host: host };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const jobs = pickArray(payload, ['offers', 'jobs']);
         if (jobs === null) throw new Error('recruitee: unexpected response, expected offers[]');
         const name = (entry && (entry.company || entry.name)) || '';
@@ -1254,7 +1252,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const teamtailorProvider = {
       id: 'teamtailor',
       vendorDomains: ['teamtailor.com', 'teamtailor.io'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         let host = base ? hostnameOf(base) : null;
@@ -1265,7 +1263,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { url: 'https://' + host + '/api/v2/posts?page%5Bsize%5D=100', host: host };
       },
-      rows: function (payload, entry) {
+      rows: function (payload: any, entry: any) {
         const data = isPlainObject(payload) ? payload.data : null;
         const jobs = Array.isArray(data) ? data : null;
         if (jobs === null) throw new Error('teamtailor: unexpected response, expected data[]');
@@ -1296,7 +1294,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const workableProvider = {
       id: 'workable',
       vendorDomains: ['workable.com', 'apply.workable.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         if (!base && !token) return null;
@@ -1304,7 +1302,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         const tenant = token || 'stage7';
         return { url: 'https://apply.workable.com/' + encodeURIComponent(String(tenant)) + '/', host: host };
       },
-      rows: function (html, entry) {
+      rows: function (html: any, entry: any) {
         return successFactorsProvider.rows.call(null, html, entry, {});
       },
     };
@@ -1314,7 +1312,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const phenomProvider = {
       id: 'phenom',
       vendorDomains: ['phenompeople.com'],
-      listUrl: function (entry) {
+      listUrl: function (entry: any) {
         const base = entry && (entry.api || entry.careers_url);
         const token = entry && entry.token;
         let host = base ? hostnameOf(base) : null;
@@ -1325,12 +1323,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { url: 'https://' + host + '/jobs', host: host };
       },
-      rows: function (html, entry) {
+      rows: function (html: any, entry: any) {
         return successFactorsProvider.rows.call(null, html, entry, {});
       },
     };
 
-    const ATS_PROVIDERS = {
+    const ATS_PROVIDERS: Record<string, any> = {
       greenhouse: greenhouseProvider,
       lever: leverProvider,
       ashby: ashbyProvider,
@@ -1367,7 +1365,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       kind: 'json',
       // The API returns the whole board in one array; it is not paginated.
       url: 'https://remoteok.com/api',
-      rows: function (payload) {
+      rows: function (payload: any) {
         // RemoteOK's first element is its own metadata record, not a job.
         const list = Array.isArray(payload) ? payload.slice(1) : null;
         if (list === null) throw new Error('remoteok: unexpected response, expected a top-level array');
@@ -1402,7 +1400,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       label: 'Remotive',
       kind: 'json',
       url: 'https://remotive.com/api/remote-jobs?limit=100',
-      rows: function (payload) {
+      rows: function (payload: any) {
         const jobs = pickArray(payload, ['jobs']);
         if (jobs === null) throw new Error('remotive: unexpected response, expected jobs[]');
         return jobs.map(function (j) {
@@ -1433,12 +1431,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       kind: 'json',
       url: 'https://www.arbeitnow.com/api/job-board-api?page=1',
       paginated: true,
-      pageUrl: function (base, page) {
+      pageUrl: function (base: any, page: any) {
         const u = new URL(base);
         u.searchParams.set('page', String(page));
         return u.toString();
       },
-      rows: function (payload) {
+      rows: function (payload: any) {
         const jobs = pickArray(payload, ['data']);
         if (jobs === null) throw new Error('arbeitnow: unexpected response, expected data[]');
         return jobs.map(function (j) {
@@ -1467,7 +1465,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       label: 'Jobicy',
       kind: 'json',
       url: 'https://jobicy.com/api/v2/remote-jobs?count=50',
-      rows: function (payload) {
+      rows: function (payload: any) {
         const jobs = pickArray(payload, ['jobs']);
         if (jobs === null) throw new Error('jobicy: unexpected response, expected jobs[]');
         return jobs.map(function (j) {
@@ -1498,7 +1496,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       label: 'We Work Remotely',
       kind: 'rss',
       url: 'https://weworkremotely.com/remote-jobs.rss',
-      rows: function (xml) {
+      rows: function (xml: any) {
         return parseRssItems(xml, {
           idPrefix: 'wwr',
           source: 'weworkremotely',
@@ -1518,7 +1516,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       label: 'Himalayas',
       kind: 'rss',
       url: 'https://himalayas.app/jobs/rss',
-      rows: function (xml) {
+      rows: function (xml: any) {
         return parseRssItems(xml, {
           idPrefix: 'him',
           source: 'himalayas',
@@ -1535,7 +1533,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // Parses an RSS 2.0 / Atom document into jobs, in-process, with no dependency.
     // CDATA is unwrapped, entities decoded, and a malformed <item> is skipped
     // rather than aborting the feed.
-    function parseRssItems(xml, map) {
+    function parseRssItems(xml: any, map: any) {
       if (typeof xml !== 'string' || !xml.trim()) throw new Error(map.idPrefix + ': empty RSS document');
       const itemRe = /<item[\s>][\s\S]*?<\/item>/gi;
       const altRe = /<entry[\s>][\s\S]*?<\/entry>/gi;
@@ -1582,7 +1580,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return out;
     }
 
-    function unwrapCdata(s) {
+    function unwrapCdata(s: any) {
       if (!s) return '';
       return String(s).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
     }
@@ -1595,9 +1593,9 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // backslash inside a dynamic string argument can be consumed before the script
     // is ever parsed. Every tag read here comes from a fixed list below, so each
     // gets a literal pattern and nothing is ever built from a variable.
-    const RSS_TAG_READERS = {
-      title: function (b) { const m = b.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i); return m ? m[1] : ''; },
-      link: function (b) {
+    const RSS_TAG_READERS: Record<string, any> = {
+      title: function (b: any) { const m = b.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i); return m ? m[1] : ''; },
+      link: function (b: any) {
         const m = b.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i);
         if (m) return m[1];
         // Atom puts the target in an href attribute on a self-closing <link/>.
@@ -1608,15 +1606,15 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return '';
       },
-      description: function (b) { const m = b.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i); return m ? m[1] : ''; },
-      'content:encoded': function (b) { const m = b.match(/<content:encoded(?:\s[^>]*)?>([\s\S]*?)<\/content:encoded>/i); return m ? m[1] : ''; },
-      content: function (b) { const m = b.match(/<content(?:\s[^>]*)?>([\s\S]*?)<\/content>/i); return m ? m[1] : ''; },
-      pubDate: function (b) { const m = b.match(/<pubDate(?:\s[^>]*)?>([\s\S]*?)<\/pubDate>/i); return m ? m[1] : ''; },
-      published: function (b) { const m = b.match(/<published(?:\s[^>]*)?>([\s\S]*?)<\/published>/i); return m ? m[1] : ''; },
-      updated: function (b) { const m = b.match(/<updated(?:\s[^>]*)?>([\s\S]*?)<\/updated>/i); return m ? m[1] : ''; },
+      description: function (b: any) { const m = b.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i); return m ? m[1] : ''; },
+      'content:encoded': function (b: any) { const m = b.match(/<content:encoded(?:\s[^>]*)?>([\s\S]*?)<\/content:encoded>/i); return m ? m[1] : ''; },
+      content: function (b: any) { const m = b.match(/<content(?:\s[^>]*)?>([\s\S]*?)<\/content>/i); return m ? m[1] : ''; },
+      pubDate: function (b: any) { const m = b.match(/<pubDate(?:\s[^>]*)?>([\s\S]*?)<\/pubDate>/i); return m ? m[1] : ''; },
+      published: function (b: any) { const m = b.match(/<published(?:\s[^>]*)?>([\s\S]*?)<\/published>/i); return m ? m[1] : ''; },
+      updated: function (b: any) { const m = b.match(/<updated(?:\s[^>]*)?>([\s\S]*?)<\/updated>/i); return m ? m[1] : ''; },
     };
 
-    function extractTag(block, tag) {
+    function extractTag(block: any, tag: any) {
       const reader = RSS_TAG_READERS[tag];
       return reader ? reader(block) : '';
     }
@@ -1624,14 +1622,14 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // "Acme Corp: Senior Data Engineer (Remote)" -> { company, role }.
     // Returns null when the title carries no company separator, so the caller keeps
     // the original title rather than guessing a company out of a role name.
-    function splitCompanyTitle(title) {
+    function splitCompanyTitle(title: any) {
       const s = String(title || '');
       const m = s.match(/^\s*(.{2,60}?)\s*[:|]\s*(.{3,})\s*$/);
       if (!m) return null;
       return { company: m[1].trim(), role: m[2].replace(/\([^)]*\)\s*$/, '').trim() };
     }
 
-    const FEED_PROVIDERS = {
+    const FEED_PROVIDERS: Record<string, any> = {
       remoteok: remoteOkFeed,
       remotive: remotiveFeed,
       arbeitnow: arbeitnowFeed,
@@ -1671,7 +1669,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // Normalizes one tracked_companies entry into { name, company, token, provider,
     // careersUrl }. An entry may pin a provider explicitly, or leave it to
     // detection: the first provider whose listUrl accepts the entry claims it.
-    function normalizeCompanyEntry(raw) {
+    function normalizeCompanyEntry(raw: any) {
       if (!isPlainObject(raw)) return null;
       const name = String(raw.name || raw.company || '').trim();
       if (!name) return null;
@@ -1688,7 +1686,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       };
     }
 
-    function normalizeBoardEntry(raw) {
+    function normalizeBoardEntry(raw: any) {
       if (isPlainObject(raw)) {
         if (raw.enabled === false) return null;
         const id = String(raw.id || raw.provider || '').trim();
@@ -1704,7 +1702,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // first provider whose listUrl accepts the entry and yields a URL. Returns null
     // when nothing claims it, which is reported as an uncovered entry rather than
     // silently skipped.
-    function resolveProviderFor(entry) {
+    function resolveProviderFor(entry: any) {
       if (entry.provider) {
         const p = ATS_PROVIDERS[entry.provider];
         if (!p) return { provider: null, reason: 'provider "' + entry.provider + '" is not one this build knows' };
@@ -1735,7 +1733,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return ctx.store.load('profiles/' + profileId, null);
     }
 
-    function collectResumeText(profile) {
+    function collectResumeText(profile: any) {
       if (!isPlainObject(profile)) return '';
       const parts = [];
       const r = profile.resume;
@@ -1750,7 +1748,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // Stems a role phrase to its distinctive head noun so "Chief Product Officer"
     // and "Senior Product Manager" share the searchable token "product".
-    function roleTokens(role) {
+    function roleTokens(role: any) {
       const stop = new Set(['a', 'an', 'the', 'of', 'and', 'or', 'to', 'for', 'in', 'at', 'senior', 'sr', 'junior', 'jr', 'staff', 'principal', 'lead', 'head', 'chief', 'vp', 'vice', 'president', 'director', 'manager', 'associate', 'specialist', 'general']);
       const words = String(role || '').toLowerCase().split(/[^a-z0-9+#.]+/).filter(Boolean);
       return words.filter(function (w) { return w.length > 2 && !stop.has(w); });
@@ -1767,7 +1765,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // the document rather than trying to infer one from the whole body: a resume
     // contains every job the candidate has ever had, so scanning all of it yields
     // whatever is most frequent rather than what they want next.
-    function deriveQueriesFromProfile(profile) {
+    function deriveQueriesFromProfile(profile: any) {
       const prefs = isPlainObject(profile) && isPlainObject(profile.preferences) ? profile.preferences : {};
       const explicit = asList(prefs.targetRoles);
       if (explicit.length) return { queries: explicit, from: 'profile preferences.targetRoles' };
@@ -1794,11 +1792,11 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // Derives target companies from the profile, used to seed the ATS tier when the
     // caller named no companies.
-    function deriveCompaniesFromProfile(profile) {
+    function deriveCompaniesFromProfile(profile: any) {
       const prefs = isPlainObject(profile) && isPlainObject(profile.preferences) ? profile.preferences : {};
       const explicit = asList(prefs.targetCompanies);
       if (explicit.length) return explicit;
-      const fromResume = [];
+      const fromResume: string[] = [];
       const resume = collectResumeText(profile);
       const expRe = /\b(?:at|@)\s+([A-Z][A-Za-z0-9&.\- ]{1,40})/g;
       let m;
@@ -1811,7 +1809,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // Keyword filter terms derived from the profile, used to keep the query
     // substring test from admitting every listing that shares one common word.
-    function deriveKeywordsFromProfile(profile) {
+    function deriveKeywordsFromProfile(profile: any) {
       const prefs = isPlainObject(profile) && isPlainObject(profile.preferences) ? profile.preferences : {};
       return asList(prefs.keywords).map(function (k) { return String(k).toLowerCase(); }).filter(Boolean);
     }
@@ -1827,7 +1825,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     const MAX_PAGES_CAP = 25;
     const MAX_JOBS_PER_BOARD = 500;
 
-    function resolveMaxPages(entry) {
+    function resolveMaxPages(entry: any) {
       const v = entry && entry.max_pages;
       if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
       return DEFAULT_MAX_PAGES;
@@ -1845,13 +1843,13 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     //
     // Returns { jobs, status, count, note, stopReason, pages } and never throws:
     // a provider failure is recorded against the ledger and the sweep continues.
-    async function collectAts(provider, entry, ctx) {
+    async function collectAts(provider: any, entry: any, ctx: any) {
       const boardLabel = provider.id + ':' + (entry.name || entry.token || 'board');
 
       let listUrl;
       try {
         listUrl = provider.listUrl(entry);
-      } catch (e) {
+      } catch (e: any) {
         return { jobs: [], status: 'error', count: 0, pages: 0, stopReason: STOP_FETCH_ERROR, note: provider.id + ': could not build a board URL (' + (e && e.message ? e.message : String(e)) + ')' };
       }
       if (!listUrl) {
@@ -1908,7 +1906,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         let rows;
         try {
           rows = provider.rows(res.data, entry, detailCtx);
-        } catch (e) {
+        } catch (e: any) {
           // A parse failure is the source changing shape. That is a failure of this
           // system, not an empty board, and it must not be reported as a zero.
           if (page === 1) {
@@ -1970,7 +1968,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // Enrichment is best-effort by construction: a detail fetch that exhausts retry
     // leaves that listing exactly as the list endpoint returned it and the sweep
     // continues. It is never fatal to the target.
-    async function enrichDescriptions(provider, jobs, entry, ctx, limit) {
+    async function enrichDescriptions(provider: any, jobs: any, entry: any, ctx: any, limit: any) {
       const targets = jobs.slice(0, limit);
       if (!targets.length) return 0;
       let cursor = 0;
@@ -1996,7 +1994,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       return done;
     }
 
-    function atsFailureNote(provider, entry, res, pinned) {
+    function atsFailureNote(provider: any, entry: any, res: any, pinned: any) {
       const detail = res.error ? ' (' + res.error + ')' : (res.status ? ' (HTTP ' + res.status + ')' : ' (no response)');
       if (res.status === 404) {
         // A 404 is a real answer: no board of that name exists under that
@@ -2011,7 +2009,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     }
 
     // Runs a company-agnostic public feed.
-    async function collectFeed(feed, ctx) {
+    async function collectFeed(feed: any, ctx: any) {
       const opts = { allowedHosts: [hostnameOf(feed.url)].filter(Boolean) };
       const isRss = feed.kind === 'rss';
       const maxPages = feed.paginated ? Math.min(ctx.maxPages || DEFAULT_MAX_PAGES, MAX_PAGES_CAP) : 1;
@@ -2038,7 +2036,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         let rows;
         try {
           rows = feed.rows(res.data);
-        } catch (e) {
+        } catch (e: any) {
           if (page === 1) {
             return { jobs: [], status: 'error', count: 0, pages: pages, stopReason: STOP_PARSE_ERROR, note: feed.label + ' could not be read \u2014 ' + (e && e.message ? e.message : String(e)) };
           }
@@ -2077,9 +2075,9 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // Runs several collectors with a bounded concurrency, never letting one
     // failure abort the others. Returns { jobs, ledger }.
-    async function runCollectors(tasks, concurrency) {
-      const results = [];
-      const ledger = [];
+    async function runCollectors(tasks: any, concurrency: any) {
+      const results: any[] = [];
+      const ledger: any[] = [];
       const limit = Math.max(1, concurrency || 4);
       let cursor = 0;
       const workers = [];
@@ -2091,7 +2089,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
             let outcome;
             try {
               outcome = await task.run();
-            } catch (e) {
+            } catch (e: any) {
               // A task that throws outright is recorded as a failure and the sweep
               // continues. Losing the entire target to one bad source is the exact
               // outcome this guards.
@@ -2202,8 +2200,8 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // the only tier that works with no company, which is the common case.
     if (wantsFeeds) {
       const configuredBoards = portalConfig.job_boards.map(normalizeBoardEntry).filter(Boolean);
-      const wantedIds = configuredBoards.length ? configuredBoards.map(function (b) { return b.id; }) : FEED_PROVIDER_IDS;
-      const configById = {};
+      const wantedIds = configuredBoards.length ? configuredBoards.map(function (b: any) { return b.id; }) : FEED_PROVIDER_IDS;
+      const configById: Record<string, any> = {};
       for (const b of configuredBoards) configById[b.id] = b;
       for (const id of wantedIds) {
         const feed = FEED_PROVIDERS[id];
@@ -2271,7 +2269,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
               let outcome;
               try {
                 outcome = await collectAts(provider, entry, { maxPerBoard: Math.min(maxPerBoard, 25), enrich: false, probeOnly: true });
-              } catch (e) {
+              } catch (e: any) {
                 outcome = { jobs: [], status: 'error', count: 0, pages: 0, note: provider.id + ': probe raised ' + (e && e.message ? e.message : String(e)) };
               }
               if (outcome.jobs && outcome.jobs.length) {
@@ -2475,7 +2473,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // of postings the user is then expected to go and find elsewhere.
     const LISTING_LINK_CAP = 200;
 
-    function listingLink(job) {
+    function listingLink(job: any) {
       if (!job) return null;
       const url = String(job.applyUrl || job.sourceUrl || '').trim();
       // Only http(s). A link is rendered as an anchor, so a javascript: or data: URL from a
@@ -2579,9 +2577,9 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // listing signal at all is a broken source, not an empty board. The previous
     // shellRe included <article, which matches almost any page, so a total markup
     // change reported itself as "no matching roles".
-    async function runGeneralBoards(queryList, location) {
-      const jobs = [];
-      const attempts = {};
+    async function runGeneralBoards(queryList: any, location: any) {
+      const jobs: any[] = [];
+      const attempts: Record<string, any> = {};
       for (const name of GENERAL_BOARD_NAMES) attempts[name] = [];
       if (!queryList.length) return { jobs: jobs, ledger: [] };
 
@@ -2613,20 +2611,20 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     //              signal was present) but nothing matched. A real answer.
     //   error    - the request failed, or the page was fetched but no listing
     //              signal was recognised at all. The source was not read.
-    function summarizeBoard(attempts, boardName) {
-      const total = attempts.reduce(function (n, a) { return n + (a.count || 0); }, 0);
+    function summarizeBoard(attempts: any, boardName: any) {
+      const total = attempts.reduce(function (n: any, a: any) { return n + (a.count || 0); }, 0);
       if (total > 0) return { status: 'ok', count: total, reason: 'extracted ' + total + ' listing' + (total === 1 ? '' : 's') + ' from the fetched pages' };
-      const reachable = attempts.filter(function (a) { return a.fetched; });
+      const reachable = attempts.filter(function (a: any) { return a.fetched; });
       if (!attempts.length || reachable.length === 0) {
-        const statuses = attempts.map(function (a) { return a.status; }).filter(function (s) { return s != null; });
+        const statuses = attempts.map(function (a: any) { return a.status; }).filter(function (s: any) { return s != null; });
         // A 4xx is a bot wall only when the board actually answered and refused us.
         // 404 is different: the URL does not exist at that shape, so the board
         // never received a question. Both are retrieval failures, but calling a
         // 404 "blocked" is a false and permanent diagnosis.
-        const wallCodes = [...new Set(statuses.filter(function (s) { return s >= 400 && s < 500 && s !== 404; }))];
-        const serverCodes = [...new Set(statuses.filter(function (s) { return s >= 500; }))];
-        const goneCodes = [...new Set(statuses.filter(function (s) { return s === 404; }))];
-        const hasNetwork = statuses.some(function (s) { return s === 0; });
+        const wallCodes = [...new Set(statuses.filter(function (s: any) { return s >= 400 && s < 500 && s !== 404; }))];
+        const serverCodes = [...new Set(statuses.filter(function (s: any) { return s >= 500; }))];
+        const goneCodes = [...new Set(statuses.filter(function (s: any) { return s === 404; }))];
+        const hasNetwork = statuses.some(function (s: any) { return s === 0; });
         let reason;
         if (wallCodes.length) {
           reason = boardName + ' blocked us (HTTP ' + wallCodes.join(', ') + '). This board refuses automated requests from this network and no amount of parsing will change that.';
@@ -2641,7 +2639,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         }
         return { status: 'error', count: 0, reason: reason };
       }
-      const shaped = reachable.filter(function (a) { return a.structure; });
+      const shaped = reachable.filter(function (a: any) { return a.structure; });
       if (shaped.length === 0) {
         return { status: 'error', count: 0, reason: 'fetched ' + reachable.length + ' of ' + attempts.length + ' page(s) but recognised no job-card markup at all \u2014 the layout has probably changed, so this source could not be read' };
       }
@@ -2658,14 +2656,14 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // LinkedIn serves a fully server-rendered results list; this is the one general
     // board that reliably works without a browser.
-    async function searchLinkedIn(query, location) {
+    async function searchLinkedIn(query: any, location: any) {
       const q = encodeURIComponent(query);
       const loc = location ? encodeURIComponent(location) : '';
       const url = 'https://www.linkedin.com/jobs/search?keywords=' + q + (loc ? '&location=' + loc : '') + '&f_TPR=r604800';
       const res = await fetchHtml(url);
       if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
-      const html = res.data;
-      const jobs = [];
+      const html: any = res.data;
+      const jobs: any[] = [];
       const cards = html.split('data-entity-urn="urn:li:jobPosting:');
       for (let i = 1; i < cards.length && jobs.length < 20; i++) {
         const card = cards[i];
@@ -2699,14 +2697,14 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
 
     // Wellfound renders its results client-side and ignores ?query=, so it is kept
     // only as a best-effort pass and reports honestly when it cannot be read.
-    async function searchWellfound(query, location) {
+    async function searchWellfound(query: any, location: any) {
       const q = encodeURIComponent(query);
       const loc = location ? encodeURIComponent(location) : '';
       const url = 'https://wellfound.com/jobs?query=' + q + (loc ? '&location=' + loc : '') + '&sort_by=recent';
       const res = await fetchHtml(url);
       if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
-      const html = res.data;
-      const jobs = [];
+      const html: any = res.data;
+      const jobs: any[] = [];
       // Anchor to the job detail path shape rather than to a class substring: a
       // class match on "job" also matches navigation links.
       const linkRe = /<a[^>]+href="([^"]*\/jobs\/[0-9a-f][^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
