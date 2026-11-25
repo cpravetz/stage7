@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const NARRATIVE_ARC_PACING_INPUT = {
@@ -71,11 +69,11 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const MINUTES_PER_PAGE = 8;
 
       // ---- Screenplay element parsing -------------------------------------------------
-      const isSlug = function (t) { return /^(INT|EXT|EST|INT\.?\/EXT|I\/E)[.\s]/i.test(t); };
-      const isTransition = function (t) { return /(TO:|CUT TO:|BACK TO:)$/.test(t) || /^(FADE (IN|OUT|TO)|CUT TO|DISSOLVE TO|SMASH CUT TO|MATCH CUT TO|WIPE TO|JUMP CUT TO)$/i.test(t); };
-      const isAllCaps = function (t) { return t === t.toUpperCase() && /[A-Z]/.test(t); };
-      const isParenthetical = function (t) { return /^\(.*\)$/.test(t) && t.length <= 70; };
-      const isCharacterCue = function (t) {
+      const isSlug = function (t: string) { return /^(INT|EXT|EST|INT\.?\/EXT|I\/E)[.\s]/i.test(t); };
+      const isTransition = function (t: string) { return /(TO:|CUT TO:|BACK TO:)$/.test(t) || /^(FADE (IN|OUT|TO)|CUT TO|DISSOLVE TO|SMASH CUT TO|MATCH CUT TO|WIPE TO|JUMP CUT TO)$/i.test(t); };
+      const isAllCaps = function (t: string) { return t === t.toUpperCase() && /[A-Z]/.test(t); };
+      const isParenthetical = function (t: string) { return /^\(.*\)$/.test(t) && t.length <= 70; };
+      const isCharacterCue = function (t: string) {
         if (t.length > 45) return false;
         if (isTransition(t)) return false;
         if (isAllCaps(t) && /[A-Z]{2,}/.test(t) && !/[.!?]/.test(t)) return true;
@@ -84,17 +82,17 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
 
       const lines = script.split(/\r?\n/);
 
-      function parseScreenplay(text) {
+      function parseScreenplay(text: string): any[] {
         const raw = text.split(/\r?\n/);
-        const scenes = [];
-        let current = null;
+        const scenes: any[] = [];
+        let current: any = null;
 
-        function openScene(slug) {
+        function openScene(slug: string) {
           current = { slug: slug, action: [], dialogue: [], transitions: [], characters: {} };
           scenes.push(current);
           return current;
         }
-        function nextNonEmpty(from) {
+        function nextNonEmpty(from: number) {
           for (let k = from; k < raw.length; k++) { if (raw[k].trim()) return { text: raw[k].trim(), index: k }; }
           return null;
         }
@@ -158,9 +156,9 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const parsed = parseScreenplay(script);
 
       let runningPages = 0;
-      const scenes = parsed.map(function (scene, index) {
+      const scenes = parsed.map(function (scene: any, index: number) {
         const actionWords = scene.action.join(' ').split(/\s+/).filter(Boolean).length;
-        const dialogueWords = scene.dialogue.reduce(function (sum, d) { return sum + d.words; }, 0);
+        const dialogueWords = scene.dialogue.reduce(function (sum: number, d: any) { return sum + d.words; }, 0);
         const totalWords = actionWords + dialogueWords;
         const pages = Math.max(0.1, Math.round((totalWords / WORDS_PER_PAGE) * 100) / 100);
         const startPage = runningPages;
@@ -191,7 +189,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const totalPages = Math.round(scenes.reduce(function (sum, s) { return sum + s.pages; }, 0) * 100) / 100;
       const estimatedRuntime = Math.round(totalPages * MINUTES_PER_PAGE * 10) / 10;
 
-      function sceneAtPageFraction(fraction) {
+      function sceneAtPageFraction(fraction: number) {
         const target = totalPages * fraction;
         let best = scenes[0];
         let bestDelta = Infinity;
@@ -205,7 +203,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const INCITING_MARKERS = /\b(deadline|arrives|arrived|knock|calls?|found|missing|gone|signed|letter|package|signed for|last chance|final|urgent|emergency|now|hurry|before it|it is over|we have to|you can't|you must)\b/i;
       const DECISIVE_MARKERS = /\b(do it|go through|final|decide|now|end of it|ends here|last chance|cut|stop|fire|kill|shoot|confess|tell her|tell him)\b/i;
 
-      function detectBeat(markers) {
+      function detectBeat(markers: RegExp) {
         for (let i = 0; i < scenes.length; i++) {
           const scene = scenes[i];
           const haystack = scene.openingLine + ' ' + scene.slug;
@@ -231,7 +229,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const climaxScene = climaxDetected || scenes[scenes.length - 1];
       const resolutionScene = scenes[scenes.length - 1];
 
-      function beatRef(scene, basis, label) {
+      function beatRef(scene: any, basis: string, label: string) {
         return {
           label: label,
           sceneNumber: scene.number,
@@ -257,7 +255,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
       const pageTargetNumber = Number(pageTarget) || 110;
       const targetPages = targetDuration > 0 ? Math.round((targetDuration / MINUTES_PER_PAGE) * 100) / 100 : pageTargetNumber;
 
-      function actFor(scene) {
+      function actFor(scene: any) {
         if (explicitActMarker) return null;
         const f = totalPages > 0 ? scene.startPage / totalPages : 0;
         if (f < 0.25) return 1;
@@ -265,7 +263,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
         return 3;
       }
 
-      const actBreakdown = [1, 2, 3].map(function (act) {
+      const actBreakdown = [1, 2, 3].map(function (act: number) {
         const inAct = explicitActMarker ? [] : scenes.filter(function (s) { return actFor(s) === act; });
         const pages = Math.round(inAct.reduce(function (sum, s) { return sum + s.pages; }, 0) * 100) / 100;
         return {
@@ -277,13 +275,13 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
         };
       }).filter(function (a) { return a.sceneCount > 0; });
 
-      const characterTotals = {};
-      scenes.forEach(function (s) {
-        s.characters.forEach(function (name) {
+      const characterTotals: Record<string, any> = {};
+      scenes.forEach(function (s: any) {
+        s.characters.forEach(function (name: string) {
           if (!characterTotals[name]) characterTotals[name] = { character: name, words: 0, scenes: 0 };
         });
       });
-      parsed.forEach(function (scene, index) {
+      parsed.forEach(function (scene: any, index: number) {
         Object.keys(scene.characters).forEach(function (name) {
           characterTotals[name].words += scene.characters[name];
           characterTotals[name].scenes += 1;
@@ -299,8 +297,8 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
         };
       }).sort(function (a, b) { return b.words - a.words; });
 
-      const pacingFlags = [];
-      function flag(severity, code, message, sceneRef) {
+      const pacingFlags: any[] = [];
+      function flag(severity: string, code: string, message: string, sceneRef?: number) {
         pacingFlags.push({ severity: severity, code: code, message: message, sceneNumber: sceneRef || null });
       }
 
@@ -346,7 +344,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
         flag('info', 'no-midpoint', 'Midpoint and climax resolve to the same scene (' + midpointScene.number + '); the second half has no turning point of its own.');
       }
 
-      const recommendations = [];
+      const recommendations: string[] = [];
       if (pacingFlags.length === 0) {
         recommendations.push('No structural or pacing problems were detected in this pass: scene boundaries parse cleanly, act positions follow page proportion, and scene lengths sit inside the 0.4-3 page band.');
       }
@@ -390,9 +388,9 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
         actBreakdown: actBreakdown,
       };
 
-      function fmt(n) { return String(n); }
+      function fmt(n: unknown): string { return String(n); }
 
-      const reportLines = [];
+      const reportLines: string[] = [];
       reportLines.push('Format: ' + format + '   Genre: ' + genre + '   Audience: ' + audience);
       reportLines.push('');
       reportLines.push('LENGTH');

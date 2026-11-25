@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const GENRE_MARKET_CONFIG_SCHEMA = {
@@ -105,10 +103,10 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       // Each delegation records its own outcome. A refusal or failure is reported rather than
       // swallowed, because a silently missing dependency made this skill report a half-empty
       // evaluation as a full one.
-      const delegations = [];
-      const results = {};
+      const delegations: any[] = [];
+      const results: Record<string, any> = {};
 
-      async function delegate(toolId, args) {
+      async function delegate(toolId: string, args: Record<string, unknown>): Promise<any> {
         const record = { toolId: toolId, connected: false, error: null };
         try {
           const result = await ctx.delegate(toolId, args);
@@ -120,7 +118,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
           record.error = (result && (result.error || result.message)) || 'Delegated skill returned no result.';
           delegations.push(record);
           return null;
-        } catch (error) {
+        } catch (error: any) {
           record.error = error && error.message ? error.message : String(error);
           delegations.push(record);
           return null;
@@ -148,8 +146,8 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       });
       if (copilotData) results.sceneBeatDialogue = copilotData;
 
-      const connected = delegations.filter(function (d) { return d.connected; }).map(function (d) { return d.toolId; });
-      const failed = delegations.filter(function (d) { return !d.connected; });
+      const connected = delegations.filter(function (d: any) { return d.connected; }).map(function (d: any) { return d.toolId; });
+      const failed = delegations.filter(function (d: any) { return !d.connected; });
 
       if (!connected.length) {
         return {
@@ -163,7 +161,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
               'not-connected',
               'Evaluation unavailable',
               'This Skill delegates its structural work to ' + delegatedTo.join(' and ') + '. Neither answered: ' +
-                failed.map(function (d) { return d.toolId + ' - ' + d.error; }).join('; ') +
+                failed.map(function (d: any) { return d.toolId + ' - ' + d.error; }).join('; ') +
                 '. No evaluation was produced.',
             ),
           ],
@@ -173,7 +171,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       // ---- Genre conventions --------------------------------------------------------
       // These are craft conventions for the genre, not measured market demand. They are what this
       // skill can actually evaluate against, and the report says so explicitly.
-      const GENRE_CONVENTIONS = {
+      const GENRE_CONVENTIONS: Record<string, any> = {
         drama:     { pages: [95, 120],  minScenes: 8,  act1Share: [0.25, 0.32], act3Share: [0.18, 0.28], requires: ['incitingIncident', 'midpoint', 'climax'], note: 'Character-credible escalation; ambiguity over spectacle.' },
         thriller:  { pages: [95, 115],  minScenes: 10, act1Share: [0.20, 0.28], act3Share: [0.22, 0.32], requires: ['incitingIncident', 'midpoint', 'climax'], note: 'Clock pressure that tightens monotonically; a ticking-timer spine.' },
         horror:    { pages: [85, 110],  minScenes: 9,  act1Share: [0.20, 0.28], act3Share: [0.22, 0.32], requires: ['incitingIncident', 'climax'], note: 'Escalating threat and withheld information.' },
@@ -184,7 +182,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       const conventions = GENRE_CONVENTIONS[genre] || GENRE_CONVENTIONS[genreFocus] || GENRE_CONVENTIONS.drama;
 
       // ---- Findings -----------------------------------------------------------------
-      const findings = [];
+      const findings: any[] = [];
       const scenePacing = results.narrativeArcPacing;
       const sceneOutline = results.sceneBeatDialogue;
 
@@ -214,7 +212,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
         }
 
         if (scenePacing.pacingFlags && scenePacing.pacingFlags.length) {
-          const warns = scenePacing.pacingFlags.filter(function (f) { return f.severity === 'warn'; }).length;
+          const warns = scenePacing.pacingFlags.filter(function (f: any) { return f.severity === 'warn'; }).length;
           findings.push({
             severity: warns ? 'warn' : 'info',
             code: 'pacing-flags',
@@ -226,8 +224,8 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       }
 
       if (sceneOutline) {
-        const beats = Array.isArray(sceneOutline.scenes) ? sceneOutline.scenes.map(function (s) { return s.storyBeat; }) : [];
-        conventions.requires.forEach(function (beat) {
+        const beats = Array.isArray(sceneOutline.scenes) ? sceneOutline.scenes.map(function (s: any) { return s.storyBeat; }) : [];
+        conventions.requires.forEach(function (beat: string) {
           if (beats.indexOf(beat) === -1) {
             findings.push({ severity: 'warn', code: 'missing-beat', message: 'The generated outline does not place a ' + beat + '. ' + genre + ' features are expected to carry it.' });
           }
@@ -242,9 +240,9 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
 
       findings.push({ severity: 'info', code: 'genre-note', message: genre + ' convention applied: ' + conventions.note });
 
-      const weights = { ok: 1, info: 0.5, warn: 0 };
-      const scored = findings.filter(function (f) { return f.code !== 'genre-note'; });
-      const readiness = scored.length ? Math.round((scored.reduce(function (sum, f) { return sum + weights[f.severity]; }, 0) / scored.length) * 100) : 0;
+      const weights: Record<string, number> = { ok: 1, info: 0.5, warn: 0 };
+      const scored = findings.filter(function (f: any) { return f.code !== 'genre-note'; });
+      const readiness = scored.length ? Math.round((scored.reduce(function (sum: number, f: any) { return sum + weights[f.severity]; }, 0) / scored.length) * 100) : 0;
       const readinessRating = readiness >= 80 ? 'ready-to-submit' : readiness >= 55 ? 'needs-revision' : 'not-ready';
 
       const status = failed.length === 0 ? 'live' : 'partial';
@@ -273,12 +271,12 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
         generatedAt: new Date().toISOString(),
       };
 
-      const reportLines = [];
+      const reportLines: string[] = [];
       reportLines.push('Genre: ' + genre + (genreFocus !== genre ? '  (focus: ' + genreFocus + ')' : ''));
       reportLines.push('Target format: ' + targetFormat);
       reportLines.push('Evaluation coverage: ' + marketFit.evaluationCoverage + ' (' + connected.join(', ') + ')');
       if (failed.length) {
-        reportLines.push('Unavailable: ' + failed.map(function (d) { return d.toolId + ' - ' + d.error; }).join('; '));
+        reportLines.push('Unavailable: ' + failed.map(function (d: any) { return d.toolId + ' - ' + d.error; }).join('; '));
       }
       reportLines.push('');
       reportLines.push('DATA SCOPE');
@@ -291,12 +289,13 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
       reportLines.push('  ' + conventions.note);
       reportLines.push('');
       reportLines.push('FINDINGS (' + findings.length + ')');
-      findings.forEach(function (f) { reportLines.push('  [' + f.severity.toUpperCase() + '] ' + f.message); });
+      findings.forEach(function (f: any) { reportLines.push('  [' + f.severity.toUpperCase() + '] ' + f.message); });
       reportLines.push('');
       reportLines.push('STRUCTURAL READINESS: ' + readiness + '% (' + readinessRating + ')');
       reportLines.push('  ' + marketFit.structuralReadinessNote);
 
-      const evaluation = {
+      // 'any' because `storePath` is attached after the store save below.
+      const evaluation: any = {
         id: 'market_eval_' + Date.now(),
         status: status,
         marketFit: marketFit,
