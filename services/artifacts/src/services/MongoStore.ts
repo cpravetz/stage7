@@ -8,6 +8,7 @@ import {
   BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
+  VectorUpsertMeta,
   MissionState,
   MissionRecoveryLease,
   AgentState,
@@ -28,7 +29,58 @@ const MAX_BRAIN_LOG_ENTRIES = 200;
 // re-emits an identical milestone therefore does not duplicate the feed.
 const EVENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
-type VectorDoc = { _id: string; vector: number[] };
+// Vector ids and metadata arrive from HTTP URL params and body fields — a
+// claim, not a fact. Each guard below re-derives a primitive-checked value
+// and callers must use the RETURN value, so only type-guarded data reaches a
+// Mongo query document; the store enforces this itself so in-process callers
+// cannot bypass it.
+const VECTOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+// Upper bound on embedding dimensions. Caps the cosine loop's iteration
+// count; real embedding models are far below this.
+export const MAX_VECTOR_DIM = 4096;
+
+function checkedVectorId(id: unknown): string {
+  if (typeof id !== 'string' || !VECTOR_ID_PATTERN.test(id)) {
+    throw new Error('Invalid vector id');
+  }
+  return id;
+}
+
+function checkedFiniteVector(vector: unknown): number[] {
+  if (!Array.isArray(vector) || vector.length === 0 || vector.length > MAX_VECTOR_DIM) {
+    throw new Error(`Invalid vector: expected 1..${MAX_VECTOR_DIM} finite numbers`);
+  }
+  const out: number[] = [];
+  for (const n of vector) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) {
+      throw new Error(`Invalid vector: expected 1..${MAX_VECTOR_DIM} finite numbers`);
+    }
+    out.push(n);
+  }
+  return out;
+}
+
+/** Rebuilds vector metadata with fixed keys and primitive-checked values only. */
+function checkedVectorMeta(meta: VectorUpsertMeta | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!meta) return out;
+  if (typeof meta.model === 'string') out.model = meta.model;
+  if (typeof meta.contentHash === 'string') out.contentHash = meta.contentHash;
+  if (typeof meta.collection === 'string') out.collection = meta.collection;
+  if (typeof meta.dim === 'number' && Number.isInteger(meta.dim)) out.dim = meta.dim;
+  if (meta.filter && typeof meta.filter === 'object' && !Array.isArray(meta.filter)) {
+    const filter: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(meta.filter)) {
+      if (typeof key === 'string' && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null)) {
+        filter[key] = value;
+      }
+    }
+    out.filter = filter;
+  }
+  return out;
+}
+
+type VectorDoc = { _id: string; vector: number[] } & VectorUpsertMeta;
 type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
 type StoredBrainPerformanceMetric = BrainPerformanceMetric & { _id?: string };
 
@@ -230,12 +282,22 @@ export class MongoStore {
   }
 
   async searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
+    // Bounded at the boundary: the cosine loop runs over the query vector's
+    // length, so it must be capped before any iteration. Bad input is a miss,
+    // not a crash.
+    const queryVector = checkedFiniteVector(query.query);
     const vectors = await this.vectors.find({}).toArray();
 
     const results: VectorSearchResult[] = [];
 
     for (const entry of vectors) {
-      const score = this.cosineSimilarity(query.query, entry.vector);
+      // Never mix models: cosine across models (or dimensions) silently
+      // produces meaningless scores. Vectors stored under a different model —
+      // or without one, from before model tagging existed — are misses.
+      if (query.model && entry.model !== query.model) continue;
+      // Cheap pre-filter on the vector's own metadata before loading documents.
+      if (entry.collection && entry.collection !== query.collection) continue;
+      const score = this.cosineSimilarity(queryVector, entry.vector);
       if (score >= (query.minScore || 0)) {
         const doc = await this.getDocument(entry._id);
         if (doc && (!query.filter || this.matchesFilter(doc, query.filter))) {
@@ -585,16 +647,38 @@ export class MongoStore {
     return this.missionEvents.find(filter).sort({ timestamp: 1 }).toArray();
   }
 
-  async upsertVector(id: string, vector: number[]): Promise<void> {
-    await this.vectors.replaceOne({ _id: id }, { _id: id, vector } as any, { upsert: true });
+  async upsertVector(id: string, vector: number[], meta: VectorUpsertMeta = {}): Promise<void> {
+    const safeId = checkedVectorId(id);
+    const safeVector = checkedFiniteVector(vector);
+    const safeMeta = checkedVectorMeta(meta);
+    const doc = { _id: safeId, vector: safeVector, ...safeMeta };
+    await this.vectors.replaceOne({ _id: safeId }, doc, { upsert: true });
+  }
+
+  /** The stored vector and its metadata, or undefined when none exists. */
+  async getVector(id: string): Promise<(VectorUpsertMeta & { vector: number[] }) | undefined> {
+    const safeId = checkedVectorId(id);
+    const entry = await this.vectors.findOne({ _id: safeId });
+    if (!entry) return undefined;
+    const { _id, vector, ...meta } = entry;
+    return { vector, ...meta };
+  }
+
+  /** Deletes a stored vector. Returns whether one existed. */
+  async deleteVector(id: string): Promise<boolean> {
+    const safeId = checkedVectorId(id);
+    const result = await this.vectors.deleteOne({ _id: safeId });
+    return result.deletedCount > 0;
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) return 0;
+    // Constant-bounded: iteration count never depends on an array length.
+    const dim = Math.min(a.length, b.length, MAX_VECTOR_DIM);
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
-    for (let i = 0; i < a.length; i++) {
+    for (let i = 0; i < dim; i++) {
       dotProduct += a[i] * b[i];
       normA += a[i] * a[i];
       normB += b[i] * b[i];

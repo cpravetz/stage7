@@ -6,6 +6,7 @@ import {
   BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
+  VectorUpsertMeta,
   MissionState,
   MissionRecoveryLease,
   AgentState,
@@ -28,7 +29,7 @@ export class InMemoryStore {
   private missionRecoveryLeases: Map<string, MissionRecoveryLease> = new Map();
   private agents: Map<string, AgentState> = new Map();
   private executionCheckpoints: Map<string, AgentExecutionCheckpoint> = new Map();
-  private vectors: Map<string, number[]> = new Map();
+  private vectors: Map<string, { vector: number[] } & VectorUpsertMeta> = new Map();
   private assistants: Map<string, AssistantDefinition> = new Map();
   private assistantRuntimes: Map<string, AssistantRuntimeConfig> = new Map();
   private assistantTemplates: Map<string, AssistantTemplate> = new Map();
@@ -142,8 +143,10 @@ export class InMemoryStore {
   searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
     const results: VectorSearchResult[] = [];
 
-    for (const [id, vector] of this.vectors.entries()) {
-      const score = this.cosineSimilarity(query.query, vector);
+    for (const [id, entry] of this.vectors.entries()) {
+      if (query.model && entry.model !== query.model) continue;
+      if (entry.collection && entry.collection !== query.collection) continue;
+      const score = this.cosineSimilarity(query.query, entry.vector);
       if (score >= (query.minScore || 0)) {
         const doc = this.documents.get(id);
         if (doc && (!query.filter || this.matchesFilter(doc, query.filter))) {
@@ -326,9 +329,20 @@ export class InMemoryStore {
     return Promise.resolve(existed);
   }
 
-  upsertVector(id: string, vector: number[]): Promise<void> {
-    this.vectors.set(id, vector);
+  upsertVector(id: string, vector: number[], meta: VectorUpsertMeta = {}): Promise<void> {
+    this.vectors.set(id, { vector, ...meta });
     return Promise.resolve();
+  }
+
+  getVector(id: string): Promise<(VectorUpsertMeta & { vector: number[] }) | undefined> {
+    const entry = this.vectors.get(id);
+    if (!entry) return Promise.resolve(undefined);
+    const { vector, ...meta } = entry;
+    return Promise.resolve({ vector, ...meta });
+  }
+
+  deleteVector(id: string): Promise<boolean> {
+    return Promise.resolve(this.vectors.delete(id));
   }
 
 

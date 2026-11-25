@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { HeuristicEntry, StoredKnowledgeEntry, logger } from '@stage7-nextgen/shared';
+import {
+  HeuristicEntry,
+  StoredKnowledgeEntry,
+  EmbeddingsClient,
+  embeddableContentHash,
+  logger,
+} from '@stage7-nextgen/shared';
 
 /**
  * Upper bound on `acquired` knowledge entries per assistant. Distillation
@@ -44,6 +50,7 @@ type PersistedKnowledgeEntry = StoredKnowledgeEntry & { ts: string };
 export class DistillationKnowledgeStore {
   private static instance: DistillationKnowledgeStore | undefined;
   private readonly artifactsUrl = (process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200').replace(/\/+$/, '');
+  private readonly embeddings = new EmbeddingsClient();
 
   static getInstance(): DistillationKnowledgeStore {
     this.instance ??= new DistillationKnowledgeStore();
@@ -66,6 +73,65 @@ export class DistillationKnowledgeStore {
       throw new Error(`Artifacts request failed (${response.status}): ${details}`);
     }
     return (response.status === 204 ? (undefined as T) : response.json()) as Promise<T>;
+  }
+
+  /** The entry shape persisted for one heuristic, including its confidence. */
+  private toPersistedEntry(
+    input: PersistHeuristicsInput,
+    heuristic: HeuristicEntry,
+    id: string,
+  ): PersistedKnowledgeEntry {
+    const rule = heuristic.rule.trim();
+    return {
+      id,
+      title: rule.length > 80 ? `${rule.slice(0, 77)}...` : rule,
+      // ts backs the cap's oldest-first eviction and surfaces in the
+      // Canvas knowledge list.
+      ts: typeof heuristic.ts === 'string' ? heuristic.ts : new Date().toISOString(),
+      content: [
+        rule,
+        ...(heuristic.rationale ? [`Rationale: ${heuristic.rationale}`] : []),
+        ...(heuristic.evidence?.length ? [`Evidence: ${heuristic.evidence.join('; ')}`] : []),
+      ].join('\n'),
+      source: 'distillation',
+      tags: ['distillation', ...(input.missionId ? [input.missionId] : [])],
+      assistantId: input.assistantId,
+      scope: 'assistant',
+      origin: 'acquired',
+      ...(typeof heuristic.confidence === 'number' ? { confidence: heuristic.confidence } : {}),
+    };
+  }
+
+  /**
+   * Embeds the entry and upserts its vector through the artifacts HTTP API,
+   * best-effort: an embedding failure must never fail the knowledge write.
+   */
+  private syncVector(entry: PersistedKnowledgeEntry): void {
+    void (async () => {
+      try {
+        const result = await this.embeddings.embed([`${entry.title}\n${entry.content}`]);
+        if (!result) return; // no embedding model available — lexical-only
+        await this.request(`/api/artifacts/vectors/${encodeURIComponent(entry.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            vector: result.vectors[0],
+            model: result.model,
+            dim: result.dim,
+            contentHash: embeddableContentHash([entry.title, entry.content]),
+            collection: 'knowledge',
+            filter: { scope: entry.scope, assistantId: entry.assistantId ?? null },
+          }),
+        });
+      } catch (err) {
+        logger.warn({ knowledgeId: entry.id, err }, 'Distillation vector sync failed; entry remains lexical-only');
+      }
+    })();
+  }
+
+  /** Deletes the entry's vector, best-effort (cap eviction / overwrite cleanup). */
+  private deleteVector(id: string): void {
+    void this.request(`/api/artifacts/vectors/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .catch((err: unknown) => logger.warn({ knowledgeId: id, err }, 'Distillation vector delete failed'));
   }
 
   /**
@@ -102,36 +168,37 @@ export class DistillationKnowledgeStore {
       if (current) {
         if (current.data?.origin !== 'acquired') {
           logger.warn({ knowledgeId: id, assistantId: input.assistantId, origin: current.data?.origin }, 'Skipping distillation heuristic; id belongs to a non-acquired knowledge entry');
+        } else {
+          // Re-learning the same rule strengthens it: overwrite the acquired
+          // entry only when the new confidence is higher. A missing stored
+          // confidence never blocks the update.
+          const storedConfidence = typeof current.data?.confidence === 'number' ? current.data.confidence : -Infinity;
+          const newConfidence = typeof heuristic.confidence === 'number' ? heuristic.confidence : -Infinity;
+          if (newConfidence > storedConfidence) {
+            const entry = this.toPersistedEntry(input, heuristic, id);
+            await this.request(`/api/artifacts/documents/${encodeURIComponent(id)}`, {
+              method: 'PUT',
+              body: JSON.stringify({ data: entry }),
+            });
+            this.syncVector(entry);
+            logger.info({ knowledgeId: id, assistantId: input.assistantId, confidence: heuristic.confidence }, 'Strengthened re-learned distillation heuristic');
+          }
         }
         continue;
       }
       if (existingIds.has(id)) continue;
 
+      const entry = this.toPersistedEntry(input, heuristic, id);
       await this.request(`/api/artifacts/documents`, {
         method: 'POST',
         body: JSON.stringify({
           id,
           tenantId: input.tenantId || 'system',
           collection: 'knowledge',
-          data: {
-            id,
-            title: rule.length > 80 ? `${rule.slice(0, 77)}...` : rule,
-            // ts backs the cap's oldest-first eviction and surfaces in the
-            // Canvas knowledge list.
-            ts: typeof heuristic.ts === 'string' ? heuristic.ts : new Date().toISOString(),
-            content: [
-              rule,
-              ...(heuristic.rationale ? [`Rationale: ${heuristic.rationale}`] : []),
-              ...(heuristic.evidence?.length ? [`Evidence: ${heuristic.evidence.join('; ')}`] : []),
-            ].join('\n'),
-            source: 'distillation',
-            tags: ['distillation', ...(input.missionId ? [input.missionId] : [])],
-            assistantId: input.assistantId,
-            scope: 'assistant',
-            origin: 'acquired',
-          } satisfies PersistedKnowledgeEntry,
+          data: entry,
         }),
       });
+      this.syncVector(entry);
       existingIds.add(id);
       created.push(id);
     }
@@ -157,6 +224,7 @@ export class DistillationKnowledgeStore {
     const excess = search.documents.slice(0, Math.max(0, search.documents.length - MAX_ACQUIRED_PER_ASSISTANT));
     for (const doc of excess) {
       await this.request(`/api/artifacts/documents/${encodeURIComponent(doc.id)}`, { method: 'DELETE' });
+      this.deleteVector(doc.id);
       logger.info({ knowledgeId: doc.id, assistantId }, 'Evicted oldest acquired knowledge entry to stay under the per-assistant cap');
     }
   }

@@ -7,6 +7,7 @@ import {
   BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
+  VectorUpsertMeta,
   MissionState,
   AgentState,
   AgentExecutionCheckpoint,
@@ -133,6 +134,18 @@ export class ArtifactsService {
 
   async searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {
     return this.useStore((store) => store.searchVectors(query));
+  }
+
+  async upsertVector(id: string, vector: number[], meta: VectorUpsertMeta = {}): Promise<void> {
+    return this.useStore((store) => store.upsertVector(id, vector, meta));
+  }
+
+  async getVector(id: string): Promise<(VectorUpsertMeta & { vector: number[] }) | undefined> {
+    return this.useStore((store) => store.getVector(id));
+  }
+
+  async deleteVector(id: string): Promise<boolean> {
+    return this.useStore((store) => store.deleteVector(id));
   }
 
   async saveMissionState(state: MissionState): Promise<void> {

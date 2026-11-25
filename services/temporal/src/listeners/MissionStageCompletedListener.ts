@@ -1,4 +1,4 @@
-import { logger, httpRequest } from '@stage7-nextgen/shared';
+import { logger, httpRequest, DEFAULT_TENANT_ID } from '@stage7-nextgen/shared';
 import type { MissionPhaseOutput } from '../types/workflow';
 import type { Plan } from '@stage7-nextgen/shared';
 import type { WorkflowInput } from '../types/workflow';
@@ -12,10 +12,14 @@ export class MissionStageCompletedListener {
       .slice(0, 20_000);
     if (!stageOutput) return;
 
+    // Missions without an entityId learn per-assistant: the read side
+    // (BrainClient) falls back to the same assistantId, so extraction and
+    // retrieval land on the same memory slot. A missionId fallback here wrote
+    // slots nothing ever read back.
     const metadataEntityId = input.metadata?.entityId;
     const entityId = typeof metadataEntityId === 'string' && metadataEntityId.trim()
       ? metadataEntityId.trim()
-      : input.assistantId || input.missionId;
+      : input.assistantId || 'general';
     const url = `${(process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '')}/api/brain/memory/entity`;
     try {
       const response = await httpRequest(url, {
@@ -23,7 +27,7 @@ export class MissionStageCompletedListener {
         headers: { 'Content-Type': 'application/json' },
         timeoutMs: 35 * 60_000,
         body: JSON.stringify({
-          tenantId: input.tenantId || 'tenant-1',
+          tenantId: input.tenantId || DEFAULT_TENANT_ID,
           entityId,
           assistantId: input.assistantId || 'general',
           missionId: input.missionId,

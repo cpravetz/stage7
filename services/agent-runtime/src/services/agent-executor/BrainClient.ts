@@ -46,9 +46,15 @@ export class BrainClient {
       maxTokens,
       temperature: 0.3,
       missionId,
-      entityId: typeof definition.metadata?.entityId === 'string'
+      // Entity-memory slot. Without an explicit entityId, missions learn
+      // per-assistant: this must mirror the extraction fallback
+      // (MissionStageCompletedListener writes entityId = assistantId).
+      // A missionId fallback here read slots nothing wrote.
+      entityId: typeof definition.metadata?.entityId === 'string' && definition.metadata.entityId
         ? definition.metadata.entityId
-        : missionId,
+        : typeof definition.metadata?.assistantId === 'string'
+          ? definition.metadata.assistantId
+          : undefined,
       assistantId: typeof definition.metadata?.assistantId === 'string'
         ? definition.metadata.assistantId
         : undefined,

@@ -45,14 +45,24 @@ function installFetch(options: { initialDocs?: FakeDoc[]; capDocs?: FakeDoc[] } 
   return {
     calls,
     /** Make a later GET of `id` return a stored document. */
-    storeDocument(id: string, origin: 'authored' | 'acquired') {
-      getResponses[id] = jsonResponse(200, knowledgeDoc(id, origin));
+    storeDocument(id: string, origin: 'authored' | 'acquired', data: Partial<StoredKnowledgeEntry & { ts: string }> = {}) {
+      const doc = knowledgeDoc(id, origin);
+      getResponses[id] = jsonResponse(200, { id, data: { ...doc.data, ...data } });
     },
   };
 }
 
 function createCalls(calls: Call[]): Call[] {
   return calls.filter((c) => c.method === 'POST' && c.url.endsWith('/documents'));
+}
+
+/** Waits for a fire-and-forget async chain to reach a visible state. */
+async function until(cond: () => boolean, tries = 100): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (cond()) return;
+    await new Promise((r) => setImmediate(r));
+  }
+  throw new Error('condition not met after flushing');
 }
 
 function persist(overrides: Partial<PersistHeuristicsInput> = {}): Promise<number> {
@@ -146,7 +156,88 @@ describe('DistillationKnowledgeStore', () => {
     const created = await persist();
     expect(created).toBe(1);
     const deletes = calls.filter((c) => c.method === 'DELETE');
-    expect(deletes).toHaveLength(1);
+    expect(deletes).toHaveLength(2);
     expect(deletes[0].url.endsWith('/documents/oldest')).toBe(true);
+    // The evicted entry's vector goes with it.
+    expect(deletes[1].url.endsWith('/vectors/oldest')).toBe(true);
+  });
+
+  it('copies the heuristic confidence onto the persisted entry', async () => {
+    const { calls } = installFetch();
+    await persist({
+      heuristics: [heuristic('Retry once on 429', { confidence: 0.8 })],
+    });
+
+    const payload = JSON.parse(createCalls(calls)[0].body!);
+    expect(payload.data.confidence).toBe(0.8);
+  });
+
+  it('overwrites a re-learned rule when the new confidence is higher', async () => {
+    const first = installFetch();
+    await persist({ heuristics: [heuristic('Retry once on 429', { confidence: 0.5 })] });
+    const storedId = JSON.parse(createCalls(first.calls)[0].body!).data.id as string;
+
+    const second = installFetch({});
+    second.storeDocument(storedId, 'acquired');
+    const created = await persist({ heuristics: [heuristic('Retry once on 429', { confidence: 0.9 })] });
+
+    expect(created).toBe(0);
+    const puts = second.calls.filter((c) => c.method === 'PUT');
+    expect(puts).toHaveLength(1);
+    expect(JSON.parse(puts[0].body!).data.confidence).toBe(0.9);
+    expect(puts[0].url.endsWith(`/documents/${storedId}`)).toBe(true);
+  });
+
+  it('does not overwrite when the stored confidence is already higher', async () => {
+    const first = installFetch();
+    await persist({ heuristics: [heuristic('Retry once on 429', { confidence: 0.9 })] });
+    const storedId = JSON.parse(createCalls(first.calls)[0].body!).data.id as string;
+
+    const second = installFetch({});
+    second.storeDocument(storedId, 'acquired', { confidence: 0.9 });
+    await persist({ heuristics: [heuristic('Retry once on 429', { confidence: 0.4 })] });
+
+    expect(second.calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('embeds and upserts a vector for each created entry, best-effort', async () => {
+    const { calls } = installFetch();
+    // Make the embeddings call succeed so the vector sync reaches artifacts.
+    jest.spyOn(global, 'fetch').mockImplementation(((url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method || 'GET', body: init?.body as string | undefined });
+      if (url.endsWith('/api/brain/embeddings')) {
+        return Promise.resolve(jsonResponse(200, { available: true, vectors: [[1, 0]], model: 'test-embedder' }));
+      }
+      if (url.endsWith('/documents/search')) {
+        return Promise.resolve(jsonResponse(200, { documents: [] }));
+      }
+      const isPost = (init?.method || 'GET') === 'POST';
+      return Promise.resolve(jsonResponse(isPost ? 201 : 204, isPost ? {} : undefined));
+    }) as typeof fetch);
+
+    await persist({ heuristics: [heuristic('Retry once on 429', { confidence: 0.9 })] });
+    const entryId = JSON.parse(createCalls(calls)[0].body!).data.id as string;
+    await until(() => calls.some((c) => c.method === 'PUT' && c.url.includes('/api/artifacts/vectors/')));
+
+    const vectorPut = calls.find((c) => c.method === 'PUT' && c.url.includes('/api/artifacts/vectors/'))!;
+    expect(vectorPut.url.endsWith(`/vectors/${entryId}`)).toBe(true);
+    const vectorBody = JSON.parse(vectorPut.body!);
+    expect(vectorBody.model).toBe('test-embedder');
+    expect(vectorBody.dim).toBe(2);
+    expect(vectorBody.collection).toBe('knowledge');
+    expect(vectorBody.contentHash).toEqual(expect.any(String));
+  });
+
+  it('does not block persist when the embeddings call fails', async () => {
+    const { calls } = installFetch();
+    jest.spyOn(global, 'fetch').mockImplementation(((url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method || 'GET', body: init?.body as string | undefined });
+      if (url.endsWith('/api/brain/embeddings')) return Promise.reject(new Error('brain unreachable'));
+      if (url.endsWith('/documents/search')) return Promise.resolve(jsonResponse(200, { documents: [] }));
+      const isPost = (init?.method || 'GET') === 'POST';
+      return Promise.resolve(jsonResponse(isPost ? 201 : 204, isPost ? {} : undefined));
+    }) as typeof fetch);
+
+    await expect(persist()).resolves.toBe(1);
   });
 });

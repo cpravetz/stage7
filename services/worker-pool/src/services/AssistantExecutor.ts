@@ -4,12 +4,14 @@ import {
   MCPToolCall,
   MCPToolResult,
 } from '@stage7-nextgen/shared';
-import { logger, httpRequest, llmCallTimeoutMs } from '@stage7-nextgen/shared';
+import { logger, httpRequest, llmCallTimeoutMs, DEFAULT_TENANT_ID } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
 import {
   applyKnowledgeBudget,
+  fuseKnowledgeRankings,
   knowledgeQueryTokens,
   rankKnowledgeEntries,
+  selectLessons,
 } from './knowledgeBudget';
 import type { AssistantLoader } from './AssistantLoader';
 
@@ -68,18 +70,47 @@ export class AssistantExecutor {
       );
     }
 
+    // Semantic retrieval: the task prompt is embedded once per execution and
+    // fused with the lexical ordering by RRF. A null embedding (no model
+    // configured, or the call failed) skips fusion entirely, which keeps the
+    // ranking — and therefore the rendered prompt — byte-identical to the
+    // lexical-only path.
+    const queryEmbedding = await this.knowledge.embedQuery(prompt);
+    let semanticScores: Map<string, number> | undefined;
+    if (queryEmbedding) {
+      const vectorScores = await this.knowledge.semanticScores(
+        queryEmbedding.vectors[0],
+        queryEmbedding.model,
+      );
+      const lexicalOrder = rankKnowledgeEntries(
+        knowledgeRecords,
+        knowledgeQueryTokens(definition.id, definition.name, prompt),
+      ).map((r) => r.entry.id);
+      semanticScores = fuseKnowledgeRankings(lexicalOrder, vectorScores);
+    }
+
     const rankedKnowledge = rankKnowledgeEntries(
       knowledgeRecords,
       knowledgeQueryTokens(definition.id, definition.name, prompt),
+      semanticScores,
     );
     const budgeted = applyKnowledgeBudget(rankedKnowledge);
-    const knowledge = budgeted.selected.map((r) => r.entry);
+    const lessons = selectLessons(budgeted.selected);
+    const lessonIds = new Set(lessons.map((l) => l.id));
+    const knowledge = budgeted.selected
+      .filter((r) => !lessonIds.has(r.entry.id))
+      .map((r) => r.entry);
 
     // Knowledge content is authored as multi-line markdown in per-assistant
     // files, so each entry is rendered as its own labelled section rather than
-    // flattened onto one line.
+    // flattened onto one line. High-confidence lessons render in their own
+    // section; excluding them here keeps the budget spent exactly once.
     const knowledgeBlock = knowledge.length > 0
       ? `\n\n## Your Knowledge\n${knowledge.map((k) => `### ${k.title}\n${k.content}`).join('\n\n')}`
+      : '';
+
+    const lessonsBlock = lessons.length > 0
+      ? `\n\n## Lessons from past missions\n${lessons.map((k) => `### ${k.title}\n${k.content}`).join('\n\n')}`
       : '';
 
     const transactionBlock = definition.transactionGuidance && definition.transactionGuidance.length > 0
@@ -90,7 +121,7 @@ export class AssistantExecutor {
       ? `\n\nAvailable tools:\n${definition.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n')}\n\nTo use a tool, respond with ONLY a JSON object in this exact format:\n{"tool":"tool-name","args":{...}}`
       : '\n\nNo tools are available. Answer directly.';
 
-    const systemPrompt = `${definition.systemPrompt}${contextBlock}${knowledgeBlock}${transactionBlock}${toolsContext}`;
+    const systemPrompt = `${definition.systemPrompt}${contextBlock}${knowledgeBlock}${lessonsBlock}${transactionBlock}${toolsContext}`;
 
     const maxIterations = Math.max(1, Number(definition.metadata?.maxIterations) || 8);
     const conversation: Array<{ role: string; content: string }> = [{ role: 'user', content: prompt }];
@@ -100,7 +131,7 @@ export class AssistantExecutor {
     let lastToolResultText: string | null = null;
 
     for (let i = 0; i < maxIterations; i++) {
-      const brainRes = await this.callBrain(systemPrompt, conversation);
+      const brainRes = await this.callBrain(definition, systemPrompt, conversation);
       if (!brainRes.ok) {
         return {
           assistantId: definition.id,
@@ -170,6 +201,7 @@ export class AssistantExecutor {
   }
 
   private async callBrain(
+    definition: AssistantDefinition,
     systemPrompt: string,
     conversation: Array<{ role: string; content: string }>,
   ): Promise<{ ok: boolean; error?: string; content?: string; tokensUsed?: number }> {
@@ -177,6 +209,13 @@ export class AssistantExecutor {
     const prompt = conversation
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
       .join('\n\n');
+    // Entity-memory context: brain keys memories by sha256(tenantId\0assistantId\0entityId),
+    // so the same three values the extraction path wrote under must be sent
+    // here or the nudges can never fire. The slot default matches the
+    // extraction fallback (assistantId) and DEFAULT_TENANT_ID.
+    const entityId = typeof definition.metadata?.entityId === 'string' && definition.metadata.entityId.trim()
+      ? definition.metadata.entityId.trim()
+      : definition.id;
     try {
       const res = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
@@ -186,6 +225,9 @@ export class AssistantExecutor {
           systemPrompt,
           maxTokens: 4096,
           temperature: 0.7,
+          entityId,
+          assistantId: definition.id,
+          tenantId: definition.tenantId || DEFAULT_TENANT_ID,
         }),
         timeoutMs: llmCallTimeoutMs(),
       });
