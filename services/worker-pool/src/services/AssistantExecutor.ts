@@ -6,6 +6,11 @@ import {
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
+import {
+  applyKnowledgeBudget,
+  knowledgeQueryTokens,
+  rankKnowledgeEntries,
+} from './knowledgeBudget';
 import type { AssistantLoader } from './AssistantLoader';
 
 export class AssistantExecutor {
@@ -52,14 +57,23 @@ export class AssistantExecutor {
 
     // Knowledge is read from the store on every execution, not carried on the
     // definition, so that entries recorded for this assistant — or shared with
-    // all of them — take effect without redeploying.
-    const knowledge = await this.knowledge.listForAssistant(definition.id);
-    if (knowledge.length === 0) {
+    // all of them — take effect without redeploying. Entries are ranked (tag
+    // match against the assistant/task first, recency second) and capped to a
+    // character budget so a growing store cannot overflow the context window.
+    const knowledgeRecords = await this.knowledge.listForAssistantWithMeta(definition.id);
+    if (knowledgeRecords.length === 0) {
       logger.warn(
         { assistantId: definition.id },
         'Assistant has no knowledge in the store; executing without knowledge block',
       );
     }
+
+    const rankedKnowledge = rankKnowledgeEntries(
+      knowledgeRecords,
+      knowledgeQueryTokens(definition.id, definition.name, prompt),
+    );
+    const budgeted = applyKnowledgeBudget(rankedKnowledge);
+    const knowledge = budgeted.selected.map((r) => r.entry);
 
     // Knowledge content is authored as multi-line markdown in per-assistant
     // files, so each entry is rendered as its own labelled section rather than
