@@ -15,6 +15,7 @@ import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schem
 import { extractJsonObject } from '../adk/resilience';
 import { assertPublicUrl } from '../utils/assertPublicUrl';
 import { schemaRecord, type ToolConfigResolver } from './ToolConfig';
+import { resolveNativeBinding } from './ExecutorBindings';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
@@ -55,7 +56,7 @@ export type NestedExecutor = (toolId: string, input: Record<string, unknown>) =>
 /**
  * Turns a (tool, input, resolved credentials) triple into an actual execution:
  * native executor binding, sandboxed code (with LLM self-healing), OpenAPI / MCP /
- * reasoning tools, name-heuristic fallbacks, discovery, and plugin auto-generation.
+ * reasoning tools, manifest-keyed native bindings, discovery, and plugin auto-generation.
  *
  * Holds no per-execution state. The registry and MCP client map are the executor's
  * own, shared by reference.
@@ -186,11 +187,10 @@ export class ToolDispatcher {
     credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] },
   ): Promise<Record<string, unknown>> {
     const { resolved, sources } = credentials;
-    const name = tool.name.toLowerCase();
     const manifest = tool.manifest as Record<string, unknown> | undefined;
     const capabilities = Array.isArray(manifest?.capabilities) ? (manifest.capabilities as string[]) : [];
 
-    // === Explicit native executor binding (checked BEFORE name heuristics) ===
+    // === Explicit native executor binding (checked first) ===
     const executorKey = manifest?.executor as string | undefined;
     if (executorKey) {
       // Input normalization: shallow-copy input and add camelCase aliases for snake_case keys
@@ -204,13 +204,10 @@ export class ToolDispatcher {
         }
       }
 
-      // Vendor tools: resolve vendor name from tool name when not supplied in input
-      if (executorKey === 'vendor' && normalizedInput.vendor === undefined) {
-        const name = tool.name.toLowerCase();
-        if (name.includes('jira')) normalizedInput.vendor = 'jira';
-        else if (name.includes('confluence')) normalizedInput.vendor = 'confluence';
-        else if (name.includes('slack')) normalizedInput.vendor = 'slack';
-        else if (name.includes('github')) normalizedInput.vendor = 'github';
+      // Vendor identity is manifest data (the schema requires `vendor` for
+      // executor: 'vendor'); no name inference.
+      if (executorKey === 'vendor' && normalizedInput.vendor === undefined && typeof manifest?.vendor === 'string') {
+        normalizedInput.vendor = manifest.vendor;
       }
 
       try {
@@ -236,7 +233,7 @@ export class ToolDispatcher {
         return { output: { error } };
       }
     }
-    // If no executorKey, fall through to existing heuristic-based dispatch
+    // If no executorKey, fall through to code / MCP / manifest-keyed dispatch below
     if (tool.type === 'code' || manifest?.language) {
       const language = (manifest?.language as string) || 'javascript';
       const sourceCode = (manifest?.sourceCode as string) || '';
@@ -477,229 +474,27 @@ export class ToolDispatcher {
         break;
     }
 
-    if (name.includes('ftp')) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for FTP tool '${tool.name}'` } };
-      }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          host: (input.host as string) || '',
-          port: (input.port as number) || 21,
-          username: (input.username as string) || '',
-          password: (input.password as string) || '',
-          operation: (input.operation as string) || 'list',
-          remotePath: input.remotePath as string,
-          localPath: input.localPath as string,
-          content: input.content as string,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return { output: exec.data.output, durationMs: exec.data.durationMs };
-    }
-
-    if (name.includes('webhook')) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for webhook tool '${tool.name}'` } };
-      }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          url: (input.url as string) || '',
-          method: (input.method as string) || 'POST',
-          headers: input.headers as Record<string, string>,
-          body: input.body as Record<string, unknown>,
-          secret: input.secret as string,
-          event: input.event as string,
-          retries: (input.retries as number) || 3,
-          timeoutMs: (input.timeoutMs as number) || 10000,
-          idempotencyKey: (input.idempotencyKey as string) || (input.executionId as string),
-          lookupUrl: input.lookupUrl as string,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return {
-        statusCode: exec.data.statusCode,
-        response: exec.data.response,
-        durationMs: exec.data.durationMs,
-        idempotencyKey: (exec.data as any).idempotencyKey,
-        providerRequestId: (exec.data as any).providerRequestId,
-        outcomeKnown: (exec.data as any).outcomeKnown,
-        reconciliation: (exec.data as any).reconciliation,
-      };
-    }
-
-    if (name.includes('database') || name.includes('db') || capabilities.includes('query')) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for database tool '${tool.name}'` } };
-      }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          engine: (input.engine as string) || 'sqlite',
-          connectionString: input.connectionString as string,
-          host: input.host as string,
-          port: input.port as number,
-          database: input.database as string,
-          username: input.username as string,
-          password: input.password as string,
-          query: (input.query as string) || '',
-          params: input.params as unknown[],
-          timeoutMs: (input.timeoutMs as number) || 30000,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return { rows: exec.data.rows, columns: exec.data.columns, rowCount: exec.data.rowCount, durationMs: exec.data.durationMs };
-    }
-
-    if (name.includes('file') || name.includes('storage') || capabilities.includes('read') || capabilities.includes('write')) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for file tool '${tool.name}'` } };
-      }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          operation: (input.operation as string) || 'read',
-          path: (input.path as string) || '',
-          content: input.content as string,
-          bucket: input.bucket as string,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return {
-        data: exec.data.data,
-        durationMs: exec.data.durationMs,
-        idempotencyKey: (exec.data as any).idempotencyKey,
-        providerRequestId: (exec.data as any).providerRequestId,
-        outcomeKnown: (exec.data as any).outcomeKnown,
-        reconciliation: (exec.data as any).reconciliation,
-      };
-    }
-
-    if (tool.type !== 'mcp' && (name.includes('jira') || name.includes('confluence') || name.includes('slack') || name.includes('github'))) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for vendor tool '${tool.name}'` } };
-      }
-      const vendor = name.includes('jira')
-        ? 'jira'
-        : name.includes('confluence')
-          ? 'confluence'
-          : name.includes('slack')
-            ? 'slack'
-            : 'github';
-
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          vendor,
-          operation: (input.operation as string) || 'query',
-          input,
-          idempotencyKey: (input.idempotencyKey as string) || (input.executionId as string),
-          lookupUrl: input.lookupUrl as string,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return {
-        data: exec.data.data,
-        durationMs: exec.data.durationMs,
-        idempotencyKey: (exec.data as any).idempotencyKey,
-        providerRequestId: (exec.data as any).providerRequestId,
-        outcomeKnown: (exec.data as any).outcomeKnown,
-        reconciliation: (exec.data as any).reconciliation,
-      };
-    }
-
     if (tool.type === 'mcp' && !manifest?.server && manifest?.configSchema) {
       return { output: { error: `MCP tool '${tool.name}' is missing MCP server configuration.` } };
     }
 
-    if (name.includes('email') || manifest?.server === 'email-mcp' || capabilities.includes('send')) {
+    // === Manifest-keyed native dispatch ===
+    // The binding (payload shape and result mapping) is read from the tool's
+    // manifest data — `executor` first, then declared capabilities — never
+    // from tool-name substrings.
+    const binding = resolveNativeBinding(manifest, capabilities);
+    if (binding) {
       const codeFile = this.resolveCodeFile(tool);
       if (!codeFile) {
-        return { output: { error: `No code file resolved for email tool '${tool.name}'` } };
+        return { output: { error: `No code file resolved for ${binding.label} tool '${tool.name}'` } };
       }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          to: (input.to as string | string[]) || '',
-          subject: (input.subject as string) || '',
-          text: (input.body as string) || (input.text as string),
-          html: input.html as string,
-          from: input.from as string,
-          attachments: (input.attachments as Array<{ filename?: string; content?: string | Buffer; path?: string }>) || [],
-          idempotencyKey: (input.idempotencyKey as string) || (input.executionId as string),
-          lookupUrl: input.lookupUrl as string,
-          lookupRequestId: input.lookupRequestId as string,
-        },
-        resolved,
-      );
-
+      const exec = await this.executeNativeModule(codeFile, binding.buildInput(input, manifest), resolved);
       if (!exec.success) {
         return { output: { error: exec.error } };
       }
-
-      return {
-        messageId: exec.data.messageId,
-        providerRequestId: (exec.data as any).providerRequestId,
-        status: 'sent',
-        idempotencyKey: (exec.data as any).idempotencyKey,
-        outcomeKnown: (exec.data as any).outcomeKnown,
-        reconciliation: (exec.data as any).reconciliation,
-      };
+      return binding.mapOutput(exec.data);
     }
 
-    if (name.includes('search') || name.includes('query') || capabilities.includes('search')) {
-      const codeFile = this.resolveCodeFile(tool);
-      if (!codeFile) {
-        return { output: { error: `No code file resolved for search tool '${tool.name}'` } };
-      }
-      const exec = await this.executeNativeModule(
-        codeFile,
-        {
-          query: (input.query as string) || (input.q as string) || '',
-          maxResults: (input.maxResults as number) || (input.max_results as number) || 10,
-          searchType: (input.searchType as 'web' | 'images' | 'news') || 'web',
-          freshness: (input.freshness as 'day' | 'week' | 'month' | 'year') || undefined,
-        },
-        resolved,
-      );
-
-      if (!exec.success) {
-        return { output: { error: exec.error } };
-      }
-
-      return { results: exec.data.results as unknown[], count: (exec.data.results as unknown[] | undefined)?.length ?? 0 };
-    }
 
     const discovered = await this.toolDiscovery.discoverAndRegister(tool.name + ' ' + tool.description, {
       register: (t: Tool) => {
