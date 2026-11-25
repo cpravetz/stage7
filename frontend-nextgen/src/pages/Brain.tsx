@@ -3,6 +3,7 @@ import { fetchJSON, postJSON } from '../utils/api';
 import { useFeedStore } from '../stores/feedStore';
 import { useSpendLimitStore } from '../stores/spendLimitStore';
 import { useAuthStore } from '../stores/authStore';
+import { tokenUserId } from '../utils/tokenUserId';
 
 interface BrainLogEntry {
   timestamp: string;
@@ -27,7 +28,9 @@ const Brain = () => {
   const recordSpendRefusal = useSpendLimitStore((s) => s.recordRefusalFromError);
   const clearSpendRefusal = useSpendLimitStore((s) => s.clearRefusal);
   const token = useAuthStore((s) => s.token);
-  const userId = useAuthStore((s) => s.user?.id);
+  // Prefer the hydrated user object; the token's `sub` covers a page reload,
+  // where the store holds the token but not the user.
+  const userId = useAuthStore((s) => s.user?.id ?? tokenUserId(s.token));
   const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [cacheStats, setCacheStats] = useState<{ hits: number; misses: number } | null>(null);
