@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
@@ -68,7 +67,7 @@ export const OPERATIONAL_ANALYTICS = createDeclarativeCodeSkill({
 
       const records = analyticsData.records || [];
 
-      function sliceData(pd, dataArray) {
+      function sliceData(pd: string, dataArray: any[]) {
         const now = new Date();
         let startDate;
         if (pd === '7d') { startDate = new Date(now); startDate.setDate(now.getDate() - 6); }
@@ -77,13 +76,13 @@ export const OPERATIONAL_ANALYTICS = createDeclarativeCodeSkill({
         else if (pd === 'YTD') { startDate = new Date(now.getFullYear(), 0, 1); }
         else if (pd === '1y') { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); }
         else { startDate = new Date(now); startDate.setDate(now.getDate() - 29); }
-        return dataArray.filter(d => { const dd = new Date(d.date); return dd >= startDate; });
+        return dataArray.filter((d: any) => { const dd = new Date(d.date); return dd >= startDate; });
       }
 
-      function computeKPIs(data) {
+      function computeKPIs(data: any[]) {
         if (!data.length) return {};
-        const nums = data.map(d => d.value).filter(v => typeof v === 'number');
-        const sum = nums.reduce((a, b) => a + b, 0);
+        const nums = data.map((d: any) => d.value).filter((v: any) => typeof v === 'number');
+        const sum = nums.reduce((a: number, b: number) => a + b, 0);
         const avg = nums.length ? sum / nums.length : 0;
         return {
           total: sum, average: Math.round(avg * 100) / 100, count: nums.length,
@@ -95,10 +94,10 @@ export const OPERATIONAL_ANALYTICS = createDeclarativeCodeSkill({
       let result;
         const slice = sliceData(period, records);
         const kpis = {
-          patientVolume: computeKPIs(slice.filter(d => d.type === 'volume')),
-          averageLengthOfStay: computeKPIs(slice.filter(d => d.type === 'los')),
-          bedOccupancy: computeKPIs(slice.filter(d => d.type === 'occupancy')),
-          throughput: computeKPIs(slice.filter(d => d.type === 'throughput')),
+          patientVolume: computeKPIs(slice.filter((d: any) => d.type === 'volume')),
+          averageLengthOfStay: computeKPIs(slice.filter((d: any) => d.type === 'los')),
+          bedOccupancy: computeKPIs(slice.filter((d: any) => d.type === 'occupancy')),
+          throughput: computeKPIs(slice.filter((d: any) => d.type === 'throughput')),
         };
         result = { success: true, data: { type: 'dashboard', reportType, period, granularity, kpis, recordCount: slice.length, source: 'local', note: 'For deeper analytics use the Healthcare Analytics platform.' } };
     }
