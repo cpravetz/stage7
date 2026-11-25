@@ -4,6 +4,7 @@ import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { MissionDetail, useMissionsStore } from '../stores/missionsStore';
 import { fetchJSON, postFormData, postJSON, putJSON } from '../utils/api';
+import { getAuthTenantId } from '../stores/authStore';
 import MissionArtifactContent from '../components/MissionArtifactContent';
 import {
   getArtifactMediaCategory,
@@ -778,7 +779,8 @@ const MissionRoom = () => {
             for (const key of secretKeys) {
               await putJSON(`/api/vault/secrets/name/${encodeURIComponent(`tool:${credentialRequest.toolId}:${key}`)}`, {
                 plaintext: interactionCredentials[key],
-                tenantId: 'system',
+                // The vault scopes by the authenticated user's token tenant.
+                tenantId: getAuthTenantId() ?? undefined,
               });
             }
           }

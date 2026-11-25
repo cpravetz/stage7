@@ -11,6 +11,28 @@ import type {
   RuntimeWorkflowResponse,
 } from '../types';
 
+import { useAuthStore } from '../stores/authStore';
+
+/**
+ * The gateway's proxy routes are bearer-gated (fail closed since commit
+ * 84822c7), so every request must carry the login token to reach a backend
+ * service. The token lives in the auth store's `localStorage.token` key —
+ * no separate storage — and requests without one (public paths, pre-login)
+ * go out headerless. Callers that pass explicit headers still win.
+ */
+export function withAuthHeaders(init?: RequestInit): RequestInit {
+  const token = useAuthStore.getState().token;
+  if (!token) return init ?? {};
+  return {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      // Existing callers pass plain-object headers only.
+      ...(init?.headers as Record<string, string> | undefined),
+    },
+  };
+}
+
 const API_BASE = '';
 
 export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
@@ -22,7 +44,7 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
   // and misinterpreting it as an error which previously emptied the skill list
   // and caused a save that persisted an empty tools array.
   const defaultInit: RequestInit = { cache: 'no-store' };
-  const response = await fetch(`${API_BASE}${path}`, { ...defaultInit, ...(init || {}) });
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({ ...defaultInit, ...(init || {}) }));
   if (response.status === 304) {
     // A conditional GET should never happen with no-store; treat it as a
     // specific, diagnosable failure instead of fabricating stale data.
@@ -43,12 +65,12 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
 }
 
 export async function postJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     ...init,
-  });
+  }));
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
@@ -56,11 +78,11 @@ export async function postJSON<T>(path: string, body: unknown, init?: RequestIni
 }
 
 export async function postFormData<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
     method: 'POST',
     body,
     ...init,
-  });
+  }));
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
@@ -68,21 +90,21 @@ export async function postFormData<T>(path: string, body: FormData, init?: Reque
 }
 
 export async function deleteResource(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
     method: 'DELETE',
-  });
+  }));
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
 }
 
 export async function putJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     ...init,
-  });
+  }));
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
@@ -90,12 +112,12 @@ export async function putJSON<T>(path: string, body: unknown, init?: RequestInit
 }
 
 export async function patchJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     ...init,
-  });
+  }));
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }

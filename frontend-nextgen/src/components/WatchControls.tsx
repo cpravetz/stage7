@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { postJSON } from '../utils/api';
 
 interface WatchControlsProps {
   skillId: string;
@@ -28,18 +29,12 @@ const WatchControls = ({ skillId, defaultQuery = '' }: WatchControlsProps) => {
         autoApply: false,
       };
 
-      const res = await fetch('/api/tool-executor/watches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`Create watch failed (${res.status})`);
-      const data = await res.json();
+      const data = await postJSON<{ id: string }>('/api/tool-executor/watches', body);
       setMessage('Watch created');
 
       if (runNow) {
         try {
-          await fetch(`/api/temporal/watches/${encodeURIComponent(data.id)}/run`, { method: 'POST' });
+          await postJSON(`/api/temporal/watches/${encodeURIComponent(data.id)}/run`, {});
          } catch {
           // best-effort
         }
