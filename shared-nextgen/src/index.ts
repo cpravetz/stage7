@@ -18,3 +18,5 @@ export * from './data/mongo';
 export * from './utils/stripTrailingSlashes';
 export * from './utils/actionReceiptVerifier';
 export * from './config/brainSettings';
+export * from './config/missionSettings';
+export * from './config/settingsDocSource';

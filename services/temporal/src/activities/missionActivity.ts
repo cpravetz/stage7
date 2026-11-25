@@ -1,4 +1,4 @@
-import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { logger, httpRequest, interServiceTimeoutMs, missionSettings, resolveMissionSettings } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { MissionActivityCheckpoint, WorkflowInput } from '../types/workflow';
 
@@ -81,8 +81,14 @@ async function executeMissionActivity(
     logger.info({ missionId: input.missionId, phaseId, question }, 'Phase awaiting approval');
     const persistenceUrl = process.env.ARTIFACTS_URL || 'http://artifacts:4200';
     const startTime = Date.now();
-    const timeout = parseInt(process.env.APPROVAL_TIMEOUT_MS || '0', 10) || 24 * 60 * 60 * 1000;
-    const pollInterval = parseInt(process.env.APPROVAL_POLL_INTERVAL_MS || '3000', 10);
+    // Settings doc first, then the APPROVAL_* environment variables, then
+    // built-in defaults. A failed or missing document leaves the environment
+    // values in effect; the refresh is TTL-cached and bounded by the
+    // inter-service timeout so it never stalls the wait.
+    await missionSettings.refresh();
+    const approvalSettings = resolveMissionSettings(missionSettings.current().overrides, process.env);
+    const timeout = approvalSettings.approvalTimeoutMs;
+    const pollInterval = approvalSettings.approvalPollIntervalMs;
     let checks = 0;
     const approvalUrl = `${persistenceUrl}/api/artifacts/missions/${input.missionId}/phases/${phaseId}`;
     while (Date.now() - startTime < timeout) {
