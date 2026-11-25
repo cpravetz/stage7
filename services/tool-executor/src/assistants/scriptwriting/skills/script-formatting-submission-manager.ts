@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const SCRIPT_FORMATTING_INPUT = {
@@ -109,26 +107,26 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       const LINES_PER_PAGE = 55;
 
       // ---- Element parsing ---------------------------------------------------------
-      const isSlug = function (t) {
+      const isSlug = function (t: string) {
         const m = t.match(/^(INT|EXT|EST|INT\.?\/EXT|I\/E)[.\s]/i);
         return Boolean(m);
       };
-      const isTransition = function (t) {
+      const isTransition = function (t: string) {
         return /(TO:|CUT TO:|BACK TO:)$/.test(t) || /^(FADE (IN|OUT|TO)|CUT TO|DISSOLVE TO|SMASH CUT TO|MATCH CUT TO|WIPE TO|JUMP CUT TO)$/i.test(t);
       };
-      const isAllCaps = function (t) { return t === t.toUpperCase() && /[A-Z]/.test(t); };
-      const isParenthetical = function (t) { return /^\(.*\)$/.test(t) && t.length <= 70; };
-      const isCharacterCue = function (t) {
+      const isAllCaps = function (t: string) { return t === t.toUpperCase() && /[A-Z]/.test(t); };
+      const isParenthetical = function (t: string) { return /^\(.*\)$/.test(t) && t.length <= 70; };
+      const isCharacterCue = function (t: string) {
         if (t.length > 45) return false;
         if (isTransition(t)) return false;
         return isAllCaps(t) && /[A-Z]{2,}/.test(t) && !/[.!?]/.test(t);
       };
-      const stripExtension = function (t) { return t.replace(/\((?:V\.?O\.?|O\.?S\.?|C\.?O\.?)\)/gi, '').trim(); };
+      const stripExtension = function (t: string) { return t.replace(/\((?:V\.?O\.?|O\.?S\.?|C\.?O\.?)\)/gi, '').trim(); };
 
       const lines = script.split(/\r?\n/);
-      const elements = [];
+      const elements: any[] = [];
       let i = 0;
-      function nextNonEmpty(from) {
+      function nextNonEmpty(from: number) {
         for (let k = from; k < lines.length; k++) { if (lines[k].trim()) return lines[k].trim(); }
         return null;
       }
@@ -156,7 +154,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
             parenthetical = lines[cursor].trim();
             cursor++;
           }
-          const spoken = [];
+          const spoken: string[] = [];
           while (cursor < lines.length && lines[cursor].trim()) {
             const line = lines[cursor].trim();
             if (isSlug(line) || isTransition(line) || isParenthetical(line)) break;
@@ -167,7 +165,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
           i = cursor;
           continue;
         }
-        const actionRun = [];
+        const actionRun: string[] = [];
         while (i < lines.length && lines[i].trim()) {
           const line = lines[i].trim();
           if (isSlug(line) || isTransition(line)) break;
@@ -178,7 +176,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
         elements.push({ type: 'action', text: actionRun.join(' ') });
       }
 
-      function normalizedSlug(text, style) {
+      function normalizedSlug(text: string, style: string) {
         if (style === 'master') return text.toUpperCase();
         // "smart" keeps the case the writer used but guarantees INT./EXT. and a time-of-day token.
         let out = text.replace(/^INT\.?\s*\/\s*EXT\.?/i, 'INT./EXT.');
@@ -189,10 +187,10 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       }
 
       // ---- Rendering ---------------------------------------------------------------
-      function pad(n) { return ' '.repeat(n); }
-      function wrap(text, width, indent) {
+      function pad(n: number) { return ' '.repeat(n); }
+      function wrap(text: string, width: number, indent: number) {
         const words = text.split(/\s+/).filter(Boolean);
-        const out = [];
+        const out: string[] = [];
         let line = '';
         words.forEach(function (w) {
           if (!line.length) { line = indent + w; return; }
@@ -205,8 +203,8 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       }
 
       function renderStandard() {
-        const out = [];
-        elements.forEach(function (el, idx) {
+        const out: string[] = [];
+        elements.forEach(function (el: any, idx: number) {
           if (idx > 0) out.push('');
           if (el.type === 'slug') { out.push(el.text.toUpperCase()); return; }
           if (el.type === 'action') { wrap(el.text, CHARS_PER_LINE, 0).forEach(function (l) { out.push(l); }); return; }
@@ -214,7 +212,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
           if (el.type === 'dialogue') {
             out.push(pad(22) + el.character);
             if (el.parenthetical) out.push(pad(16) + el.parenthetical);
-            el.lines.forEach(function (l) { wrap(l, 35, 10).forEach(function (x) { out.push(x); }); });
+            el.lines.forEach(function (l: string) { wrap(l, 35, 10).forEach(function (x) { out.push(x); }); });
             return;
           }
         });
@@ -222,9 +220,9 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       }
 
       function renderFountain() {
-        const out = [];
-        let previous = null;
-        elements.forEach(function (el) {
+        const out: string[] = [];
+        let previous: any = null;
+        elements.forEach(function (el: any) {
           if (el.type === 'slug') {
             out.push(el.text.toUpperCase());
           } else if (el.type === 'transition') {
@@ -233,7 +231,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
             if (previous && previous !== 'action') out.push('');
             out.push(el.character);
             if (el.parenthetical) out.push(el.parenthetical);
-            el.lines.forEach(function (l) { out.push(l); });
+            el.lines.forEach(function (l: string) { out.push(l); });
           } else if (el.type === 'action') {
             if (previous && previous !== 'action') out.push('');
             out.push(el.text);
@@ -244,21 +242,21 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       }
 
       const standardLines = renderStandard();
-      const wordCount = elements.reduce(function (sum, el) {
+      const wordCount = elements.reduce(function (sum: number, el: any) {
         if (el.type === 'action') return sum + el.text.split(/\s+/).filter(Boolean).length;
         if (el.type === 'dialogue') return sum + el.lines.join(' ').split(/\s+/).filter(Boolean).length;
         return sum;
       }, 0);
       const estimatedPages = Math.max(1, Math.round((wordCount / WORDS_PER_PAGE) * 100) / 100);
 
-      let body;
-      let outputLines;
+      let body: string;
+      let outputLines: string[];
       if (targetFormat === 'fountain') {
         outputLines = renderFountain();
         body = outputLines.join('\n');
       } else {
         outputLines = standardLines;
-        const withBreaks = [];
+        const withBreaks: string[] = [];
         outputLines.forEach(function (l) {
           withBreaks.push(l);
           if (targetFormat === 'pdf' && withBreaks.length % LINES_PER_PAGE === 0) {
@@ -272,14 +270,14 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
 
       // ---- Format verification -----------------------------------------------------
       const counts = { slug: 0, action: 0, character: 0, parenthetical: 0, dialogue: 0, transition: 0 };
-      elements.forEach(function (el) {
+      elements.forEach(function (el: any) {
         if (el.type === 'slug') counts.slug++;
         else if (el.type === 'action') counts.action++;
         else if (el.type === 'transition') counts.transition++;
         else if (el.type === 'dialogue') { counts.character++; counts.dialogue++; if (el.parenthetical) counts.parenthetical++; }
       });
 
-      const formatChecks = [];
+      const formatChecks: any[] = [];
       if (counts.slug === 0) {
         formatChecks.push({ severity: 'error', code: 'no-slug', message: 'No INT./EXT. scene headings were found, so the script has no scene boundaries in standard format.' });
       }
@@ -289,7 +287,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       if (counts.character === 0 && counts.action > 0) {
         formatChecks.push({ severity: 'warn', code: 'no-dialogue', message: 'No dialogue was detected. Everything was treated as action.' });
       }
-      elements.forEach(function (el) {
+      elements.forEach(function (el: any) {
         if (el.type === 'dialogue' && !el.lines.length) {
           formatChecks.push({ severity: 'warn', code: 'empty-dialogue', message: 'Character cue "' + el.character + '" has no dialogue after it.' });
         }
@@ -314,9 +312,9 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
         content: body,
       };
 
-      let submissionStatus;
-      let submissionMessage;
-      let submissionResponse = null;
+      let submissionStatus: string;
+      let submissionMessage: string;
+      let submissionResponse: any = null;
 
       if (submitTo.length === 0) {
         submissionStatus = 'not-requested';
@@ -332,25 +330,25 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
         submissionMessage = 'Submission to ' + submitTo.join(', ') + ' requires explicit confirmation. Re-run with confirmation true to send.';
       } else {
         try {
-          const headers = { 'Content-Type': 'application/json' };
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
           if (apiKey) headers['X-API-Key'] = apiKey;
           const res = await fetch(endpoint, { method: 'POST', headers: headers, body: JSON.stringify(artifact) });
           const text = await res.text();
-          let data = null;
+          let data: any = null;
           try { data = text ? JSON.parse(text) : null; } catch (_) { data = { text: text }; }
           submissionResponse = { status: res.status, data: data };
           submissionStatus = res.ok ? 'submitted' : 'failed';
           submissionMessage = res.ok
             ? 'Submitted to ' + submitTo.join(', ') + ' and accepted with HTTP ' + res.status + '.'
             : 'Endpoint ' + endpoint + ' rejected the submission with HTTP ' + res.status + '. The formatted script remains available locally.';
-        } catch (error) {
+        } catch (error: any) {
           submissionStatus = 'failed';
           submissionMessage = 'Submission to ' + endpoint + ' failed: ' + (error && error.message ? error.message : String(error)) + '. The formatted script remains available locally.';
           submissionResponse = { status: null, data: null };
         }
       }
 
-      const reportLines = [];
+      const reportLines: string[] = [];
       reportLines.push('Input format: ' + format + '   Target format: ' + targetFormat + '   Page size: ' + pageSize);
       reportLines.push('Title: ' + artifact.title);
       reportLines.push('');
@@ -383,7 +381,8 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       reportLines.push('-------------------------------------');
       reportLines.push(body);
 
-      const output = {
+      // 'any' because `storePath` is attached after the store save below.
+      const output: any = {
         id: 'sfm_' + Date.now(),
         title: artifact.title,
         format: format,

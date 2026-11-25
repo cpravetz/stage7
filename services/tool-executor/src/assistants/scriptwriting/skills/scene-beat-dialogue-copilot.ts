@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 import { SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { extractJsonObject } from '../../../adk/resilience';
@@ -77,7 +75,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       ? Math.max(1, Math.min(20, Math.floor(requestedScenes)))
       : Math.max(3, Math.min(8, Math.round(targetDuration)));
 
-    let cast = Array.isArray(input.characters) ? input.characters.filter(Boolean).map(function (c) { return String(c).trim().toUpperCase(); }) : [];
+    let cast = Array.isArray(input.characters) ? input.characters.filter(Boolean).map(function (c: any) { return String(c).trim().toUpperCase(); }) : [];
     if (!cast.length) {
       cast = genre === 'comedy' ? ['PROTAGONIST', 'SIDEKICK'] : ['PROTAGONIST', 'ANTAGONIST', 'ALLY'];
     }
@@ -85,11 +83,11 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
 
     const NL = '\n';
 
-    function payload(success, status, data, error, present) {
+    function payload(success: boolean, status: string, data: any, error: string | null, present: any) {
       return { success: success, status: status, data: data || null, error: error || null, present: present || [] };
     }
 
-    function emitAndExit(success, status, data, error, present) {
+    function emitAndExit(success: boolean, status: string, data: any, error: string, present: any) {
       const out = JSON.stringify(payload(success, status, data, error, present));
       process.stdout.write(out + '\n', function () { process.exit(0); });
     }
@@ -97,7 +95,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
     const NOT_CONNECTED_BODY = [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Scene and beat generation requires a configured assistant model. Contact your administrator to set brainEndpoint in this Skill\'s configuration and verify model availability.' }];
     const NOT_CONNECTED_ERROR = 'Scene and beat guidance are unavailable; set brainEndpoint in this Skill configuration and ensure the assistant model is reachable';
 
-    function unwrapDelegated(res) {
+    function unwrapDelegated(res: any) {
       if (!res || typeof res !== 'object') return null;
       if (res.status === 'failed') return null;
       if (res.success === false) return null;
@@ -117,7 +115,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       return null;
     }
 
-    function delegatedText(payload) {
+    function delegatedText(payload: any) {
       if (!payload) return null;
       if (typeof payload === 'string') return cleanDelegatedText(payload);
       if (typeof payload !== 'object') return null;
@@ -126,7 +124,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       return null;
     }
 
-    function cleanDelegatedText(text) {
+    function cleanDelegatedText(text: string) {
       if (!text) return null;
       let body = text;
       const thinkingIdx = body.indexOf('Thinking Process:');
@@ -145,7 +143,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       return body ? body : null;
     }
 
-    function withDeadline(promise, ms) {
+    function withDeadline(promise: any, ms: number) {
       return new Promise(function (resolve) {
         let done = false;
         const timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
@@ -160,7 +158,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
     }
 
-    async function callBrain(prompt) {
+    async function callBrain(prompt: string) {
       const base = brainBaseUrl();
       if (!base) return null;
       try {
@@ -174,14 +172,14 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
           }),
         });
         if (!res.ok) return null;
-        const data = await res.json();
+        const data: any = await res.json();
         return data.content || data.summary || null;
       } catch (e) {
         return null;
       }
     }
 
-    function scenesFromPayload(payload) {
+    function scenesFromPayload(payload: any) {
       if (!payload || typeof payload !== 'object') return null;
       if (Array.isArray(payload.scenes) && payload.scenes.length > 0) return payload.scenes;
       const text = delegatedText(payload);
@@ -198,9 +196,9 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       : 24000;
 
     const work = (async function () {
-      const delegatedTo = [];
-      const missing = [];
-      const brainBacked = [];
+      const delegatedTo: string[] = [];
+      const missing: string[] = [];
+      const brainBacked: string[] = [];
 
       const toolInput = {
         topic: topic,
@@ -223,7 +221,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
         + 'Each scene must advance a different story beat; never repeat one template. storyBeat must be one of: opening, inciting, first-turn, rising, midpoint, complication, crisis, climax, resolution. Scenes run in dramatic order (Act 1 -> Act 2 -> Act 3). Include slug lines (INT./EXT. LOCATION - DAY/NIGHT), action description, and dialogue with character cues and optional parentheticals.\n\n'
         + 'Output only that JSON: no preamble, no analysis of the request, no markdown fences, and no closing remarks about your own answer.';
 
-      let scenes = null;
+      let scenes: any = null;
       try {
         const raw = await withDeadline(ctx.delegate('scriptwriting-scene-beat-generator', toolInput), DELEGATED_TIMEOUT_MS);
         const payload = unwrapDelegated(raw);
@@ -247,10 +245,10 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
         missing.push('Generated via direct brain call (' + brainBacked.join(', ') + ').');
       }
 
-      function renderScreenplay(list) {
-        return list.map(function (scene) {
+      function renderScreenplay(list: any) {
+        return list.map(function (scene: any) {
           const parts = [scene.slug || '', '', scene.action || '', ''];
-          (scene.dialogue || []).forEach(function (d) {
+          (scene.dialogue || []).forEach(function (d: any) {
             if (d.parenthetical) {
               parts.push(d.parenthetical);
               parts.push(d.line);
@@ -270,21 +268,21 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
 
       const formattedScreenplay = renderScreenplay(scenes);
 
-      function outlineText(list) {
-        const lines = [];
+      function outlineText(list: any) {
+        const lines: string[] = [];
         lines.push('Topic: ' + topic);
         if (logline) lines.push('Logline: ' + logline);
         lines.push('Setting: ' + place + '   Cast: ' + cast.join(', '));
         lines.push('Scenes: ' + list.length);
         lines.push('');
-        list.forEach(function (scene) {
+        list.forEach(function (scene: any) {
           lines.push('SCENE ' + scene.number + ' - Act ' + scene.act + ' - ' + String(scene.storyBeat || '').toUpperCase() + ' - ' + (scene.pacing || ''));
           lines.push('  ' + (scene.slug || ''));
           lines.push('  Purpose: ' + (scene.purpose || ''));
           lines.push('  Beats:');
-          (scene.beats || []).forEach(function (b, i) { lines.push('    ' + (i + 1) + '. ' + b); });
+          (scene.beats || []).forEach(function (b: any, i: number) { lines.push('    ' + (i + 1) + '. ' + b); });
           lines.push('  Dialogue:');
-          (scene.dialogue || []).forEach(function (d) {
+          (scene.dialogue || []).forEach(function (d: any) {
             lines.push('    ' + (d.character || '') + (d.parenthetical ? ' ' + d.parenthetical : ''));
             lines.push('      ' + d.line);
           });
@@ -295,43 +293,44 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       }
       const outlineBody = outlineText(scenes);
 
-      const totalWords = scenes.reduce(function (sum, s) {
+      const totalWords = scenes.reduce(function (sum: number, s: any) {
         const words = (s.action || '').split(/\s+/).filter(Boolean).length
-          + (s.dialogue || []).reduce(function (s2, d) { return s2 + (d.line || '').split(/\s+/).filter(Boolean).length; }, 0);
+          + (s.dialogue || []).reduce(function (s2: number, d: any) { return s2 + (d.line || '').split(/\s+/).filter(Boolean).length; }, 0);
         return sum + words;
       }, 0);
       const estimatedPages = Math.round((totalWords / 180) * 100) / 100;
       const estimatedRuntime = Math.round(estimatedPages * 8 * 10) / 10;
 
-      const actBreakdown = [1, 2, 3].map(function (act) {
-        const inAct = scenes.filter(function (s) { return s.act === act; });
+      const actBreakdown = [1, 2, 3].map(function (act: number) {
+        const inAct = scenes.filter(function (s: any) { return s.act === act; });
         return {
           act: act,
-          sceneNumbers: inAct.map(function (s) { return s.number; }),
+          sceneNumbers: inAct.map(function (s: any) { return s.number; }),
           sceneCount: inAct.length,
           pageShare: estimatedPages > 0
-            ? Math.round((inAct.reduce(function (sum, s) { return sum + ((s.action || '').length / 180); }, 0) / estimatedPages) * 100)
+            ? Math.round((inAct.reduce(function (sum: number, s: any) { return sum + ((s.action || '').length / 180); }, 0) / estimatedPages) * 100)
             : 0,
         };
-      }).filter(function (a) { return a.sceneCount > 0; });
+      }).filter(function (a: any) { return a.sceneCount > 0; });
 
-      function actBreakdownText(acts) {
-        const lines = [];
+      function actBreakdownText(acts: any) {
+        const lines: string[] = [];
         lines.push('Act breakdown across ' + scenes.length + ' scenes (~' + estimatedPages + ' pages, ~' + estimatedRuntime + ' min runtime):');
         lines.push('');
-        acts.forEach(function (a) {
+        acts.forEach(function (a: any) {
           lines.push('Act ' + a.act + ': scenes ' + a.sceneNumbers.join(', ') + ' (' + a.sceneCount + ' scenes, ' + a.pageShare + '% of pages)');
         });
         return lines.join('\n');
       }
 
-      const notes = [];
+      const notes: string[] = [];
       if (!logline) {
         notes.push('No logline supplied; scenes were generated from the topic alone. Provide a logline for a tighter ' + place + ' through-line.');
       }
       notes.push('Scene count ' + scenes.length + ' covers the nine-beat skeleton; raise sceneCount above 9 for a longer outline.');
 
-      const result = {
+      // 'any' because `storePath` is attached after the store save below.
+      const result: any = {
         id: 'sbd_' + Date.now(),
         topic: topic,
         logline: logline,
@@ -368,7 +367,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       return { success: true, status: 'ok', data: result, error: null, present: present };
     })();
 
-    let budgetTimer = null;
+    let budgetTimer: any = null;
     const budget = new Promise(function (resolve) {
       budgetTimer = setTimeout(function () { resolve('budget-exhausted'); }, SKILL_BUDGET_MS);
     });
@@ -383,4 +382,3 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
   }
 });
 SCENE_BEAT_DIALOGUE_COPILOT.configSchema = {};
-export { SCENE_BEAT_DIALOGUE_COPILOT };
