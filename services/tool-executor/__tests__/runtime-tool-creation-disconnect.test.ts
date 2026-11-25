@@ -1,6 +1,6 @@
 import { MCPToolExecutive } from '../src/services/MCPToolExecutive';
 import { mcpToolDiscovery } from '../src/services/MCPToolDiscovery';
-import { MCPLibrarySourceRegistry } from '../src/services/MCPLibrarySourceRegistry';
+import { MCPLibrarySourceRegistry, mcpLibrarySourceRegistry } from '../src/services/MCPLibrarySourceRegistry';
 import { setToolRegistry, getToolRegistry } from '../src/services/ToolIntegrator';
 
 describe('runtime tool creation: capability resolution', () => {
@@ -16,6 +16,7 @@ describe('runtime tool creation: capability resolution', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     setToolRegistry(savedRegistry);
+    mcpLibrarySourceRegistry.unregister('stage7-curated');
   });
 
   it('surfaces the unreachable source instead of fabricating a tool', async () => {
@@ -35,7 +36,17 @@ describe('runtime tool creation: capability resolution', () => {
     expect(discovered.error).toMatch(/Discovery failed|stage7-mcp-curated|503/i);
   });
 
-  it('resolves through the mcp-runtime HTTP source when reachable', async () => {
+  it('resolves through a remote curated HTTP source when reachable', async () => {
+    // Curated pre-approval requires a registered curated source; there is no
+    // built-in default since the mcp-runtime fold.
+    mcpLibrarySourceRegistry.register({
+      id: 'stage7-curated',
+      name: 'Stage7 Curated MCP Library',
+      transport: 'remote',
+      config: {},
+      tier: 'curated',
+      enabled: true,
+    });
     const exec = new MCPToolExecutive();
     const injected: { tools: Record<string, unknown> } = { tools: {} };
     setToolRegistry({
@@ -78,12 +89,8 @@ describe('runtime tool creation: capability resolution', () => {
     expect(discovered.tool?.name).toBe('send_sms');
   });
 
-  it('default curated source points at the mcp-runtime HTTP transport', () => {
+  it('has no built-in curated source after the mcp-runtime fold', () => {
     const registry = new MCPLibrarySourceRegistry();
-    const source = registry.get('stage7-curated');
-    expect(source).toBeDefined();
-    expect(source?.transport).toBe('remote');
-    expect(typeof source?.config.url).toBe('string');
-    expect(source?.config.url).toMatch(/mcp-runtime/);
+    expect(registry.get('stage7-curated')).toBeUndefined();
   });
 });

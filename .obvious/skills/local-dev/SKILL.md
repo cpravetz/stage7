@@ -17,7 +17,7 @@ Docker — this skill documents the verified native path.
    `redis-server --port 6379 --bind 127.0.0.1`. Sandbox lacks systemd for the apt packages —
    start daemons directly. mongod 8 tarball works on Debian 13.
 2. **Hostnames**: `sudo` append to `/etc/hosts`:
-   `127.0.0.1 mongo redis gateway brain worker-pool mcp-runtime agent-runtime tool-executor temporal vault artifacts auth frontend`
+   `127.0.0.1 mongo redis gateway brain worker-pool agent-runtime tool-executor temporal vault artifacts auth frontend`
    Service code hardcodes docker hostnames (gateway registry, brain provider URLs) — this one
    line makes the whole mesh resolve natively.
 3. **Env**: `cp .env.example .env`, point Mongo/Redis/service URLs at localhost, set
@@ -32,8 +32,8 @@ Docker — this skill documents the verified native path.
        `npx tsc --outDir dist --rootDir src ... src/index.ts` (flags mirroring its tsconfig).
    - `cd frontend-nextgen && npm ci` (own lockfile, not a root workspace).
 5. **Launch** (any order after infra; ~2s startup each):
-   - `node services/<svc>/dist/index.js` for gateway, brain, worker-pool, mcp-runtime,
-     tool-executor, vault, artifacts, temporal, mcp-runtime — with `TOOL_STORE_DIR` /
+   - `node services/<svc>/dist/index.js` for gateway, brain, worker-pool,
+     tool-executor, vault, artifacts, temporal — with `TOOL_STORE_DIR` /
      `PLUGIN_DEPLOY_DIR` set to writable dirs for tool-executor.
    - agent-runtime and auth emit `dist/src/index.js` (nested layout) — different entry point.
 6. **Frontend**: `cd frontend-nextgen && npm run dev` → `http://localhost:8080`; vite proxies

@@ -58,14 +58,13 @@ and output, and the **Assistant chat window** for questions, clarifications, and
 docker compose up -d
 ```
 
-This brings up the web UI plus ten backend services:
+This brings up the web UI plus nine backend services:
 
 | Service | Host port | Role |
 |---------|-----------|------|
 | frontend | 8080 | Web UI — open `http://localhost:8080` |
 | gateway | 3900 | API entry point and reverse proxy |
 | brain | 3100 | LLM routing and health |
-| mcp-runtime | 3300 | Tool registry (Model Context Protocol) |
 | worker-pool | 3200 | Task queue, execution, assistant registry |
 | agent-runtime | 3400 | Agent and worker processes |
 | tool-executor | 3500 | ADK runtime: Skills, Tools, workspaces |
@@ -801,7 +800,6 @@ Base URL `http://localhost:3900/api/workers`
 | frontend | `http://localhost:8080` |
 | gateway | `http://localhost:3900/api/gateway/health` |
 | brain | `http://localhost:3100/api/brain/health` |
-| mcp-runtime | `http://localhost:3300/api/mcp-runtime/health` |
 | worker-pool | `http://localhost:3200/api/workers/health` |
 | agent-runtime | `http://localhost:3400/api/agent-runtime/health` |
 | tool-executor | `http://localhost:3500/api/tool-executor/health` |

@@ -45,17 +45,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  mcp-runtime:
-    image: stage7-mcp-runtime
-    build:
-      context: .
-      dockerfile: services/mcp-runtime/dockerfile
-    ports:
-      - "3300:3300"
-    env_file:
-      - .env
-    restart: unless-stopped
-
   worker-pool:
     image: stage7-worker-pool
     build:

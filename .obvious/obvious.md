@@ -11,7 +11,7 @@ Compose in production-style deployments. MongoDB (documents/persistence) and Red
 - **Package manager:** npm workspaces (`shared-nextgen`, `services/*`); `frontend-nextgen` has its own lockfile and must be installed separately
 - **Infra:** MongoDB 8 (port 27017), Redis (port 6379)
 - **Frontend:** React 18 + Vite 6 (dev server port 8080, proxies `/api/*` to backend services)
-- **Container path:** full stack via `docker-compose.yaml` (13 built services + mongo + redis); interactive setup: `./setup.sh`
+- **Container path:** full stack via `docker-compose.yaml` (12 built services + mongo + redis); interactive setup: `./setup.sh`
 
 ## Services and ports (native)
 
@@ -20,7 +20,6 @@ Compose in production-style deployments. MongoDB (documents/persistence) and Red
 | gateway | 3000 (host-mapped 3900 in compose) | `services/gateway` |
 | brain | 3100 | `services/brain` |
 | worker-pool | 3200 | `services/worker-pool` |
-| mcp-runtime | 3300 | `services/mcp-runtime` |
 | agent-runtime | 3400 | `services/agent-runtime` |
 | tool-executor | 3500 | `services/tool-executor` |
 | vault | 4000 | `services/vault` |
@@ -52,7 +51,7 @@ run `npx tsc` there after removing test files from include).
 
 1. Provide MongoDB and Redis locally (install `mongod` + `redis-server`; compose normally provides them).
 2. Add docker service hostnames to `/etc/hosts` — code references them literally:
-   `127.0.0.1 mongo redis gateway brain worker-pool mcp-runtime agent-runtime tool-executor temporal vault artifacts auth`
+   `127.0.0.1 mongo redis gateway brain worker-pool agent-runtime tool-executor temporal vault artifacts auth`
 3. `cp .env.example .env` and point hosts at localhost (`MONGO_URI=mongodb://localhost:27017`,
    `REDIS_HOST=localhost`, service URLs to localhost ports). Set `MASTER_KEY` (vault) to any
    random hex. No LLM provider key is required to boot; providers degrade gracefully.

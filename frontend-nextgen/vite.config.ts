@@ -46,10 +46,6 @@ export default defineConfig({
         target: 'http://localhost:3500',
         changeOrigin: true,
       },
-      '/api/mcp-runtime': {
-        target: 'http://localhost:3300',
-        changeOrigin: true,
-      },
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
