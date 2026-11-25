@@ -16,7 +16,8 @@ export interface AgentExecutorOptions {
   fetcher?: typeof fetch
   maxIterations?: number
   maxDelegationDepth?: number
-  brainRequestTimeoutMs?: number
+  /** Fixed timeout, or a resolver consulted per request so saved deadlines propagate without a restart. */
+  brainRequestTimeoutMs?: number | (() => Promise<number> | number)
 }
 
 export interface AgentExecutionContext {

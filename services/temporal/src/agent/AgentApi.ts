@@ -25,7 +25,7 @@ export class AgentApi {
         method: options.method,
         headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
         body: options.body as string | undefined,
-        timeoutMs: agentRuntimeTimeoutMs(),
+        timeoutMs: await agentRuntimeTimeoutMs(),
       });
     } catch (err) {
       const message = describeRequestError(err);

@@ -1,4 +1,4 @@
-import { logger } from '@stage7-nextgen/shared';
+import { logger, fetchLlmSettingsDoc, resolveBrainCompletionDeadlineMs } from '@stage7-nextgen/shared';
 import {
   AgentDefinition,
   AgentToolPolicy,
@@ -25,13 +25,22 @@ export function getAgentRuntimeUrl(): string {
  * The default must outlast the Brain completion deadline, otherwise the
  * request is aborted while the agent is still working and the mission fails
  * even though the agent eventually succeeds.
+ *
+ * Resolution order: the AGENT_RUNTIME_TIMEOUT_MS override, the llm-config
+ * settings completion deadline (+60 s headroom), the BRAIN_COMPLETION_DEADLINE_MS
+ * env deadline (+60 s headroom), then the flat 15-minute default. Shared with
+ * MissionAgentRuntime — this is the single implementation of the formula.
  */
-export function agentRuntimeTimeoutMs(): number {
+export async function agentRuntimeTimeoutMs(): Promise<number> {
   const configured = Number(process.env.AGENT_RUNTIME_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  const brainDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-  if (Number.isFinite(brainDeadline) && brainDeadline > 0) return brainDeadline + 60_000;
-  return 900_000;
+  const envBrainDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
+  const settings = await fetchLlmSettingsDoc(process.env.ARTIFACTS_URL || 'http://artifacts:4200');
+  return resolveBrainCompletionDeadlineMs({
+    settingsValue: settings?.completionDeadlineMs,
+    attemptTimeoutMs: Number.isFinite(envBrainDeadline) && envBrainDeadline > 0 ? envBrainDeadline : undefined,
+    variant: 'temporal',
+  });
 }
 
 export function encodePathSegment(value: string): string {

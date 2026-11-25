@@ -7,9 +7,16 @@ export class CircuitBreaker {
   private nextAttempt = 0;
 
   constructor(
-    private readonly threshold: number = 5,
-    private readonly cooldownMs: number = 30000,
+    private threshold: number = 5,
+    private cooldownMs: number = 30000,
   ) {}
+
+  // Runtime-tunable breaker tuning: applies to future failures; an already
+  // open circuit keeps its current cooldown window.
+  configure(threshold: number, cooldownMs: number): void {
+    this.threshold = threshold;
+    this.cooldownMs = cooldownMs;
+  }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === 'open') {

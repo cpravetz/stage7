@@ -1,8 +1,22 @@
 import { TemporalClient } from './client/TemporalClient'
-import { logger, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared'
+import { logger, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders, fetchLlmSettingsDoc, DEFAULT_WATCH_SCHEDULER_POLL_MS } from '@stage7-nextgen/shared'
 
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
-const POLL_MS = Number(process.env.WATCH_SCHEDULER_POLL_MS || '60000')
+
+/**
+ * Resolves the poll interval for the NEXT tick: the llm-config settings
+ * document first (its own 30 s TTL cache amortizes the fetch), then the env
+ * var, then the default. Read per tick so a saved change reaches the running
+ * scheduler without a restart.
+ */
+export async function resolveWatchPollIntervalMs(
+  fetchSettings: () => Promise<{ watchSchedulerPollMs?: number } | null> = () => fetchLlmSettingsDoc(ARTIFACTS_URL),
+): Promise<number> {
+  const configured = Number(process.env.WATCH_SCHEDULER_POLL_MS)
+  const fallback = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_WATCH_SCHEDULER_POLL_MS
+  const settings = await fetchSettings()
+  return settings?.watchSchedulerPollMs ?? fallback
+}
 
 export function startWatchScheduler(client: TemporalClient): () => void {
   if (!ARTIFACTS_URL) {
@@ -11,6 +25,7 @@ export function startWatchScheduler(client: TemporalClient): () => void {
   }
 
   let running = true
+  let timer: NodeJS.Timeout | undefined
 
   async function poll() {
     try {
@@ -43,22 +58,27 @@ export function startWatchScheduler(client: TemporalClient): () => void {
     }
   }
 
-  // Start initial poll immediately
-  poll()
-
-  const handle = setInterval(() => {
+  // Self-scheduling loop: each tick waits for the interval resolved AFTER the
+  // previous poll, so interval changes apply from the next cycle onward.
+  async function tick() {
     if (!running) return
-    poll()
-  }, POLL_MS)
+    await poll()
+    if (!running) return
+    const pollMs = await resolveWatchPollIntervalMs()
+    timer = setTimeout(tick, pollMs)
+  }
+
+  // Start initial poll immediately
+  tick()
 
   process.on('exit', () => {
     running = false
-    clearInterval(handle)
+    if (timer) clearTimeout(timer)
   })
 
-  logger.info({ pollMs: POLL_MS }, 'Watch scheduler started')
+  logger.info('Watch scheduler started')
   return () => {
     running = false
-    clearInterval(handle)
+    if (timer) clearTimeout(timer)
   }
 }
