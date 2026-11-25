@@ -10,15 +10,16 @@
     "lint": "echo 'lint not configured'"
   },
   "dependencies": {
-    "zod": "^4.6.6",
-    "pino": "^8.16.2",
     "express": "^4.18.2",
-    "undici": "^6.21.3"
+    "pino": "^8.16.2",
+    "undici": "^6.21.3",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
+    "express-rate-limit": "^8.7.5",
     "jest": "^30.0.0",
     "ts-jest": "^29.4.15",
     "typescript": "^5.3.0"

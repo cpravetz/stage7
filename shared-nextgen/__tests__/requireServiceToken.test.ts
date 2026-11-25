@@ -2,6 +2,7 @@ import request from 'supertest';
 import express from 'express';
 import http from 'http';
 import { AddressInfo } from 'net';
+import rateLimit from 'express-rate-limit';
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { requireServiceToken, verifyTokenWithAuthService } from '../src/middleware/requireServiceToken';
 import { TokenPayload } from '../src/types/auth';
@@ -127,8 +128,10 @@ describe('requireServiceToken', () => {
   });
 
   it('calls next with the error surface as a 401 response, never an unhandled rejection', async () => {
-    // Test-only app: exists for this one assertion, never served or exposed.
-    const app = express(); // codeql[js/missing-rate-limiting]
+    // Test-only app, never served: it mirrors the production wiring where
+    // requireServiceToken runs behind the gateway's rate limiter.
+    const app = express();
+    app.use(rateLimit({ windowMs: 60_000, limit: 1000, standardHeaders: 'draft-7', legacyHeaders: false }));
     const crashingNext: NextFunction = jest.fn();
     app.use('/protected', requireServiceToken(), crashingNext);
     const response = await request(app).get('/protected');
