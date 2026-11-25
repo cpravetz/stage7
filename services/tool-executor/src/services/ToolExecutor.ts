@@ -97,6 +97,16 @@ request: CredentialRequest;
   opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown>; executionId?: string; idempotencyKey?: string; requestId?: string; [key: string]: unknown };
 }
 
+/**
+ * Outcome of classifying a repeated idempotent execution request.
+ * `fresh` carries the prior record (if any) so callers can reconcile external state.
+ */
+type ExistingExecutionResolution =
+  | { kind: 'in_progress'; record: ExecutionRecord }
+  | { kind: 'duplicate'; record: ExecutionRecord }
+  | { kind: 'pending_credentials'; record: ExecutionRecord; request: CredentialRequest }
+  | { kind: 'fresh'; prior: ExecutionRecord | null };
+
 export class ToolExecutor {
   private mcpClients = new Map<string, MCPClient | MCPHTTPClient>();
   private mcpServerConfigs = new Map<string, MCPServerConfig>();
@@ -277,6 +287,37 @@ export class ToolExecutor {
     return status === 'completed' || status === 'failed';
   }
 
+  /**
+   * Classify a repeated idempotent execution request by loading the stored
+   * record. Callers own the response policy per kind: `in_progress` and
+   * `duplicate` are short-circuits, `pending_credentials` needs the caller's
+   * credential channel, and `fresh` proceeds after external reconciliation.
+   */
+  private async resolveExistingExecution(executionId: string, resumePending: unknown): Promise<ExistingExecutionResolution> {
+    const existing = await this.loadExecutionRecord(executionId);
+    if (!existing) return { kind: 'fresh', prior: null };
+    if (existing.status === 'in_progress' && !resumePending) return { kind: 'in_progress', record: existing };
+    if (this.isTerminalLifecycle(existing.status)) return { kind: 'duplicate', record: existing };
+    if (existing.status === 'pending_credentials' && existing.pendingCredentialRequest) {
+      return { kind: 'pending_credentials', record: existing, request: existing.pendingCredentialRequest };
+    }
+    return { kind: 'fresh', prior: existing };
+  }
+
+  /** Stamp a terminal duplicate with the shared reconciliation marker. */
+  private withDuplicateReconciliation(record: ExecutionRecord, executionId: string): ExecutionRecord {
+    return {
+      ...record,
+      reconciliation: {
+        ...(record.reconciliation || {}),
+        idempotencyKey: executionId,
+        duplicatePrevented: true,
+        outcomeKnown: record.reconciliation?.outcomeKnown ?? true,
+        note: record.reconciliation?.note || 'Returned existing execution record for repeated idempotent request.',
+      },
+    };
+  }
+
   private async loadExecutionRecord(executionId: string): Promise<ExecutionRecord | null> {
     try { return await this.executionRecordStore.get(executionId); } catch (err) {
       logger.warn({ executionId, err: err instanceof Error ? err.message : String(err) }, 'Execution record load failed');
@@ -442,29 +483,15 @@ export class ToolExecutor {
     const startedAt = new Date();
 
     if (requestedId) {
-      const existing = await this.loadExecutionRecord(executionId);
-      if (existing) {
-        if (existing.status === 'in_progress' && !(opts as any)?.resumePending) {
-          return this.executionFromRecord(existing);
-        }
-        if (this.isTerminalLifecycle(existing.status)) {
-          return this.executionFromRecord({
-            ...existing,
-            reconciliation: {
-              ...(existing.reconciliation || {}),
-              idempotencyKey: executionId,
-              duplicatePrevented: true,
-              outcomeKnown: existing.reconciliation?.outcomeKnown ?? true,
-              note: existing.reconciliation?.note || 'Returned existing execution record for repeated idempotent request.',
-            },
-          });
-        }
-        if (existing.status === 'pending_credentials' && existing.pendingCredentialRequest) {
-          this.restorePendingCredentialRequest(existing);
-          return this.executionFromRecord(existing);
-        }
+      const resolution = await this.resolveExistingExecution(executionId, opts?.resumePending);
+      if (resolution.kind === 'in_progress') return this.executionFromRecord(resolution.record);
+      if (resolution.kind === 'duplicate') return this.executionFromRecord(this.withDuplicateReconciliation(resolution.record, executionId));
+      if (resolution.kind === 'pending_credentials') {
+        // execute() has no credentials channel: hand back the stored record as-is.
+        this.restorePendingCredentialRequest(resolution.record);
+        return this.executionFromRecord(resolution.record);
       }
-      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, existing);
+      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, resolution.prior);
       opts = { ...(opts || {}), __reconciliation: reconciliation };
     }
 
@@ -623,24 +650,20 @@ export class ToolExecutor {
     const startedAt = new Date();
 
     if (requestedId) {
-      const existing = await this.loadExecutionRecord(executionId);
-      if (existing?.status === 'in_progress' && !(opts as any)?.resumePending) return this.executionFromRecord(existing);
-      if (existing && this.isTerminalLifecycle(existing.status)) {
-        const reconciliation = { ...(existing.reconciliation || {}), idempotencyKey: executionId, duplicatePrevented: true, outcomeKnown: existing.reconciliation?.outcomeKnown ?? true, note: existing.reconciliation?.note || 'Returned existing execution record for repeated idempotent request.' };
-        return this.executionFromRecord({ ...existing, reconciliation });
+      const resolution = await this.resolveExistingExecution(executionId, opts?.resumePending);
+      if (resolution.kind === 'in_progress') return this.executionFromRecord(resolution.record);
+      if (resolution.kind === 'duplicate') return this.executionFromRecord(this.withDuplicateReconciliation(resolution.record, executionId));
+      if (resolution.kind === 'pending_credentials') {
+        this.restorePendingCredentialRequest(resolution.record);
+        if (providedCredentials && Object.keys(providedCredentials).length > 0) {
+          this.pendingCredentialOverrides.set(tool.id, providedCredentials);
+          const resumed = await this.submitCredentials(executionId, { credentials: providedCredentials });
+          if (this.isCredentialRequiredError(resumed)) return resumed instanceof CredentialRequiredError ? resumed : new CredentialRequiredError((resumed as any).request);
+          return resumed;
+        }
+        return new CredentialRequiredError(resolution.request);
       }
-      if (existing?.status === 'pending_credentials' && existing.pendingCredentialRequest && !(providedCredentials && Object.keys(providedCredentials).length > 0)) {
-        this.restorePendingCredentialRequest(existing);
-        return new CredentialRequiredError(existing.pendingCredentialRequest);
-      }
-      if (existing?.status === 'pending_credentials' && providedCredentials && Object.keys(providedCredentials).length > 0) {
-        this.restorePendingCredentialRequest(existing);
-        this.pendingCredentialOverrides.set(tool.id, providedCredentials);
-        const resumed = await this.submitCredentials(executionId, { credentials: providedCredentials });
-        if (this.isCredentialRequiredError(resumed)) return resumed instanceof CredentialRequiredError ? resumed : new CredentialRequiredError((resumed as any).request);
-        return resumed;
-      }
-      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, existing);
+      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, resolution.prior);
       (opts as any) = { ...(opts || {}), __reconciliation: reconciliation };
     }
 
