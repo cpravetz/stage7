@@ -32,9 +32,11 @@ export const RESUME_COMPLETION_TOKEN_BONUS = 8_192
 export const DEFAULT_MAX_ITERATIONS = 50
 export const DEFAULT_MAX_DELEGATION_DEPTH = 3
 
-/** Brain request timeouts. */
-export const DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 310_000
-export const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
+/** Brain request timeouts. Defaults live in @stage7-nextgen/shared (brainSettings) so every consumer resolves them identically. */
+export {
+  DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS,
+  DEFAULT_BRAIN_COMPLETION_DEADLINE_MS,
+} from '@stage7-nextgen/shared'
 export const BRAIN_RESPONSE_GRACE_MS = 30_000
 export const MAX_BRAIN_REQUEST_TIMEOUT_MS = 2_147_483_647
 

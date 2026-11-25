@@ -1,7 +1,7 @@
 import type { AgentDefinition, AgentTask } from '../types'
 import { httpRequest } from '@stage7-nextgen/shared'
 import { ActionExecutor } from './agent-executor/ActionExecutor'
-import { BrainClient, brainRequestTimeoutFromEnvironment } from './agent-executor/BrainClient'
+import { BrainClient, brainRequestTimeout } from './agent-executor/BrainClient'
 import { CapabilityResolver } from './agent-executor/CapabilityResolver'
 import type { ExecutorDeps } from './agent-executor/RunContext'
 import { SystemToolClient } from './agent-executor/SystemToolClient'
@@ -48,7 +48,7 @@ export class AgentExecutor {
     const toolExecutorUrl = (options.toolExecutorUrl || process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/$/, '')
     const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.maxDelegationDepth = options.maxDelegationDepth ?? DEFAULT_MAX_DELEGATION_DEPTH
-    const brainRequestTimeoutMs = options.brainRequestTimeoutMs ?? brainRequestTimeoutFromEnvironment()
+    const brainRequestTimeoutMs = options.brainRequestTimeoutMs
     const fetcher = options.fetcher || ((input, init) => fetch(input, init))
     if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > 100) {
       throw new Error('Agent maxIterations must be an integer between 1 and 100')
@@ -56,10 +56,14 @@ export class AgentExecutor {
     if (!Number.isInteger(this.maxDelegationDepth) || this.maxDelegationDepth < 0 || this.maxDelegationDepth > 8) {
       throw new Error('Agent maxDelegationDepth must be an integer between 0 and 8')
     }
+    // Explicit timeouts are fixed for the executor's lifetime; when unset,
+    // the timeout is resolved per request from the settings doc / environment
+    // and clamped inside brainRequestTimeout().
     if (
-      !Number.isInteger(brainRequestTimeoutMs)
-      || brainRequestTimeoutMs < 1_000
-      || brainRequestTimeoutMs > MAX_BRAIN_REQUEST_TIMEOUT_MS
+      brainRequestTimeoutMs !== undefined
+      && (!Number.isInteger(brainRequestTimeoutMs)
+        || brainRequestTimeoutMs < 1_000
+        || brainRequestTimeoutMs > MAX_BRAIN_REQUEST_TIMEOUT_MS)
     ) {
       throw new Error(`Agent brainRequestTimeoutMs must be an integer between 1000 and ${MAX_BRAIN_REQUEST_TIMEOUT_MS}`)
     }
@@ -70,7 +74,7 @@ export class AgentExecutor {
       method: init?.method,
       headers: { 'Content-Type': 'application/json' },
       body: typeof init?.body === 'string' ? init.body : undefined,
-      timeoutMs: brainRequestTimeoutMs,
+      timeoutMs: brainRequestTimeoutMs ?? brainRequestTimeout(),
       signal: init?.signal || undefined,
     }))
     const resolver = new CapabilityResolver(toolExecutorUrl, resolveFetcher, catalog)
