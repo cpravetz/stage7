@@ -1,3 +1,4 @@
+import { MissionClient } from '../src/client/MissionClient';
 import { TemporalClient } from '../src/client/TemporalClient';
 import { fetchWatchActivity, runWatchActivity } from '../src/activities/watchActivity';
 
@@ -24,10 +25,10 @@ function never<T>(): Promise<T> {
   return new Promise<T>(() => {});
 }
 
-function clientWith(stub: unknown): TemporalClient {
-  const client = new TemporalClient('test-ns');
-  (client as any).client = stub;
-  return client;
+function clientWith(stub: unknown): MissionClient {
+  const temporal = new TemporalClient();
+  (temporal as any).client = stub;
+  return new MissionClient('test-ns', undefined as never, temporal);
 }
 
 function alreadyStartedError() {

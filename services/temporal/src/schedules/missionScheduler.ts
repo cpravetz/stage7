@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logger, httpRequest } from '@stage7-nextgen/shared';
-import type { TemporalClient } from '../client/TemporalClient';
+import type { MissionClient } from '../client/MissionClient';
 import type { WorkflowInput } from '../types/workflow';
 import {
   missionRecurrenceSchema,
@@ -162,7 +162,7 @@ export async function disableMissionSchedule(scheduleId: string): Promise<void> 
 
 async function updateSchedule(
   schedule: MissionSchedule,
-  client: TemporalClient,
+  client: MissionClient,
   now: Date,
 ): Promise<void> {
   const scheduledFor = new Date(schedule.nextRunAt);
@@ -215,7 +215,7 @@ async function updateSchedule(
   logger.info({ scheduleId: schedule.scheduleId, missionId: occurrenceMissionId }, 'Recurring mission started');
 }
 
-export function startMissionScheduler(client: TemporalClient): () => void {
+export function startMissionScheduler(client: MissionClient): () => void {
   if (!process.env.ARTIFACTS_URL) {
     logger.warn('ARTIFACTS_URL not set, recurring mission scheduler disabled');
     return () => {};

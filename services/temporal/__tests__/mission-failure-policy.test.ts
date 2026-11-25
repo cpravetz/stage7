@@ -1,4 +1,4 @@
-import { TemporalClient } from "../src/client/TemporalClient";
+import { MissionClient } from "../src/client/MissionClient";
 
 interface RecordedRequest {
   method: string;
@@ -51,7 +51,7 @@ function installArtifacts(record: Record<string, unknown>) {
 const broadcasts = (requests: RecordedRequest[], type: string) =>
   requests.filter((request) => request.url.endsWith("/events") && request.body?.type === type);
 
-describe("TemporalClient mission failure policy", () => {
+describe("MissionClient mission failure policy", () => {
   const originalArtifactsUrl = process.env.ARTIFACTS_URL;
   const originalGatewayUrl = process.env.GATEWAY_URL;
 
@@ -78,7 +78,7 @@ describe("TemporalClient mission failure policy", () => {
     const runner = jest.fn(async () => {
       throw error;
     });
-    const client = new TemporalClient("default", runner as never);
+    const client = new MissionClient("default", runner as never);
     await client.startMission({
       missionId,
       tenantId: "tenant-1",

@@ -8,7 +8,7 @@ import {
 } from '../src/planner/MissionPlanner'
 import { MissionContext, MissionOrchestrator } from '../src/planner/MissionOrchestrator'
 import { MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
-import { TemporalClient } from '../src/client/TemporalClient'
+import { MissionClient } from '../src/client/MissionClient'
 
 function validPlan(): Plan {
   return {
@@ -215,7 +215,7 @@ describe('mission lifecycle event persistence', () => {
       json: async () => ({}),
     } as Response)
 
-    await new TemporalClient().broadcastMissionUpdate({
+    await new MissionClient().broadcastMissionUpdate({
       type: 'mission_failed',
       missionId: 'mission-failed',
       workflowId: 'mission-mission-failed',
@@ -242,7 +242,7 @@ describe('mission lifecycle event persistence', () => {
       json: async () => ({}),
     } as Response)
 
-    await new TemporalClient().broadcastMissionUpdate({
+    await new MissionClient().broadcastMissionUpdate({
       type: 'mission_completed',
       missionId: 'mission-completed',
       status: 'completed',

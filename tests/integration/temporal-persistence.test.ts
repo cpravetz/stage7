@@ -1,16 +1,16 @@
 import request from 'supertest';
 import express from 'express';
 import temporalRoutes from '../../services/temporal/src/routes/missions';
-import { TemporalClient } from '../../services/temporal/src/client/TemporalClient';
+import { MissionClient } from '../../services/temporal/src/client/MissionClient';
 
-jest.mock('../../services/temporal/src/client/TemporalClient', () => {
+jest.mock('../../services/temporal/src/client/MissionClient', () => {
   const mocks = {
     startMission: jest.fn(),
     getMissionResult: jest.fn(),
     terminateMission: jest.fn(),
   };
   return {
-    TemporalClient: jest.fn().mockImplementation(() => mocks),
+    MissionClient: jest.fn().mockImplementation(() => mocks),
     ...mocks,
   };
 });
@@ -21,7 +21,7 @@ describe('Integration: Temporal Mission Lifecycle', () => {
   let getMissionResult: jest.Mock;
 
   beforeEach(() => {
-    const temporalMocks = require('../../services/temporal/src/client/TemporalClient') as any;
+    const temporalMocks = require('../../services/temporal/src/client/MissionClient') as any;
     startMission = temporalMocks.startMission;
     getMissionResult = temporalMocks.getMissionResult;
 
