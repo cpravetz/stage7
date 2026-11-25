@@ -15,7 +15,9 @@ export async function resolveWatchPollIntervalMs(
   const configured = Number(process.env.WATCH_SCHEDULER_POLL_MS)
   const fallback = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_WATCH_SCHEDULER_POLL_MS
   const settings = await fetchSettings()
-  return settings?.watchSchedulerPollMs ?? fallback
+  const settingsValue = settings?.watchSchedulerPollMs
+  if (typeof settingsValue === 'number' && Number.isFinite(settingsValue) && settingsValue > 0) return settingsValue
+  return fallback
 }
 
 export function startWatchScheduler(client: TemporalClient): () => void {
