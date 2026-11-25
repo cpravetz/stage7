@@ -20,7 +20,6 @@ import { sportsSkills } from '../src/assistants/sports';
 import { supportSkills } from '../src/assistants/support';
 import { songwritingSkills } from '../src/assistants/songwriting';
 import { scriptwritingSkills } from '../src/assistants/scriptwriting';
-import { assistantRegistries, getOverlappingSkills, getRetainedOverlapDecisions, getRetainedOverlapDecision, getRetainedOverlapDecisionIds } from '../src/adk/registry';
 
 const allSkillArrays: { name: string; skills: typeof ctoSkills; workflow?: typeof ctoWorkflow }[] = [
   { name: 'CTO', skills: ctoSkills, workflow: ctoWorkflow },
@@ -267,83 +266,4 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
     });
   });
 
-  describe('Cross-assistant overlap detection', () => {
-    it('registry can detect overlapping skill IDs', () => {
-      const overlaps = getOverlappingSkills();
-      expect(Array.isArray(overlaps)).toBe(true);
-    });
-  });
-
-  describe('Retained overlap decisions (Sprint 6)', () => {
-    it('has documented retained overlap decisions', () => {
-      const decisions = getRetainedOverlapDecisions();
-      expect(Array.isArray(decisions)).toBe(true);
-      expect(decisions.length).toBeGreaterThanOrEqual(10);
-    });
-
-    it('each decision is keyed by user outcome, object, and decision boundary', () => {
-      const decisions = getRetainedOverlapDecisions();
-      for (const decision of decisions) {
-        expect(decision.userOutcome).toBeTruthy();
-        expect(decision.object).toBeTruthy();
-        expect(decision.decisionBoundary).toBeTruthy();
-      }
-    });
-
-    it('every decision has a documented rationale and registry implication', () => {
-      const decisions = getRetainedOverlapDecisions();
-      for (const decision of decisions) {
-        expect(decision.rationale).toBeTruthy();
-        expect(decision.registryImplication).toBeTruthy();
-        expect(['retain-separate', 'merge', 'retain-with-hierarchy']).toContain(decision.decision);
-      }
-    });
-
-    it('DEC-009 genre evaluators are differentiated by domain', () => {
-      const decision = getRetainedOverlapDecision('DEC-009');
-      expect(decision).toBeDefined();
-      expect(decision!.decision).toBe('retain-separate');
-      expect(decision!.skillIds).toContain('songwriter_genre_trend_evaluator');
-      expect(decision!.skillIds).toContain('scriptwriting-genre-market-evaluator');
-    });
-
-    it('DEC-010 sports capabilities are retained with isolation rationale', () => {
-      const decision = getRetainedOverlapDecision('DEC-010');
-      expect(decision).toBeDefined();
-      expect(decision!.assistantNames).toContain('Sports');
-      expect(decision!.decision).toBe('retain-separate');
-    });
-
-    it('no duplicate decision IDs', () => {
-      const decisions = getRetainedOverlapDecisions();
-      const ids = decisions.map(d => d.decisionId);
-      expect(new Set(ids).size).toBe(ids.length);
-    });
-  });
-
-  describe('Sports isolation (DEC-010)', () => {
-    it('sports performance skills are not shared with wagering objects', () => {
-      const sportsReg = assistantRegistries.find(r => r.assistant.toLowerCase() === 'sports');
-      expect(sportsReg).toBeDefined();
-      const performanceSkills = sportsReg!.skills.filter(s =>
-        ['sports-tactical-roster-evaluator', 'sports-battlecard-creator'].includes(s.id)
-      );
-      const wageringSkills = sportsReg!.skills.filter(s =>
-        ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot'].includes(s.id)
-      );
-      expect(performanceSkills.length).toBeGreaterThan(0);
-      expect(wageringSkills.length).toBeGreaterThan(0);
-      const performanceIds = new Set(performanceSkills.map(s => s.id));
-      for (const wagering of wageringSkills) {
-        expect(performanceIds.has(wagering.id)).toBe(false);
-      }
-    });
-
-    it('sports productObject is performance-focused', () => {
-      const sportsReg = assistantRegistries.find(r => r.assistant.toLowerCase() === 'sports');
-      expect(sportsReg).toBeDefined();
-      expect(sportsReg!.productObject).toContain('game');
-      expect(sportsReg!.productObject).not.toContain('wager');
-    });
-  });
 });

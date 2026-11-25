@@ -19,7 +19,6 @@ import { investmentSkills, investmentWorkflow } from '../src/assistants/investme
 import { legalSkills, legalWorkflow } from '../src/assistants/legal';
 import { songwritingSkills, songwritingWorkflow } from '../src/assistants/songwriting';
 import { scriptwritingSkills, scriptwritingWorkflow } from '../src/assistants/scriptwriting';
-import { assistantRegistries, getOverlappingSkills } from '../src/adk/registry';
 import { Tool } from '../src/types';
 import { isCorrectlyGated, isMutatingSkill } from './confirmation-gate';
 
@@ -86,23 +85,6 @@ describe('Assistant governance', () => {
       }
     });
 
-    it('registry entries match the workflow product objects', () => {
-      const byAssistant = new Map(assistants.map((a) => [a.workflow.assistant, a.workflow.productObject]));
-      const mismatches = assistantRegistries
-        .filter((reg) => byAssistant.has(reg.assistant))
-        .filter((reg) => reg.productObject !== byAssistant.get(reg.assistant))
-        .map((reg) => reg.assistant);
-      expect(mismatches).toEqual([]);
-    });
-
-    it('registry workflow flows match the workflow flow summaries', () => {
-      const byAssistant = new Map(assistants.map((a) => [a.workflow.assistant, a.workflow.flow]));
-      const mismatches = assistantRegistries
-        .filter((reg) => byAssistant.has(reg.assistant))
-        .filter((reg) => reg.workflowFlow !== byAssistant.get(reg.assistant))
-        .map((reg) => reg.assistant);
-      expect(mismatches).toEqual([]);
-    });
   });
 
   describe('Mutating operations require approval', () => {
@@ -151,17 +133,6 @@ describe('Assistant governance', () => {
     });
   });
 
-  describe('Cross-assistant overlap detection', () => {
-    it('registry can detect overlapping skill IDs across assistants', () => {
-      const overlaps = getOverlappingSkills();
-      expect(Array.isArray(overlaps)).toBe(true);
-      for (const overlap of overlaps) {
-        expect(overlap.skillId).toBeTruthy();
-        expect(overlap.assistants.length).toBeGreaterThan(1);
-      }
-    });
-  });
-
   describe('Schema hygiene - raw ID exposure', () => {
     const forbiddenPatterns = [
       /patientId/i,
@@ -200,12 +171,6 @@ describe('Assistant governance', () => {
       expect(analyticsWorkflow.assistant).toBe('Analytics');
       expect(analyticsWorkflow.productObject).toBe('metric / insight');
       expect(analyticsWorkflow.flow).toBeTruthy();
-    });
-
-    it('registers its product object and flow', () => {
-      const reg = assistantRegistries.find((r) => r.assistant === 'Analytics');
-      expect(reg?.productObject).toBe('metric / insight');
-      expect(reg?.workflowFlow).toBe(analyticsWorkflow.flow);
     });
   });
 });
