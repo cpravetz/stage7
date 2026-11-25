@@ -17,6 +17,7 @@ export * from './middleware/healthRouter';
 export * from './middleware/requireServiceToken';
 export * from './data/mongo';
 export * from './utils/stripTrailingSlashes';
+export * from './utils/brainClient';
 export * from './utils/actionReceiptVerifier';
 export * from './config/brainSettings';
 export * from './config/missionSettings';

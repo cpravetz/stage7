@@ -12,6 +12,7 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   MissionArtifact,
   MissionArtifactSchema,
+  reportBrainComplaint as reportComplaintToBrain,
   sanitizeAgentMessage,
   sanitizeAgentMessageList,
   isAgentConversationPayload,
@@ -21,7 +22,6 @@ import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
 import { AgentApi } from './AgentApi';
-import { BrainComplaintReporter } from './BrainComplaint';
 import { invalidExpectedArtifacts, parseAgentTaskResult, parseActionReceiptsLenient, parseArtifactsLenient, warnExpectedArtifacts, withActionReceiptArtifactLenient } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
@@ -347,7 +347,6 @@ export class MissionAgentRuntime {
   private missionId: string;
   private tenantId: string;
   private readonly agentApi: AgentApi;
-  private readonly brainComplaints: BrainComplaintReporter;
   private broadcast: MissionAgentConfig['broadcast'];
   private agentToolPolicies: Map<string, MissionAgentToolGrant>;
   private missionRetryCount: number;
@@ -400,7 +399,6 @@ export class MissionAgentRuntime {
     this.missionId = config.missionId;
     this.tenantId = config.tenantId;
     this.agentApi = new AgentApi({ missionId: config.missionId, agentRuntimeUrl: config.agentRuntimeUrl });
-    this.brainComplaints = new BrainComplaintReporter({ missionId: config.missionId });
     this.broadcast = config.broadcast || (async () => {});
     this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
     this.entityId = typeof config.metadata?.entityId === 'string' ? config.metadata.entityId : undefined;
@@ -417,7 +415,7 @@ export class MissionAgentRuntime {
   }
 
   private async reportBrainComplaint(requestId: string | undefined, reason: string): Promise<void> {
-    await this.brainComplaints.reportComplaint(requestId, reason);
+    await reportComplaintToBrain({ requestId, reason, missionId: this.missionId });
   }
 
   /**

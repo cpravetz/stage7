@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { httpRequest } from './httpClient';
 import { logger } from './logger';
+import { getBrainUrl } from './brainClient';
 
 /**
  * Client for brain's embedding route.
@@ -21,7 +22,7 @@ export interface EmbeddingResult {
 export class EmbeddingsClient {
   private readonly brainUrl: string;
 
-  constructor(brainUrl = (process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '')) {
+  constructor(brainUrl = getBrainUrl()) {
     this.brainUrl = brainUrl;
   }
 

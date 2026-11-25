@@ -1,4 +1,4 @@
-import { logger, httpRequest, DEFAULT_TENANT_ID } from '@stage7-nextgen/shared';
+import { logger, httpRequest, DEFAULT_TENANT_ID, getBrainUrl } from '@stage7-nextgen/shared';
 import type { MissionPhaseOutput } from '../types/workflow';
 import type { Plan } from '@stage7-nextgen/shared';
 import type { WorkflowInput } from '../types/workflow';
@@ -20,7 +20,7 @@ export class MissionStageCompletedListener {
     const entityId = typeof metadataEntityId === 'string' && metadataEntityId.trim()
       ? metadataEntityId.trim()
       : input.assistantId || 'general';
-    const url = `${(process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '')}/api/brain/memory/entity`;
+    const url = `${getBrainUrl()}/api/brain/memory/entity`;
     try {
       const response = await httpRequest(url, {
         method: 'POST',
