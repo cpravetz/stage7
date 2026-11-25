@@ -12,7 +12,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { BrainError } from '../utils/errors';
+import { NextGenError } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 
@@ -430,7 +430,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         const reason = eligibleCandidates.length === 0
           ? 'No models are eligible under the current Brain settings'
           : `All ${eligibleCandidates.length} eligible models have already been tried`;
-        const error = new BrainError(`${reason}${settings?.freeModelsOnly ? ' (free models only is enabled)' : ''}.`, 503, {
+        const error = new NextGenError(`${reason}${settings?.freeModelsOnly ? ' (free models only is enabled)' : ''}.`, 503, {
           code: BRAIN_MODEL_SELECTION_EXHAUSTED,
           eligibleModelCount: eligibleCandidates.length,
           attemptedModelCount: attemptedEligibleModelCount,
@@ -840,7 +840,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       // verdict: the caller retries, the routing session hands it a model that
       // has not been tried yet, and the next call gets a fresh deadline. Only
       // an exhausted model set is reported as a terminal failure.
-      throw new BrainError(message, 503, {
+      throw new NextGenError(message, 503, {
         code,
         eligibleModelCount: eligibleCandidates.length,
         attemptedModelCount: attemptedEligibleModelCount,

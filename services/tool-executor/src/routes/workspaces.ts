@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import asyncHandler from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { ValidationError } from '../utils/errors';
 import { toolRegistry, executor, workspaceManager } from '../utils/sharedInstance';
 import { AssistantWorkflow } from '../adk/workflow-common';

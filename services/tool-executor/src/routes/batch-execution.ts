@@ -5,7 +5,7 @@ import { createCodeSkill } from '../adk/code-skill-factory';
 import { CredentialRequiredError } from '../types';
 import { ValidationError } from '../utils/errors';
 import { toolRegistry, executor } from '../utils/sharedInstance';
-import asyncHandler from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 
 const jsonSchema = z.object({
   type: z.literal('object'),

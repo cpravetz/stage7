@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { VaultError } from './errors';
+import { NextGenError } from '@stage7-nextgen/shared';
 
 export interface AuthenticatedTenantContext {
   tenantId: string;
@@ -48,7 +48,7 @@ export async function resolveTenantContext(req: Request): Promise<AuthenticatedT
       const verified = await verifyBearerTenant(token);
       if (verified) return verified;
       // Fall through: invalid bearer should not grant access via spoofable headers/body.
-      throw VaultError.unauthorized('Invalid or expired authentication token');
+      throw NextGenError.unauthorized('Invalid or expired authentication token');
     }
   }
 
@@ -70,7 +70,7 @@ export async function resolveTenantContext(req: Request): Promise<AuthenticatedT
 export async function requireTenantContext(req: Request): Promise<AuthenticatedTenantContext> {
   const context = await resolveTenantContext(req);
   if (!context) {
-    throw VaultError.unauthorized('Authenticated tenant context is required');
+    throw NextGenError.unauthorized('Authenticated tenant context is required');
   }
   return context;
 }
@@ -79,7 +79,7 @@ export function assertTenantMatch(context: AuthenticatedTenantContext, requested
   const tenantId = normalizeTenant(requested);
   if (!tenantId) return context.tenantId;
   if (tenantId !== context.tenantId) {
-    throw VaultError.forbidden('Tenant mismatch');
+    throw NextGenError.forbidden('Tenant mismatch');
   }
   return context.tenantId;
 }

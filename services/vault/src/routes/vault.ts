@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { asyncHandler } from '../utils/asyncHandler';
-import { VaultError } from '../utils/errors';
+import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { EnvelopeEncryption } from '../encryption/envelopeEncryption';
 import { SecretStore } from '../services/SecretStore';
 import { requireTenantContext, resolveTenantContext, assertTenantMatch, defaultTenantForDiscovery } from '../utils/tenant';
@@ -17,7 +16,7 @@ router.post('/encrypt', asyncHandler(async (req, res) => {
   const { plaintext } = req.body;
 
   if (!plaintext || typeof plaintext !== 'string') {
-    throw VaultError.badRequest('Missing or invalid plaintext');
+    throw NextGenError.badRequest('Missing or invalid plaintext');
   }
 
   const encrypted = encryption.encrypt(plaintext);
@@ -28,7 +27,7 @@ router.post('/decrypt', asyncHandler(async (req, res) => {
   const { ciphertext, keyId, version } = req.body;
 
   if (!ciphertext) {
-    throw VaultError.badRequest('Missing ciphertext');
+    throw NextGenError.badRequest('Missing ciphertext');
   }
 
   const decrypted = encryption.decrypt({
@@ -63,17 +62,17 @@ router.post('/secrets', asyncHandler(async (req, res) => {
   const { name, plaintext, tenantId } = req.body;
 
   if (!name || typeof name !== 'string') {
-    throw VaultError.badRequest('Missing or invalid name');
+    throw NextGenError.badRequest('Missing or invalid name');
   }
   if (!plaintext || typeof plaintext !== 'string') {
-    throw VaultError.badRequest('Missing or invalid plaintext');
+    throw NextGenError.badRequest('Missing or invalid plaintext');
   }
   const resolvedTenantId = assertTenantMatch(context, tenantId);
 
   const existing = await secretStore.getSecretByName(name, resolvedTenantId);
   if (existing) {
     const updated = await secretStore.updateSecret(existing.id, plaintext);
-    if (!updated) throw VaultError.notFound('Secret not found');
+    if (!updated) throw NextGenError.notFound('Secret not found');
     res.status(200).json({ ...updated, existed: true, reconciled: true });
     return;
   }
@@ -91,16 +90,16 @@ router.put('/secrets/name/:name', asyncHandler(async (req, res) => {
   const { name } = req.params;
   const { plaintext, tenantId } = req.body;
 
-  if (!name) throw VaultError.badRequest('Missing or invalid name');
+  if (!name) throw NextGenError.badRequest('Missing or invalid name');
   if (typeof plaintext !== 'string' || !plaintext) {
-    throw VaultError.badRequest('Missing or invalid plaintext');
+    throw NextGenError.badRequest('Missing or invalid plaintext');
   }
   const resolvedTenantId = assertTenantMatch(context, tenantId);
 
   const existing = await secretStore.getSecretByName(name, resolvedTenantId);
   if (existing) {
     const updated = await secretStore.updateSecret(existing.id, plaintext);
-    if (!updated) throw VaultError.notFound('Secret not found');
+    if (!updated) throw NextGenError.notFound('Secret not found');
     res.json({ ...updated, existed: true, reconciled: true });
     return;
   }
@@ -122,7 +121,7 @@ router.get('/secrets/:id', asyncHandler(async (req, res) => {
   const secret = await secretStore.getSecret(id, context.tenantId);
 
   if (!secret) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   res.json({
@@ -140,7 +139,7 @@ router.get('/secrets/:id/decrypt', asyncHandler(async (req, res) => {
   const plaintext = await secretStore.decryptSecret(id, context.tenantId);
 
   if (plaintext === undefined) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   res.json({ plaintext });
@@ -154,7 +153,7 @@ router.get('/secrets/name/:name', asyncHandler(async (req, res) => {
   const secret = await secretStore.getSecretByName(name, tenantId);
 
   if (!secret) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   res.json({
@@ -174,13 +173,13 @@ router.get('/secrets/name/:name/decrypt', asyncHandler(async (req, res) => {
   const secret = await secretStore.getSecretByName(name, tenantId);
 
   if (!secret) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   const plaintext = await secretStore.decryptSecret(secret.id, tenantId);
 
   if (plaintext === undefined) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   res.json({ plaintext, id: secret.id });
@@ -191,7 +190,7 @@ router.post('/secrets/ensure', asyncHandler(async (req, res) => {
   const { name, plaintext, tenantId } = req.body;
 
   if (!name || typeof name !== 'string') {
-    throw VaultError.badRequest('Missing or invalid name');
+    throw NextGenError.badRequest('Missing or invalid name');
   }
   const resolvedTenantId = assertTenantMatch(context, tenantId);
 
@@ -210,7 +209,7 @@ router.post('/secrets/ensure', asyncHandler(async (req, res) => {
   }
 
   if (typeof plaintext !== 'string') {
-    throw VaultError.badRequest('Missing or invalid plaintext');
+    throw NextGenError.badRequest('Missing or invalid plaintext');
   }
 
   const ensured = await secretStore.ensureSecret(name, plaintext, resolvedTenantId);
@@ -227,7 +226,7 @@ router.delete('/secrets/:id', asyncHandler(async (req, res) => {
   const deleted = await secretStore.deleteSecret(id, context.tenantId);
 
   if (!deleted) {
-    throw VaultError.notFound('Secret not found');
+    throw NextGenError.notFound('Secret not found');
   }
 
   res.status(204).send();

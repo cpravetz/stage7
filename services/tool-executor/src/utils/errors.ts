@@ -1,6 +1,8 @@
-export class ToolNotFoundError extends Error {
+import { NextGenError } from '@stage7-nextgen/shared';
+
+export class ToolNotFoundError extends NextGenError {
   constructor(id: string) {
-    super(`Tool not found: ${id}`)
+    super(`Tool not found: ${id}`, 404)
     this.name = 'ToolNotFoundError'
   }
 }
@@ -19,9 +21,9 @@ export class PluginGenerationError extends Error {
   }
 }
 
-export class ValidationError extends Error {
+export class ValidationError extends NextGenError {
   constructor(message: string) {
-    super(message)
+    super(message, 400)
     this.name = 'ValidationError'
   }
 }
