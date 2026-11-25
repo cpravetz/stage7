@@ -13,6 +13,23 @@ import type {
 
 const API_BASE = '';
 
+/**
+ * API failure with the response attached. Status and body ride on the error so
+ * callers can react to a specific refusal contract (e.g. HTTP 429
+ * SPEND_LIMIT_REACHED) instead of reparsing a formatted message.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, statusText: string, path: string, body?: unknown) {
+    super(`API error: ${status} ${statusText} for ${path}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
   // Default to no-cache so the UI always sees the latest assistant and tool
   // registry state. Browsers sometimes return 304s from a stale cache which
@@ -29,7 +46,7 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
     throw new Error(`API error: 304 Not Modified for ${path}`);
   }
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText} for ${path}`);
+    throw new ApiError(response.status, response.statusText, path);
   }
   const text = await response.text();
   if (!text) {
@@ -43,16 +60,29 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
 }
 
 export async function postJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+  return sendJSON<T>(path, 'POST', body, init);
+}
+
+async function sendJSON<T>(path: string, method: string, body: unknown, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     ...init,
   });
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
+    throw new ApiError(response.status, response.statusText, path, await safeBody(response));
   }
   return response.json();
+}
+
+/** The refusal payload is diagnostic; a body that will not parse is not fatal. */
+async function safeBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
 }
 
 export async function postFormData<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
@@ -72,34 +102,16 @@ export async function deleteResource(path: string): Promise<void> {
     method: 'DELETE',
   });
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
+    throw new ApiError(response.status, response.statusText, path);
   }
 }
 
 export async function putJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    ...init,
-  });
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return sendJSON<T>(path, 'PUT', body, init);
 }
 
 export async function patchJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    ...init,
-  });
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-  return response.json();
+  return sendJSON<T>(path, 'PATCH', body, init);
 }
 
 // Sprint 5: typed helpers for the tool-executor workspace contract.
