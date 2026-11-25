@@ -10,6 +10,8 @@
  * - completionDeadlineMs: whole-completion deadline
  * - circuitThreshold: consecutive provider failures that open the breaker
  * - circuitCooldownMs: open-state cooldown before a probe attempt
+ * - spendLimits.system: operator default cap for the `system` attribution
+ *   bucket — { limit: estimated USD, period: day|week|month }, uncapped until set
  *
  * A missing field falls back to its BRAIN_* environment variable, then to the
  * built-in default. Invalid document fields are dropped individually — one bad
@@ -23,6 +25,89 @@ import type { SettingsDocStatus, SettingsDocSnapshot } from './settingsDocSource
 export const MAX_BRAIN_PROVIDER_TIMEOUT_MS = 600_000;
 export const MAX_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 1_800_000;
 export const MAX_BRAIN_COMPLETION_DEADLINE_MS = 7_200_000;
+/** Period boundaries for a spending cap. All UTC. */
+export type SpendLimitPeriod = 'day' | 'week' | 'month';
+
+/** Operator-configurable cap. Estimated USD; 0 and negatives are never valid. */
+export const MAX_BRAIN_SPEND_LIMIT_USD = 1_000_000;
+export const DEFAULT_SPEND_LIMIT_PERIOD: SpendLimitPeriod = 'month';
+
+/** One cap: an estimated-USD ceiling over a UTC period. */
+export interface SpendLimitConfig {
+  limit: number;
+  period: SpendLimitPeriod;
+}
+
+export interface BrainSettingsOverrides {
+  providerTimeoutMs?: number;
+  providerAttemptTimeoutMs?: number;
+  completionDeadlineMs?: number;
+  circuitThreshold?: number;
+  circuitCooldownMs?: number;
+  /** Operator defaults; `system` is the bucket for calls with no resolvable user. */
+  spendLimits?: {
+    system?: SpendLimitConfig;
+  };
+}
+
+export interface BrainSettings {
+  providerTimeoutMs: number;
+  providerAttemptTimeoutMs: number;
+  completionDeadlineMs: number;
+  circuitThreshold: number;
+  circuitCooldownMs: number;
+  /** Uncapped (undefined) until an operator sets one. */
+  spendLimits: {
+    system?: SpendLimitConfig;
+  };
+}
+
+/** Validates a spending-limit period value; undefined passes through untouched. */
+export function parseSpendLimitPeriod(value: unknown): SpendLimitPeriod | undefined {
+  return value === 'day' || value === 'week' || value === 'month' ? value : undefined;
+}
+
+/** Validates a spending-limit amount: a finite number in (0, MAX_BRAIN_SPEND_LIMIT_USD]. */
+export function parseSpendLimitUsd(value: unknown, max = MAX_BRAIN_SPEND_LIMIT_USD): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max ? value : undefined;
+}
+
+/** Validates one bucket of the settings doc's spendLimits section, field by field. */
+function parseSpendLimitBucket(
+  value: unknown,
+  label: string,
+  logger?: Pick<Console, 'warn'>,
+): SpendLimitConfig | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    logger?.warn(`[brainSettings] Ignoring invalid ${label} value in settings document: ${String(value)}`);
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const limit = parseSpendLimitUsd(record.limit);
+  if (record.limit !== undefined && limit === undefined) {
+    logger?.warn(`[brainSettings] Ignoring invalid ${label}.limit value in settings document: ${String(record.limit)}`);
+  }
+  const period = record.period === undefined ? DEFAULT_SPEND_LIMIT_PERIOD : parseSpendLimitPeriod(record.period);
+  if (record.period !== undefined && period === undefined) {
+    logger?.warn(`[brainSettings] Ignoring invalid ${label}.period value in settings document: ${String(record.period)}`);
+  }
+  if (limit === undefined) return undefined;
+  return { limit, period: period ?? DEFAULT_SPEND_LIMIT_PERIOD };
+}
+
+function parseSpendLimitsOverrides(
+  value: unknown,
+  logger?: Pick<Console, 'warn'>,
+): BrainSettingsOverrides['spendLimits'] {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    logger?.warn(`[brainSettings] Ignoring invalid spendLimits value in settings document: ${String(value)}`);
+    return undefined;
+  }
+  const system = parseSpendLimitBucket((value as Record<string, unknown>).system, 'spendLimits.system', logger);
+  return system ? { system } : {};
+}
 export const MAX_BRAIN_CIRCUIT_THRESHOLD = 1_000;
 export const MAX_BRAIN_CIRCUIT_COOLDOWN_MS = 3_600_000;
 
@@ -48,8 +133,9 @@ export interface BrainSettings {
   circuitCooldownMs: number;
 }
 
-/** The knobs this module owns — used to whitelist document fields. */
-const KNOB_KEYS: Array<keyof BrainSettingsOverrides> = [
+/** The flat numeric knobs this module owns — used to whitelist document fields. */
+type BrainNumericKnob = Exclude<keyof BrainSettingsOverrides, 'spendLimits'>;
+const KNOB_KEYS: BrainNumericKnob[] = [
   'providerTimeoutMs',
   'providerAttemptTimeoutMs',
   'completionDeadlineMs',
@@ -57,7 +143,7 @@ const KNOB_KEYS: Array<keyof BrainSettingsOverrides> = [
   'circuitCooldownMs',
 ];
 
-const KNOB_LIMITS: Record<keyof BrainSettingsOverrides, number> = {
+const KNOB_LIMITS: Record<BrainNumericKnob, number> = {
   providerTimeoutMs: MAX_BRAIN_PROVIDER_TIMEOUT_MS,
   providerAttemptTimeoutMs: MAX_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS,
   completionDeadlineMs: MAX_BRAIN_COMPLETION_DEADLINE_MS,
@@ -103,6 +189,8 @@ export function parseBrainSettingsDoc(
     }
     overrides[key] = resolved;
   }
+  const spendLimits = parseSpendLimitsOverrides(record.spendLimits, logger);
+  if (spendLimits !== undefined) overrides.spendLimits = spendLimits;
   return { status: 'ok', overrides };
 }
 
@@ -134,7 +222,23 @@ export function resolveBrainSettings(
       ?? intFromEnv(env, 'BRAIN_CIRCUIT_THRESHOLD', 8, MAX_BRAIN_CIRCUIT_THRESHOLD),
     circuitCooldownMs: resolveOverride(overrides?.circuitCooldownMs, MAX_BRAIN_CIRCUIT_COOLDOWN_MS)
       ?? intFromEnv(env, 'BRAIN_CIRCUIT_COOLDOWN_MS', 60_000, MAX_BRAIN_CIRCUIT_COOLDOWN_MS),
+    spendLimits: {
+      system: overrides?.spendLimits?.system
+        ?? systemSpendLimitFromEnv(env),
+    },
   };
+}
+
+/**
+ * Environment fallback for the system-bucket operator default: a limit in
+ * estimated USD plus an optional period (default month). Unset means the
+ * system bucket stays uncapped.
+ */
+function systemSpendLimitFromEnv(env: Record<string, string | undefined>): SpendLimitConfig | undefined {
+  const limit = parseSpendLimitUsd(Number(env.BRAIN_SPEND_LIMIT_SYSTEM_USD));
+  if (limit === undefined) return undefined;
+  const period = parseSpendLimitPeriod(env.BRAIN_SPEND_LIMIT_SYSTEM_PERIOD) ?? DEFAULT_SPEND_LIMIT_PERIOD;
+  return { limit, period };
 }
 
 export interface BrainSettingsSource {

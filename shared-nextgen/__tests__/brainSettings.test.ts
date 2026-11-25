@@ -94,6 +94,7 @@ describe('resolveBrainSettings', () => {
       completionDeadlineMs: DEFAULT_BRAIN_COMPLETION_DEADLINE_MS,
       circuitThreshold: 8,
       circuitCooldownMs: 60_000,
+      spendLimits: undefined,
     });
   });
 
