@@ -1,5 +1,5 @@
 const express = require('express');
-const { TemporalClient } = require('../../dist/client/TemporalClient.js');
+const { MissionClient } = require('../../dist/client/MissionClient.js');
 
 const parentUrl = process.env.PARITY_FIXTURE_URL;
 const taskId = 'task-1';
@@ -17,7 +17,7 @@ async function runMissionDirect(_input, checkpoint, controlCheckpoint) {
   return { outputs: { status: 'completed', result: 'resumed without repeating the task' } };
 }
 
-const client = new TemporalClient('default', runMissionDirect);
+const client = new MissionClient('default', runMissionDirect);
 const app = express();
 app.use(express.json());
 

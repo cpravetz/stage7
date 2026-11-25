@@ -1,10 +1,10 @@
-import { TemporalClient } from './client/TemporalClient'
+import { MissionClient } from './client/MissionClient'
 import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared'
 
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
 const POLL_MS = Number(process.env.WATCH_SCHEDULER_POLL_MS || '60000')
 
-export function startWatchScheduler(client: TemporalClient): () => void {
+export function startWatchScheduler(client: MissionClient): () => void {
   if (!ARTIFACTS_URL) {
     logger.info('ARTIFACTS_URL not set, watch scheduler disabled')
     return () => {}

@@ -1,7 +1,7 @@
 console.log('missions route module loaded');
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
-import { TemporalClient, isMissionAwaitingInputError } from '../client/TemporalClient';
+import { MissionClient, isMissionAwaitingInputError } from '../client/MissionClient';
 import { WorkflowInput, MissionTaskCheckpoint, MissionPendingInteraction } from '../types/workflow';
 import { asyncHandler, NextGenError, PlanSchema, logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
@@ -36,8 +36,8 @@ function validateServiceUrl(url: string | undefined): URL | null {
   }
 }
 
-export const temporalClient = new TemporalClient();
-const client = temporalClient;
+export const missionClient = new MissionClient();
+const client = missionClient;
 const artifactsBase = validateServiceUrl(process.env.ARTIFACTS_URL);
 
 const router: Router = Router();

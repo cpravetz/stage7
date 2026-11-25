@@ -1,7 +1,7 @@
-import { isMissionAwaitingInputError, missionStatus, TemporalClient } from '../src/client/TemporalClient'
+import { isMissionAwaitingInputError, missionStatus, MissionClient } from '../src/client/MissionClient'
 import * as missionActivity from '../src/activities/missionActivity'
 
-describe('TemporalClient mission start', () => {
+describe('MissionClient mission start', () => {
   it('only treats explicitly completed output as completed', () => {
     expect(missionStatus({ outputs: { status: 'awaiting_review' } })).toBe('awaiting_review')
     expect(missionStatus({ outputs: { status: 'incomplete' } })).toBe('incomplete')
@@ -21,7 +21,7 @@ describe('TemporalClient mission start', () => {
       ok: true,
       json: async () => String(url).endsWith('/missions') ? { missions: [record] } : record,
     }) as Response)
-    const client = new TemporalClient()
+    const client = new MissionClient()
 
     expect(await client.getMissionResult('mission-old-incorrect-status')).toMatchObject({ status: 'awaiting_review' })
     expect(await client.listMissions()).toEqual([expect.objectContaining({ status: 'awaiting_review' })])
@@ -70,7 +70,7 @@ describe('TemporalClient mission start', () => {
       return { ok: true, status: 200, json: async () => ({}) } as Response
     })
     const runner = jest.fn(async () => ({ outputs }))
-    const client = new TemporalClient('default', runner)
+    const client = new MissionClient('default', runner)
     await client.startMission({ missionId: 'review-test', tenantId: 'tenant-1', assistantId: '', prompt: 'Send it.' })
     await finished
     expect(writes).toContainEqual(expect.objectContaining({ status: 'awaiting_review' }))
@@ -104,7 +104,7 @@ describe('TemporalClient mission start', () => {
   it('always uses the built-in runner regardless of legacy backend settings', () => {
     process.env.TEMPORAL_BACKEND = 'temporal-server'
     process.env.TEMPORAL_ADDRESS = 'temporal:7233'
-    expect(new TemporalClient().getRuntimeStatus().executionMode).toBe('artifacts-backed-direct')
+    expect(new MissionClient().getRuntimeStatus().executionMode).toBe('artifacts-backed-direct')
   })
 
   it('recovers a running mission from its persisted plan and completed task statuses', async () => {
@@ -112,7 +112,7 @@ describe('TemporalClient mission start', () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
     const directRun = jest.fn(async () => ({}))
-    const client = new TemporalClient('default', directRun)
+    const client = new MissionClient('default', directRun)
     const input = {
       missionId: 'mission-recovery',
       tenantId: 'tenant-1',
@@ -186,7 +186,7 @@ describe('TemporalClient mission start', () => {
       plan: { summary: largeText },
       outputs: { status: 'incomplete', phases: [{ tasks: [{ output: largeText }] }] },
     }))
-    const client = new TemporalClient('default', directRun)
+    const client = new MissionClient('default', directRun)
     const missionId = 'large-final-state'
     const missionWrites: Array<Record<string, unknown>> = []
     let missionReads = 0
@@ -249,8 +249,8 @@ describe('TemporalClient mission start', () => {
     delete process.env.GATEWAY_URL
     const directRun = jest.fn(async () => ({}))
     const clients = [
-      new TemporalClient('default', directRun),
-      new TemporalClient('default', directRun),
+      new MissionClient('default', directRun),
+      new MissionClient('default', directRun),
     ]
     const input = {
       missionId: 'mission-recovery-race',
@@ -299,7 +299,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-paused',
       tenantId: 'tenant-1',
@@ -361,7 +361,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-clarification',
       tenantId: 'tenant-1',
@@ -410,7 +410,7 @@ describe('TemporalClient mission start', () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-mcp-permission',
       tenantId: 'tenant-1',
@@ -504,7 +504,7 @@ describe('TemporalClient mission start', () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-resume-once',
       tenantId: 'tenant-1',
@@ -574,7 +574,7 @@ describe('TemporalClient mission start', () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-tool-credentials',
       tenantId: 'tenant-1',
@@ -705,7 +705,7 @@ describe('TemporalClient mission start', () => {
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
     delete process.env.GATEWAY_URL
     delete process.env.VAULT_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-cred-format',
       tenantId: 'tenant-1',
@@ -780,7 +780,7 @@ describe('TemporalClient mission start', () => {
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
     delete process.env.GATEWAY_URL
     delete process.env.VAULT_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-unresolved-credentials',
       tenantId: 'tenant-1',
@@ -850,7 +850,7 @@ describe('TemporalClient mission start', () => {
   it('resumes a credential interruption with a conversational message without submitting it as a secret', async () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'message-context', tenantId: 'tenant-1', assistantId: 'assistant-1',
       prompt: 'Complete the protected operation',
@@ -894,7 +894,7 @@ describe('TemporalClient mission start', () => {
   it('resumes a plain pending question with the user reply as guidance', async () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'plain-question', tenantId: 'tenant-1', assistantId: 'assistant-1',
       prompt: 'Send the customer an SMS',
@@ -948,7 +948,7 @@ describe('TemporalClient mission start', () => {
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
     const directRun = jest.fn(async () => ({}))
-    const client = new TemporalClient('default', directRun)
+    const client = new MissionClient('default', directRun)
     const input = {
       missionId: 'mission-retry-no-progress',
       tenantId: 'tenant-1',
@@ -994,7 +994,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const missions = [
       { missionId: 'mission-pause-recovery', controlState: 'pause_requested', status: 'paused' },
       { missionId: 'mission-terminate-recovery', controlState: 'terminate_requested', status: 'canceled' },
@@ -1044,7 +1044,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'scheduled-occurrence-1',
       tenantId: 'tenant-1',
@@ -1076,7 +1076,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-awaiting-config',
       tenantId: 'tenant-1',
@@ -1150,7 +1150,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-completed-resume',
       tenantId: 'tenant-1',
@@ -1200,7 +1200,7 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const client = new MissionClient()
     const input = {
       missionId: 'mission-canceled-resume',
       tenantId: 'tenant-1',

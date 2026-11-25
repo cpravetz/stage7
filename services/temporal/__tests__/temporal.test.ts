@@ -2,9 +2,9 @@ import { WorkflowInput, WorkflowResult, WorkflowState, ActivityResult } from '..
 import request from 'supertest';
 import express from 'express';
 import missionsRoutes from '../src/routes/missions';
-import { TemporalClient } from '../src/client/TemporalClient';
+import { MissionClient } from '../src/client/MissionClient';
 
-jest.mock('../src/client/TemporalClient', () => {
+jest.mock('../src/client/MissionClient', () => {
   const mocks = {
     startMission: jest.fn(),
     getMissionResult: jest.fn(),
@@ -18,7 +18,7 @@ jest.mock('../src/client/TemporalClient', () => {
       error instanceof Error && error.name === 'MissionAwaitingInputError',
   };
   return {
-    TemporalClient: jest.fn().mockImplementation(() => mocks),
+    MissionClient: jest.fn().mockImplementation(() => mocks),
     ...mocks,
   };
 });
@@ -44,7 +44,7 @@ describe('Temporal Routes', () => {
   let stopMissionSchedule: jest.Mock;
 
   beforeEach(() => {
-    const temporalMocks = require('../src/client/TemporalClient') as any;
+    const temporalMocks = require('../src/client/MissionClient') as any;
     startMission = temporalMocks.startMission;
     getMissionResult = temporalMocks.getMissionResult;
     listMissions = temporalMocks.listMissions;
@@ -72,7 +72,7 @@ describe('Temporal Routes', () => {
   });
 
   it('passes a conversational answer to the agent during a credential request', async () => {
-    const temporalMocks = require('../src/client/TemporalClient') as {
+    const temporalMocks = require('../src/client/MissionClient') as {
       broadcastMissionUpdate: jest.Mock; resumeMission: jest.Mock;
     };
     temporalMocks.broadcastMissionUpdate.mockResolvedValue(undefined);
@@ -95,7 +95,7 @@ describe('Temporal Routes', () => {
   });
 
   it('resumes a blocked mission when the user replies with feedback instead of an answer', async () => {
-    const temporalMocks = require('../src/client/TemporalClient') as {
+    const temporalMocks = require('../src/client/MissionClient') as {
       broadcastMissionUpdate: jest.Mock; resumeMission: jest.Mock;
     };
     temporalMocks.broadcastMissionUpdate.mockResolvedValue(undefined);
@@ -130,7 +130,7 @@ describe('Temporal Routes', () => {
   });
 
   it('reports a resume that needs an answer as a conflict instead of a server error', async () => {
-    const temporalMocks = require('../src/client/TemporalClient') as {
+    const temporalMocks = require('../src/client/MissionClient') as {
       resumeMission: jest.Mock;
     };
     temporalMocks.resumeMission.mockRejectedValue(
@@ -153,7 +153,7 @@ describe('Temporal Routes', () => {
   });
 
   it('reports execution lease contention as a retryable conflict', async () => {
-    const temporalMocks = require('../src/client/TemporalClient') as {
+    const temporalMocks = require('../src/client/MissionClient') as {
       resumeMission: jest.Mock;
     };
     temporalMocks.resumeMission.mockRejectedValue(

@@ -1,4 +1,4 @@
-import { TemporalClient } from '../src/client/TemporalClient'
+import { MissionClient } from '../src/client/MissionClient'
 import { MissionTerminationRequestedError } from '../src/types/missionControl'
 
 interface RecordedRequest {
@@ -58,7 +58,7 @@ function installArtifacts(record: Record<string, unknown>) {
 const deletes = (requests: RecordedRequest[]) =>
   requests.filter((request) => request.method === 'DELETE')
 
-describe('TemporalClient mission deletion', () => {
+describe('MissionClient mission deletion', () => {
   const originalArtifactsUrl = process.env.ARTIFACTS_URL
   const originalGatewayUrl = process.env.GATEWAY_URL
 
@@ -82,7 +82,7 @@ describe('TemporalClient mission deletion', () => {
       status: 'completed',
       controlState: 'running',
     })
-    const client = new TemporalClient()
+    const client = new MissionClient()
 
     await expect(client.deleteMission('mission-mission-finished')).resolves.toBe('deleted')
 
@@ -97,7 +97,7 @@ describe('TemporalClient mission deletion', () => {
       status: 'running',
       controlState: 'running',
     })
-    const client = new TemporalClient()
+    const client = new MissionClient()
 
     await expect(client.deleteMission('mission-mission-running')).resolves.toBe('stopping')
 
@@ -122,7 +122,7 @@ describe('TemporalClient mission deletion', () => {
       await runnerGate
       throw new MissionTerminationRequestedError()
     })
-    const client = new TemporalClient('default', directRun as never)
+    const client = new MissionClient('default', directRun as never)
 
     await client.startMission({
       missionId: 'finalized',
