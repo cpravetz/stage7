@@ -429,6 +429,17 @@ export class CodeExecutor {
 
         try {
 const code = options.code;
+        // The vault authenticates by verified service token, so the sandbox's
+        // credential-resolution prelude carries one minted for this execution —
+        // the same token injection the Python prelude performs. A failed mint
+        // degrades the vault-backed lookup to empty, the same as a failed
+        // vault call inside the prelude.
+        let vaultToken = '';
+        try {
+          vaultToken = await getServiceToken();
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault service token unavailable for sandbox auth resolution');
+        }
         // Generated source code frequently contains backticks (template literals),
   // which would close this outer template literal early and truncate the
   // prelude. Build the wrapped script with plain string concatenation so a
@@ -444,6 +455,11 @@ const code = options.code;
     'function __getCredentialSource(logicalKey) {\n' +
     '  return __credential_sources.find(s => s.logicalKey === logicalKey);\n' +
     '}\n' +
+    // Per-execution vault credential, consumed by the inlined stage7-auth.js
+    // below (its vault fetch reads globalThis.__STAGE7_VAULT_TOKEN). Assigned
+    // as a true global — a top-level `const` would not be visible through
+    // globalThis inside the inlined module.
+    'globalThis.__STAGE7_VAULT_TOKEN = ' + JSON.stringify(vaultToken) + ';\n' +
     // Inlined verbatim from src/adk/shared/stage7-auth.js — defines __resolveAuth
     // (and __resolveAuthValue). Never hand-maintain this logic here.
     authPrelude.replace(/\n$/, '') + '\n' +
