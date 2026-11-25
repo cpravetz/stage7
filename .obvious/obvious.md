@@ -78,6 +78,24 @@ exchange `SERVICE_AUTH_ID`/`SERVICE_API_KEY` credentials at
 `auth-bootstrap` step seeds the three service accounts on stack start;
 credentials are templated in `.env.example`. The gateway is unchanged:
 internal S2S calls dial services directly and never traverse it.
+The frontend Settings page uses the token-carrying axios client
+(`frontend-nextgen/src/services/api.ts`), which attaches the user JWT and
+redirects to `/login` on 401.
+
+## System settings document
+
+Runtime-tunable settings live in the `llm-config` document (collection
+`settings`, tenantId `system`) on the artifacts documents API. The Settings
+page (frontend) edits them; shared-nextgen's `utils/settings.ts` is the
+server-side resolver, and `frontend-nextgen/src/utils/llmSettings.ts` mirrors
+it client-side. Because the documents POST replaces `data` wholesale, the UI
+round-trips every known field on save. Covered fields: `freeModelsOnly`,
+`providerTimeoutMs`, `providerAttemptTimeoutMs`, `completionDeadlineMs`,
+`circuitThreshold`, `circuitCooldownMs`, `preferredModelIds`,
+`forbiddenModelIds`, `approvalTimeoutMs`, `approvalPollIntervalMs`,
+`watchSchedulerPollMs`. The corresponding env vars in `.env.example` are the
+fallback layer beneath the settings doc; services converge on saves within
+~30 seconds via their settings caches.
 
 ## Environment
 
