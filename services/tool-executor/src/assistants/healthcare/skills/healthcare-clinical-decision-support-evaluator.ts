@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
@@ -64,7 +63,7 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
       const NL = '\n';
       const SAFETY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.';
 
-      function fail(status, message, title) {
+      function fail(status: string, message: string, title: string) {
         return {
           success: false,
           status: status,
@@ -83,13 +82,13 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
         return fail('not-connected', 'Not connected: patient symptoms and evidence-based guideline inputs are required', 'Input required');
       }
 
-      const redFlags = symptoms.filter((item) => /chest pain|difficulty breathing|stroke|severe bleed|unconscious|suicidal/i.test(String(item)));
-      const considerations = guidelines.map((guideline) => {
+      const redFlags = symptoms.filter((item: any) => /chest pain|difficulty breathing|stroke|severe bleed|unconscious|suicidal/i.test(String(item)));
+      const considerations = guidelines.map((guideline: any) => {
         const item = guideline && typeof guideline === 'object' ? guideline : {};
         const keywords = Array.isArray(item.keywords) ? item.keywords : [];
-        const relevance = symptoms.filter((symptom) => keywords.some((keyword) => String(symptom).toLowerCase().includes(String(keyword).toLowerCase()))).length;
+        const relevance = symptoms.filter((symptom: any) => keywords.some((keyword: any) => String(symptom).toLowerCase().includes(String(keyword).toLowerCase()))).length;
         return { guideline: item.name || 'unnamed guideline', relevance, pathway: item.pathway || 'clinician review required', evidenceLevel: item.evidenceLevel || 'not supplied' };
-      }).sort((left, right) => right.relevance - left.relevance || String(left.guideline).localeCompare(String(right.guideline)));
+      }).sort((left: any, right: any) => right.relevance - left.relevance || String(left.guideline).localeCompare(String(right.guideline)));
 
       const escalation = redFlags.length ? 'urgent clinician or emergency-pathway review required' : 'routine clinician review';
       const patientAge = patient.age === undefined ? null : Number(patient.age);
@@ -106,10 +105,10 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
         lines.push('No red-flag symptom(s) identified. Escalation recommendation: ' + escalation + '.');
       }
       lines.push('');
-      const scored = considerations.filter(function (c) { return c.relevance > 0; });
+      const scored = considerations.filter(function (c: any) { return c.relevance > 0; });
       if (scored.length > 0) {
         lines.push('Guideline considerations (ranked by keyword relevance):');
-        scored.forEach(function (c, i) {
+        scored.forEach(function (c: any, i: number) {
           lines.push('  ' + (i + 1) + '. ' + c.guideline + ' - ' + c.relevance + ' of ' + symptoms.length + ' symptom(s) matched; pathway: ' + c.pathway + '; evidence level: ' + c.evidenceLevel);
         });
       } else {

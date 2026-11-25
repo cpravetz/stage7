@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
@@ -63,7 +62,7 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
       const NL = '\n';
       const SAFETY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.';
 
-      function fail(status, message, title) {
+      function fail(status: string, message: string, title: string) {
         return {
           success: false,
           status: status,
@@ -82,7 +81,7 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
         return fail('not-connected', 'Not connected: condition, goals, and education topics are required', 'Input required');
       }
 
-      const medicationLines = medications.map((medication) => {
+      const medicationLines = medications.map((medication: any) => {
         const name = typeof medication === 'string' ? medication : ((medication && medication.name) || 'unnamed therapy');
         const instruction = typeof medication === 'string' ? '' : String((medication && medication.instruction) || '');
         return { name, instruction: instruction || 'verify the instruction with the prescribing clinician' };
@@ -90,13 +89,13 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
 
       // Education content is structural only: the topics are listed verbatim from the supplied input so
       // the user can confirm which topics were covered. No explanatory prose is invented.
-      const topicLines = educationTopics.map((topic) => ({
+      const topicLines = educationTopics.map((topic: any) => ({
         topic: String(topic),
         format: 'plain-language briefing',
         note: 'Topic supplied by the clinician; a human clinician should explain it in plain language.',
       }));
 
-      const goalRanked = goals.map((goal, index) => ({
+      const goalRanked = goals.map((goal: any, index: number) => ({
         rank: index + 1,
         goal: String(goal),
         measure: 'patient-reported or clinician-defined target',
@@ -107,13 +106,13 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
       lines.push('Patient care-plan briefing for: ' + condition);
       lines.push('');
       lines.push('Care goals (' + goals.length + '):');
-      goalRanked.forEach(function (g) {
+      goalRanked.forEach(function (g: any) {
         lines.push('  ' + g.rank + '. ' + g.goal + '  [measure: ' + g.measure + ']');
       });
       lines.push('');
       if (medicationLines.length > 0) {
         lines.push('Medications / therapies (' + medicationLines.length + '):');
-        medicationLines.forEach(function (m) {
+        medicationLines.forEach(function (m: any) {
           lines.push('  - ' + m.name + (m.instruction ? '  (' + m.instruction + ')' : ''));
         });
         lines.push('  Medication details are copied from the supplied plan; do not start, stop, or change a dose from this briefing.');
@@ -123,7 +122,7 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
         lines.push('');
       }
       lines.push('Education topics (' + educationTopics.length + ') - structural coverage only, not clinical instruction:');
-      topicLines.forEach(function (t, i) {
+      topicLines.forEach(function (t: any, i: number) {
         lines.push('  ' + (i + 1) + '. ' + t.topic);
       });
       lines.push('  These topics are listed verbatim from what the clinician supplied. A human clinician should explain each topic in plain language.');

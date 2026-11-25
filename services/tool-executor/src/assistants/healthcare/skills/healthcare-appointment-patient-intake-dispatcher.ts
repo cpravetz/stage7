@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
@@ -85,11 +84,11 @@ const intake = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.';
 
-      function presentNotice(title, body) {
+      function presentNotice(title: string, body: string) {
         return [{ id: 'notice', title: title, kind: 'text', body: body + NL + NL + SAFETY }];
       }
 
-      function emit(success, status, opts) {
+      function emit(success: boolean, status: string, opts: any) {
         const opts2 = opts || {};
         return {
           success: success,
@@ -120,7 +119,7 @@ const intake = createDeclarativeCodeSkill({
       };
       const requiredDocuments = Array.isArray(input.requiredDocuments) ? input.requiredDocuments : [];
       const suppliedDocuments = Array.isArray(input.documents) ? input.documents : [];
-      const missingDocumentation = requiredDocuments.filter((document) => !suppliedDocuments.includes(document));
+      const missingDocumentation = requiredDocuments.filter((document: any) => !suppliedDocuments.includes(document));
       const queuePosition = input.queuePosition === undefined ? (Array.isArray(input.pendingIntakeIds) ? input.pendingIntakeIds.length + 1 : null) : Number(input.queuePosition);
       const route = String(input.route || input.provider || input.facility || 'unassigned');
 
@@ -198,7 +197,7 @@ const intake = createDeclarativeCodeSkill({
       }
 
       try {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (token) headers.Authorization = 'Bearer ' + token;
         const response = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(payload) });
         const text = await response.text();

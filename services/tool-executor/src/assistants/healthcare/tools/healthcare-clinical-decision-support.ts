@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
@@ -72,14 +71,14 @@ export const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
       let store = [];
       store = ctx.store.load('cdsPath', []);
 
-      function safeParseDate(d) {
+      function safeParseDate(d: any) {
         if (!d) return null;
         try { const dt = new Date(d); return isNaN(dt.getTime()) ? null : dt; } catch(e) { return null; }
       }
 
-      function assessUrgency(symptoms, vitalSigns) {
+      function assessUrgency(symptoms: any, vitalSigns: any) {
         const criticalSigns = ['chest pain', 'shortness of breath', 'severe bleeding', 'loss of consciousness', 'stroke symptoms'];
-        const hasCritical = symptoms.some(s => criticalSigns.some(c => s.toLowerCase().includes(c)));
+        const hasCritical = symptoms.some((s: any) => criticalSigns.some((c: string) => s.toLowerCase().includes(c)));
         const bpSys = vitalSigns.bloodPressureSystolic || 0;
         const hr = vitalSigns.heartRate || 0;
         const temp = vitalSigns.temperature || 0;
@@ -93,11 +92,11 @@ export const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
           patient, symptoms, duration, clinicalContext,
         patientHistory, medications, allergies, vitalSigns, riskFactors,
         urgency: assessUrgency(symptoms, vitalSigns),
-        differentialDiagnoses: symptoms.length ? symptoms.map(s => ({
+        differentialDiagnoses: symptoms.length ? symptoms.map((s: any) => ({
           symptom: s, possibleConditions: ['Requires clinical evaluation'],
           confidence: 0, caveat: 'Differential diagnosis requires professional clinical assessment.',
         })) : [],
-        riskFlags: riskFactors.length ? riskFactors.map(r => ({ factor: r, level: 'requires-review' })) : [],
+        riskFlags: riskFactors.length ? riskFactors.map((r: any) => ({ factor: r, level: 'requires-review' })) : [],
         recommendedActions: ['Consult qualified healthcare professional'],
         safetyCaveats: [disclaimer, 'This tool has limited sensitivity and specificity. Negative results do not rule out disease.'],
         createdAt: new Date().toISOString(),

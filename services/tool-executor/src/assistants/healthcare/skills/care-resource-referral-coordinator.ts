@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -73,7 +72,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
 
       const patientId = String(input.patient || '');
       const referralId = String(input.referralId || '');
-      const clinicalNeeds = Array.isArray(input.clinicalNeeds) ? input.clinicalNeeds.map((item) => String(item)).filter(Boolean) : [];
+      const clinicalNeeds = Array.isArray(input.clinicalNeeds) ? input.clinicalNeeds.map((item: any) => String(item)).filter(Boolean) : [];
       const insurance = input.insurance && typeof input.insurance === 'object' ? input.insurance : {};
       const preferences = input.preferences && typeof input.preferences === 'object' ? input.preferences : {};
       const location = input.location && typeof input.location === 'object' ? input.location : {};
@@ -90,23 +89,23 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
       if (clinicalNeeds.length === 0) missingInformation.push('clinicalNeeds (at least one clinical need)');
 
       const stepStatus = { records_scheduling: 'not-attempted', resource_coordination: 'not-attempted', patient_communication: 'not-attempted' };
-      const stepErrors = {};
-      const stepsAttempted = [];
-      const stepsSucceeded = [];
-      const stepsFailed = [];
-      const stepsUnavailable = [];
+      const stepErrors: Record<string, any> = {};
+      const stepsAttempted: string[] = [];
+      const stepsSucceeded: string[] = [];
+      const stepsFailed: string[] = [];
+      const stepsUnavailable: string[] = [];
 
-      function notConnected(title, body) {
+      function notConnected(title: string, body: string) {
         return { success: false, status: 'not-connected', connected: false, operation: 'refer', data: null, present: [{ id: 'not-connected', title: title, kind: 'text', body: body }], safetyBoundary: SAFETY };
       }
 
-      function blocked(title, body, status) {
+      function blocked(title: string, body: string, status: string) {
         return { success: false, status: status, connected: false, operation: 'refer', data: null, present: [{ id: 'blocked', title: title, kind: 'text', body: body }], safetyBoundary: SAFETY };
       }
 
-      function done(success, status, bodyLines, extra) {
+      function done(success: boolean, status: string, bodyLines: string[], extra: any) {
         const body = bodyLines.join(NL);
-        const payload = {
+        const payload: any = {
           success: success,
           status: status,
           connected: success,
@@ -293,7 +292,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
         }
         if (candidates.length > 0) {
           lines.push('Candidate resources (' + candidates.length + '):');
-          candidates.slice(0, maxResults).forEach(function (c, i) {
+          candidates.slice(0, maxResults).forEach(function (c: any, i: number) {
             const name = (c && (c.name || c.id || c.resourceName)) || ('candidate ' + (i + 1));
             lines.push('  ' + (i + 1) + '. ' + name);
           });

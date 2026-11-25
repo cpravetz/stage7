@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaProps, createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from '../healthcare-contract';
