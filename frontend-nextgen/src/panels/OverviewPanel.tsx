@@ -5,6 +5,8 @@ import FeedSelector, { buildFeedOptions, type SkillDef, type ProducedFeedEntry }
 import { useAssistantViewStore } from '../stores/assistantViewStore';
 import { SchemaFields, sfGetSchemaProperties as getSchemaProperties } from '../components/SchemaFields';
 import WatchControls from '../components/WatchControls';
+import { ApiError } from '../utils/api';
+import { useSpendLimitStore } from '../stores/spendLimitStore';
 import { getToolInputSchema, getToolConfigSchema, getToolDisplayName } from '../utils/workspaceHelpers';
 import { MissionRecurrenceOptions, type MissionRecurrence } from '../components/MissionRecurrenceOptions';
 import type { MissionScheduleRow } from '../stores/missionsStore';
@@ -72,6 +74,9 @@ export const OverviewPanel = ({
   const runResults = view.runResults;
   const runningMap = view.runningMap;
   const setField = useAssistantViewStore((s) => s.setField);
+  // Refused tool runs feed the global limit-reached notice; clearing stays
+  // owned by the next successful Brain completion in pages/Brain.tsx.
+  const recordSpendRefusal = useSpendLimitStore((s) => s.recordRefusalFromError);
 
   const isUserTriggered = (tool: ToolBinding): boolean => {
     const skill = availableSkills.find((s) => s.id === tool.name || s.name === tool.name);
@@ -85,12 +90,26 @@ export const OverviewPanel = ({
     setField(entity.id, 'runningMap', { ...runningMap, [tool.name]: true });
     try {
       const args = runInputs[tool.name] || {};
-      const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`, withAuthHeaders({
+      const executePath = `/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`;
+      const res = await fetch(executePath, withAuthHeaders({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: tool.name, arguments: args }),
       }));
       const resultText = await res.text();
+      // Worker-pool propagates Brain's 429 refusal contract verbatim on
+      // refused runs (review finding B), so route it into the global notice.
+      // recordRefusalFromError records only well-formed SPEND_LIMIT_REACHED
+      // payloads — a malformed body or other status never triggers it.
+      if (res.status === 429) {
+        let body: unknown;
+        try {
+          body = JSON.parse(resultText);
+        } catch {
+          body = undefined;
+        }
+        recordSpendRefusal(new ApiError(res.status, res.statusText, executePath, body));
+      }
       setField(entity.id, 'runResults', { ...runResults, [tool.name]: resultText });
     } catch (err) {
       setField(entity.id, 'runResults', { ...runResults, [tool.name]: String(err instanceof Error ? err.message : err) });
