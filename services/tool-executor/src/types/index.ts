@@ -1,3 +1,5 @@
+import { NextGenError } from '@stage7-nextgen/shared';
+
 /**
  * Schema property definition with full UI metadata support.
  * Extends JSON Schema with fields needed by the skill panel UI.
@@ -424,7 +426,7 @@ export class CrossObjectHandoffError extends Error {
  * The caller presents the request to the user; on grant, the tool is
  * integrated automatically and the execution can be retried.
  */
-export class MCPToolDiscoveryRequiredError extends Error {
+export class MCPToolDiscoveryRequiredError extends NextGenError {
   readonly toolId: string;
   readonly toolName: string;
   readonly capability: string;
@@ -432,13 +434,32 @@ export class MCPToolDiscoveryRequiredError extends Error {
   readonly candidate?: import('../types/mcp-discovery').MCPToolCandidate;
 
   constructor(tool: Tool, permissionRequest: import('../types/mcp-discovery').PermissionRequest, candidate?: import('../types/mcp-discovery').MCPToolCandidate) {
-    super(`No registered tool provides capability "${permissionRequest.neededCapability}". Permission required to discover and integrate an MCP tool.`);
+    super(`No registered tool provides capability "${permissionRequest.neededCapability}". Permission required to discover and integrate an MCP tool.`, 202);
     this.name = 'MCPToolDiscoveryRequiredError';
     this.toolId = tool.id;
     this.toolName = tool.name;
     this.capability = permissionRequest.neededCapability;
     this.permissionRequest = permissionRequest;
     this.candidate = candidate;
+  }
+
+  // Lazy require: ToolPermissionService imports types from this module, so a
+  // static import of renderPermissionPrompt would create a cycle.
+  toJson(): any {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { renderPermissionPrompt } = require('../services/ToolPermissionService');
+    return {
+      success: false as const,
+      error: this.message,
+      permissionRequired: true,
+      toolId: this.toolId,
+      toolName: this.toolName,
+      capability: this.capability,
+      request: this.permissionRequest,
+      prompt: renderPermissionPrompt(this.permissionRequest),
+      candidate: this.candidate,
+      statusCode: this.statusCode,
+    };
   }
 }
 

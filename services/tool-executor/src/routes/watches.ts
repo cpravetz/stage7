@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import asyncHandler from '../utils/asyncHandler'
+import { asyncHandler } from '@stage7-nextgen/shared'
 import logger from '../utils/logger'
 
 const router: Router = Router()

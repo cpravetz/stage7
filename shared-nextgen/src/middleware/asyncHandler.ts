@@ -11,7 +11,7 @@ const production = (): boolean => process.env.NODE_ENV === 'production';
  * 500 can never hide the actual cause.
  */
 export const asyncHandler = (
-  fn: (req: Request, res: Response, next: NextFunction) => void | Promise<void>
+  fn: (req: Request, res: Response, next: NextFunction) => void | Response | Promise<void | Response>
 ) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch((err: unknown) => {
