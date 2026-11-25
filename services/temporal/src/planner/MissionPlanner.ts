@@ -189,7 +189,7 @@ Requirements:
 2. The planner must never ask the user questions or use the __ASK_USER__ marker. The planner's only output is a complete JSON plan. If information is missing, make reasonable assumptions and proceed.
 3. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. When a goal requires both producing an output and taking a separate action with it, separate those tasks and make the action depend on the output task. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
 4. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
-5. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
+5. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, estimatedComplexity, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent. estimatedComplexity is required on every task and is one of "low", "medium", or "high", judging how difficult the task's work is for an AI agent. You may also set selectionCriteria on a task as one of "cost", "speed", "accuracy", or "creativity" to say what matters most when choosing a model for it; omit selectionCriteria when cost is the right default.
 6. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 7. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 8. Mark requiresApproval=true only where a human decision is needed before work continues.
@@ -200,7 +200,7 @@ Requirements:
 13. Plan only work that is necessary to accomplish the stated mission goal. Do not expand scope with unrelated domains, research, analysis, or capabilities not requested by the user. If a task or action fails, recovery must focus on completing the requested outcome or reporting a concrete blocker; never reframe a failure as a need to produce a design or planning document unless the user explicitly requested that document.
 
 Return one complete JSON object matching this structure:
-{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
+{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"estimatedComplexity":"medium","selectionCriteria":"cost","status":"pending","artifacts":[]}]}]}
 Do not include prose, markdown fences, or any text outside the JSON object.`;
 const PLANNER_REMEDIATION_SYSTEM_PROMPT = 'You are correcting one part of an existing mission plan. Apply only the listed corrections, preserve everything else, return only the corrected JSON value described, no prose or Markdown fences. Do not ask questions or use the __ASK_USER__ marker.';
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
@@ -234,6 +234,14 @@ function applyPlannerDefaults(plan: any): any {
       if (task && typeof task === 'object' && !Array.isArray(task)) {
         if (task.status === undefined) task.status = 'pending';
         task.requiredActions = [];
+        // Normalize routing fields BEFORE validation so planner enum typos never
+        // reach the Brain remediation loop. selectionCriteria must be set
+        // explicitly: omitting the field would route as the router's implicit
+        // 'balanced' default instead of the cost default.
+        const COMPLEXITY_VALUES = ['low', 'medium', 'high'];
+        const CRITERIA_VALUES = ['cost', 'speed', 'accuracy', 'creativity'];
+        if (!COMPLEXITY_VALUES.includes(task.estimatedComplexity)) task.estimatedComplexity = 'medium';
+        if (!CRITERIA_VALUES.includes(task.selectionCriteria)) task.selectionCriteria = 'cost';
         if (typeof task.agentRole === 'string' && task.agentRole.trim()) {
           task.agentRole = canonicalMissionAgentRole(task.agentRole);
         }

@@ -335,6 +335,14 @@ export class ModelRouter {
       score += 10;
     }
 
+    // Creativity preference is served ONLY by this static +10 for models whose
+    // registry definition carries the 'creative' capability tag — the one
+    // routing dimension without a measured metric (accuracy, cost, and speed
+    // all draw on persisted ModelPerformanceOutcome data). This is distinct
+    // from inferCapabilities/CAPABILITY_KEYWORDS above, which infer REQUIRED
+    // capabilities from task text for eligibility filtering and never feed
+    // this bonus. A measured creativity signal would be a registry/metrics-
+    // schema change, out of scope here.
     if (optimizeFor === 'creativity' && model.capabilities.includes('creative')) {
       score += 10;
     }

@@ -1,30 +1,28 @@
 import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
-  brainSettings,
   reportBrainComplaint,
-  resolveBrainSettings,
 } from '@stage7-nextgen/shared'
 import type { AgentDefinition } from '../../types'
 import {
   BRAIN_RESPONSE_GRACE_MS,
+  DEFAULT_BRAIN_COMPLETION_DEADLINE_MS,
+  DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS,
   MAX_BRAIN_REQUEST_BYTES,
-  MAX_BRAIN_REQUEST_TIMEOUT_MS,
 } from './constants'
 import { compactBrainRequest } from './requestCompaction'
 import type { BrainErrorResponse, BrainResponse, ChatMessage } from './types'
 
-/**
- * Request ceiling for a Brain call: the completion deadline (settings doc
- * first, then environment, then the shared defaults) plus grace for the
- * response hop back. Reads the last polled snapshot synchronously — no I/O on
- * this path — and clamps to the same bounds the executor validates explicit
- * timeouts against.
- */
-export function brainRequestTimeout(): number {
-  const resolved = resolveBrainSettings(brainSettings.current().overrides, process.env)
-  const timeoutMs = resolved.completionDeadlineMs + BRAIN_RESPONSE_GRACE_MS
-  return Math.min(Math.max(timeoutMs, 1_000), MAX_BRAIN_REQUEST_TIMEOUT_MS)
+export function brainRequestTimeoutFromEnvironment(): number {
+  const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS)
+  const configuredAttemptTimeout = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS)
+  const attemptTimeout = Number.isFinite(configuredAttemptTimeout) && configuredAttemptTimeout > 0
+    ? configuredAttemptTimeout
+    : DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+  const completionDeadline = Number.isFinite(configuredDeadline) && configuredDeadline > 0
+    ? configuredDeadline
+    : Math.max(attemptTimeout, Math.min(attemptTimeout * 3, DEFAULT_BRAIN_COMPLETION_DEADLINE_MS))
+  return completionDeadline + BRAIN_RESPONSE_GRACE_MS
 }
 
 /** HTTP client for the Brain service: completions and response-quality complaints. */
@@ -32,13 +30,8 @@ export class BrainClient {
   constructor(
     private readonly brainUrl: string,
     private readonly fetcher: typeof fetch,
-    private readonly requestTimeoutMs?: number,
+    private readonly requestTimeoutMs: number,
   ) {}
-
-  /** Explicit timeout wins; otherwise the deadline is resolved per request so runtime settings changes apply. */
-  private requestTimeout(): number {
-    return this.requestTimeoutMs ?? brainRequestTimeout()
-  }
 
   async complete(
     definition: AgentDefinition,
@@ -47,10 +40,14 @@ export class BrainClient {
     history: ChatMessage[],
     maxTokens: number,
     routingSessionId?: string,
+    optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity',
     userId?: string,
   ): Promise<BrainResponse> {
     const base = {
-      options: { optimizeFor: 'accuracy' },
+      // Task threading sets optimizeFor per mission task (planner selectionCriteria /
+      // estimatedComplexity); callers that pass nothing — phase review, completion
+      // review, planner self-completions — route on cost, the platform default.
+      options: { optimizeFor: optimizeFor || 'cost' },
       maxTokens,
       temperature: 0.3,
       missionId,
@@ -87,8 +84,7 @@ export class BrainClient {
     }
 
     const controller = new AbortController()
-    const requestTimeoutMs = this.requestTimeout()
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs)
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs)
     let response: Response
     try {
       response = await this.fetcher(`${this.brainUrl}/api/brain/complete`, {
@@ -100,7 +96,7 @@ export class BrainClient {
     } catch (error) {
       if (controller.signal.aborted) {
         const cause = error instanceof Error ? `: ${error.message}` : '';
-        throw new Error(`Brain request timed out after ${requestTimeoutMs}ms${cause}`, { cause: error })
+        throw new Error(`Brain request timed out after ${this.requestTimeoutMs}ms${cause}`, { cause: error })
       }
       throw error
     } finally {

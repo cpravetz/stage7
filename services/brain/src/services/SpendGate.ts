@@ -1,7 +1,6 @@
 import {
   NextGenError,
   MAX_BRAIN_SPEND_LIMIT_USD,
-  latestResolvedBrainSettings,
 } from '@stage7-nextgen/shared';
 import type { SpendLimitConfig, SpendLimitPeriod } from '@stage7-nextgen/shared';
 import { SpendLedgerStore, UserSpendLimitStore } from '../data/spendStores';
@@ -233,13 +232,12 @@ export const MAX_SPEND_LIMITS = { perUserUsd: MAX_BRAIN_SPEND_LIMIT_USD };
 let sharedGate: SpendGate | undefined;
 
 /**
- * Process-wide gate. The operator default reads the settings Brain publishes
- * per completion, so a cap an operator saves lands on the next call without a
- * restart.
+ * Process-wide gate. Per-user limits come from the Mongo store; the operator's
+ * `system`-bucket default is uncapped in this tree — the settings-doc lookup
+ * returns when the backend PR re-homes operator defaults onto settingsDocSource
+ * (main deleted the brainSettings module in the OD-8 revert).
  */
 export function getSpendGate(): SpendGate {
-  sharedGate ??= new SpendGate({
-    operatorSystemDefault: () => latestResolvedBrainSettings()?.spendLimits?.system,
-  });
+  sharedGate ??= new SpendGate({});
   return sharedGate;
 }

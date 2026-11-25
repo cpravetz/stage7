@@ -67,6 +67,8 @@ export const TaskSchema = z.object({
   requiresExternalAction: z.boolean().optional(),
   requiredActions: z.array(RequiredActionSchema).max(50).optional(),
   status: z.enum(['pending', 'in_progress', 'awaiting_approval', 'completed', 'incomplete', 'failed', 'skipped']),
+  estimatedComplexity: z.enum(['low', 'medium', 'high']).optional(),
+  selectionCriteria: z.enum(['cost', 'speed', 'accuracy', 'creativity']).optional(),
   output: z.string().optional(),
   artifacts: z.array(MissionArtifactSchema).default([]),
   startedAt: z.number().optional(),
