@@ -10,6 +10,7 @@ RUN apk add --no-cache vips-dev python3 make g++
 
 # Copy root package files
 COPY package.json package-lock.json ./
+COPY tsconfig.base.json ./
 
 # Copy workspace package files
 COPY services/brain/package.json ./services/brain/

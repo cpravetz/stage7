@@ -6,6 +6,7 @@ WORKDIR /usr/src/app
 
 # Copy package files first for better layer caching
 COPY package*.json ./
+COPY tsconfig.base.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/worker-pool/package*.json ./services/worker-pool/
 COPY services/artifacts/package*.json ./services/artifacts/

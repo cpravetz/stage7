@@ -5,6 +5,7 @@ RUN apk add --no-cache python3 make g++ vips-dev bubblewrap util-linux
 WORKDIR /usr/src/app
 
 COPY package*.json ./
+COPY tsconfig.base.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/tool-executor/package*.json ./services/tool-executor/
 COPY services/tool-executor/tsconfig.json ./services/tool-executor/

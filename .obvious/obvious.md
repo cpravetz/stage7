@@ -35,17 +35,19 @@ Each service listens on `process.env.PORT` with the port above as its default.
 ```bash
 npm ci                                 # install root workspaces
 (cd frontend-nextgen && npm ci)        # frontend deps (separate lockfile)
-npm run build --workspaces --if-present  # build shared + services
+npm run build                         # dependency-ordered build (shared → artifacts → services)
 npm run lint                           # eslint (tool-executor, worker-pool, shared-nextgen)
 npm test                               # jest unit + integration tests (requires bubblewrap — see Local verification)
 cd frontend-nextgen && npm run dev     # vite dev server on :8080
 ```
 
-Per-service builds: `npm run build -w @stage7-nextgen/<name>`. Note: `npm run build --workspaces`
-fails for `agent-runtime` (builds before its dependency `artifacts` — rebuild it after) and for
-`gateway` (its tsconfig includes `__tests__` outside `rootDir`; Docker builds copy only `src/`,
-so build gateway from `services/gateway` with `npx tsc --rootDir src src/index.ts ...` flags, or
-run `npx tsc` there after removing test files from include).
+Per-service builds: `npm run build -w @stage7-nextgen/<name>`. All services emit `dist/index.js`
+(each tsconfig sets `rootDir: src` and excludes tests from the build emit; tests type-check under
+ts-jest instead), while `shared-nextgen` emits `dist/src/` (its `main` points there). Plain
+`npm run build --workspaces` is NOT dependency-ordered under npm 10 — `agent-runtime` and
+`worker-pool` fail if `artifacts` has no `dist` yet — so use the root `npm run build`, which
+builds `shared-nextgen` and `artifacts` first. Every tsconfig extends the root
+`tsconfig.base.json`; dockerfiles that copy a service tsconfig also copy `tsconfig.base.json`.
 
 ## Local dev without Docker (verified recipe)
 
