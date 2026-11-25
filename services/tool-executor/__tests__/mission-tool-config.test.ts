@@ -6,6 +6,27 @@ import { CodeExecutor } from '../src/executors/CodeExecutor';
 import { credentialProvider } from '../src/services/CredentialProvider';
 import { requireIsolationRuntime } from './requireIsolationRuntime';
 
+// Vault calls authenticate with a service token minted from the auth service.
+// The fetch mocks below answer the mint endpoint; these env credentials make
+// the mint happen at all.
+const SERVICE_AUTH_ENV: Record<string, string> = {
+  TOOL_EXECUTOR_SERVICE_ID: 'tool-executor-test',
+  TOOL_EXECUTOR_SERVICE_API_KEY: 'test-api-key',
+};
+
+beforeAll(() => {
+  for (const [key, value] of Object.entries(SERVICE_AUTH_ENV)) process.env[key] = value;
+});
+
+afterAll(() => {
+  for (const key of Object.keys(SERVICE_AUTH_ENV)) delete process.env[key];
+});
+
+/** Mock answer for the auth service's token mint endpoint. */
+const mintResponse = (): Response =>
+  ({ ok: true, status: 200, json: async () => ({ success: true, token: 'test-service-token' }) } as Response);
+
+
 describe('mission tool configuration', () => {
   beforeAll(() => {
     // This suite validates generated tools through the real bwrap isolation
@@ -209,10 +230,14 @@ print(json.dumps({'success': True, 'messageId': result['sid']}))`,
   });
 
   it('resolves previously supplied values from the tool-specific vault entry', async () => {
-    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({ plaintext: 'saved-account' }),
-    } as Response);
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/auth/')) return mintResponse();
+      return {
+        ok: true,
+        json: async () => ({ plaintext: 'saved-account' }),
+      } as Response;
+    });
     const config = new ToolConfigResolver(new Map());
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
@@ -224,9 +249,13 @@ print(json.dumps({'success': True, 'messageId': result['sid']}))`,
 
   it('resolves an explicitly named existing vault secret independently of the logical key', async () => {
     credentialProvider.invalidate();
-    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true, json: async () => ({ plaintext: 'saved-value' }),
-    } as Response);
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/auth/')) return mintResponse();
+      return {
+        ok: true, json: async () => ({ plaintext: 'saved-value' }),
+      } as Response;
+    });
     const configSchema = {
       type: 'object',
       properties: { account_id: { type: 'string', vaultSecretId: 'secret:provider_account' } },
@@ -276,6 +305,7 @@ describe('vault credential resolution by secret name', () => {
   // Vault mimic: invented ids 404, real names decrypt, and only GET /api/vault/secrets lists names.
   const mockVault = () => jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
     const url = String(input);
+    if (url.includes('/api/auth/')) return mintResponse();
     if (url.endsWith('/api/vault/secrets')) {
       return {
         ok: true,

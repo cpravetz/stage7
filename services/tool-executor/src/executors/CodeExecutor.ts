@@ -1,4 +1,5 @@
 import { logger } from '@stage7-nextgen/shared';
+import { getServiceToken } from '../utils/serviceToken';
 import { ToolCredentials, NamedCredentialSource } from '../services/CredentialProvider';
 import fs from 'fs';
 import http from 'http';
@@ -623,6 +624,16 @@ async function __execute_tool(toolId, input) {
         const hasBridge = !!bridge;
 
         try {
+        // The vault authenticates by verified service token, so the sandbox's
+        // credential-resolution prelude carries one minted for this execution.
+        // A failed mint degrades the vault-backed lookup to empty, the same as
+        // a failed vault call inside the prelude.
+        let vaultToken = '';
+        try {
+          vaultToken = await getServiceToken();
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault service token unavailable for sandbox auth resolution');
+        }
         const code = options.code;
         const wrapped = `import json
 import os
@@ -660,7 +671,7 @@ async def __resolve_auth(auth):
                     vault_url = os.environ.get('VAULT_URL', 'http://vault:4000')
                     req = urllib.request.Request(
                         f'{vault_url}/api/vault/secrets/{val["vaultSecretId"]}/decrypt',
-                        headers={'X-Tenant-Id': 'system'}
+                        headers={'Authorization': 'Bearer ' + base64.b64decode('${Buffer.from(vaultToken).toString('base64')}').decode()}
                     )
                     with urllib.request.urlopen(req, timeout=5) as resp:
                         import json as json_mod

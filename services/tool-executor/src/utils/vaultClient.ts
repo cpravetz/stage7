@@ -1,4 +1,5 @@
 import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { getServiceToken } from './serviceToken';
 
 /**
  * Canonical vault client: one place for the vault base URL, the tenant
@@ -6,12 +7,12 @@ import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
  * and PluginGenerator all go through this module instead of hand-building
  * fetch URLs.
  *
- * Tenant convention: every call takes an explicit `tenantId` (default
- * `'system'`) carried in the `X-Tenant-Id` header — the vault's
- * `resolveTenantContext` gives it the same authority the pre-header `?tenantId`
- * query convention had, and the body `tenantId` the ensure/store routes require
- * always matches. Callers previously mixed query-param, header, and body-only
- * conventions; all resolved to the same tenant, which this module preserves.
+ * Tenant convention: every call authenticates with the process's service
+ * token (see `serviceToken.ts`); the vault derives the tenant from the
+ * verified token, so the tenant is no longer a caller-supplied header. The
+ * body `tenantId` the ensure/store routes accept is kept as an assertion —
+ * a mismatch with the token's tenant is rejected by the vault (403) instead
+ * of silently writing into another tenant.
  */
 
 /** Default vault address, identical to the docker-compose service name. */
@@ -42,9 +43,12 @@ export function assertVaultBaseUrl(url: string = vaultBaseUrl()): URL {
   return base;
 }
 
-/** The canonical tenant convention: tenant travels in the X-Tenant-Id header. */
-export function vaultTenantHeaders(tenantId: string): Record<string, string> {
-  return { 'X-Tenant-Id': tenantId };
+/**
+ * The credential convention: the process's service token travels in the
+ * Authorization header; the vault resolves the tenant from the verified token.
+ */
+export async function vaultAuthHeaders(): Promise<Record<string, string>> {
+  return { Authorization: `Bearer ${await getServiceToken()}` };
 }
 
 /** Extract secret names from a vault listing payload (array or `{ secrets: [...] }`). */
@@ -59,10 +63,10 @@ export function parseVaultSecretNames(data: unknown): string[] {
     .filter((name): name is string => typeof name === 'string' && name.length > 0);
 }
 
-/** List tenant secret names. Throws on network failure and non-OK status. */
-export async function listVaultSecretNames(tenantId = 'system', timeoutMs?: number): Promise<string[]> {
+/** List secret names visible to the service token. Throws on network failure and non-OK status. */
+export async function listVaultSecretNames(timeoutMs?: number): Promise<string[]> {
   const response = await httpRequest(`${vaultBaseUrl()}/api/vault/secrets`, {
-    headers: vaultTenantHeaders(tenantId),
+    headers: await vaultAuthHeaders(),
     timeoutMs: timeoutMs ?? interServiceTimeoutMs(),
   });
   if (!response.ok) {
@@ -85,7 +89,6 @@ export interface VaultDecryptResult {
  */
 export async function decryptVaultSecret(
   ref: { byId?: string; byName?: string },
-  tenantId = 'system',
 ): Promise<VaultDecryptResult> {
   const base = assertVaultBaseUrl();
   const target = ref.byId !== undefined
@@ -95,7 +98,7 @@ export async function decryptVaultSecret(
     // Unreachable for the fixed paths above; kept as a guard if path building changes.
     throw new Error('Vault URL origin escape attempt');
   }
-  const response = await httpRequest(target.toString(), { headers: vaultTenantHeaders(tenantId), timeoutMs: interServiceTimeoutMs() });
+  const response = await httpRequest(target.toString(), { headers: await vaultAuthHeaders(), timeoutMs: interServiceTimeoutMs() });
   if (!response.ok) {
     return { status: response.status, ok: false };
   }
@@ -115,7 +118,7 @@ export async function ensureVaultSecret(
 ): Promise<{ existed?: boolean; name?: string } | undefined> {
   const response = await httpRequest(`${vaultBaseUrl()}/api/vault/secrets/ensure`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...vaultTenantHeaders(tenantId) },
+    headers: { 'Content-Type': 'application/json', ...(await vaultAuthHeaders()) },
     body: JSON.stringify({ name, plaintext, tenantId }),
     timeoutMs: interServiceTimeoutMs(),
   });
@@ -132,7 +135,7 @@ export async function storeVaultSecret(plaintext: string, tenantId: string, name
   const target = new URL('/api/vault/secrets', base);
   const response = await httpRequest(target.toString(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...vaultTenantHeaders(tenantId) },
+    headers: { 'Content-Type': 'application/json', ...(await vaultAuthHeaders()) },
     body: JSON.stringify({ name, plaintext, tenantId }),
     timeoutMs: interServiceTimeoutMs(),
   });
