@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { asyncHandler } from './src/utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { VaultError } from './src/utils/errors';
 import { EnvelopeEncryption } from './src/encryption/envelopeEncryption';
 

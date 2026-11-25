@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PersistentWorkerPool } from '../pool/PersistentWorkerPool';
-import { asyncHandler } from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { WorkerPoolError } from '../utils/errors';
 import { persistence } from '../utils/sharedInstance';
 

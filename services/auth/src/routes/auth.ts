@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { asyncHandler } from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { AuthError } from '../utils/errors';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
