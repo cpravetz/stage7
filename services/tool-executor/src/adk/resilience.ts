@@ -84,6 +84,68 @@ export function backoffDelay(attempt: number, baseMs = 500, maxMs = 30_000): num
 }
 
 /**
+ * Extracts the first well-formed JSON object from free-form LLM output.
+ *
+ * Replaces the copy-pasted greedy `/{[\s\S]*}/` regexes, which fail two ways:
+ * prose containing multiple objects produces `{"a":1} ... {"b":2}`-shaped
+ * garbage, and braces inside string values truncate or over-extend the match.
+ * This scans for balanced brace groups (respecting strings and escapes), tries
+ * each as JSON, and returns the first object that parses — or null.
+ *
+ * Self-contained on purpose: `code-skill-factory.ts` serializes this function
+ * verbatim (via `.toString()`) into the sandboxed skill preamble, where
+ * module-scope imports do not exist. Keep it free of TS-only syntax and
+ * references to anything outside its own body.
+ */
+export function extractJsonObject(text: string): Record<string, unknown> | null {
+  if (typeof text !== 'string' || text.indexOf('{') === -1) return null;
+  let scanStart = 0;
+  while (true) {
+    const open = text.indexOf('{', scanStart);
+    if (open === -1) return null;
+    // Find the matching close brace for this open brace, honouring strings
+    // and backslash escapes so `{"code": "return {a: 1}"}` stays intact.
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let close = -1;
+    for (let i = open; i < text.length; i += 1) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+    }
+    if (close === -1) {
+      // This group never closes; a later group can still be complete, so
+      // restart the scan after this brace rather than giving up.
+      scanStart = open + 1;
+      continue;
+    }
+    scanStart = close + 1;
+    try {
+      const parsed = JSON.parse(text.slice(open, close + 1));
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Not valid JSON at this brace; keep scanning later groups.
+    }
+  }
+}
+
+/**
  * The retry step.
  *
  * Only transient failures are retried. Retrying a validation error wastes time

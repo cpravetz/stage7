@@ -2,6 +2,7 @@
 
 import { SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
+import { extractJsonObject } from '../../../adk/resilience';
 
 const SCENE_BEAT_DIALOGUE_INPUT = {
   type: 'object',
@@ -185,14 +186,8 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
       if (Array.isArray(payload.scenes) && payload.scenes.length > 0) return payload.scenes;
       const text = delegatedText(payload);
       if (!text) return null;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return null;
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return Array.isArray(parsed.scenes) && parsed.scenes.length > 0 ? parsed.scenes : null;
-      } catch {
-        return null;
-      }
+      const parsed = extractJsonObject(text);
+      return parsed && Array.isArray(parsed.scenes) && parsed.scenes.length > 0 ? parsed.scenes : null;
     }
 
     const SKILL_BUDGET_MS = Number(ctx.config?.skillBudgetMs) > 0

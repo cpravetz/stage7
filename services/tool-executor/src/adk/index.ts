@@ -106,6 +106,7 @@ export {
 export {
   classifyFailure,
   backoffDelay,
+  extractJsonObject,
   withDeterministicRetry,
   withSelfCorrection,
   escalationCard,

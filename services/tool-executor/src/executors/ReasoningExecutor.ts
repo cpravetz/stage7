@@ -1,6 +1,7 @@
 import { Tool } from '../types';
 import logger from '../utils/logger';
 import { httpRequest, llmCallTimeoutMs, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { extractJsonObject } from '../adk/resilience';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 

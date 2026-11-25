@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
+import { extractJsonObject } from '../../../adk/resilience';
 
 export const WRITE_PRD = createDeclarativeCodeSkill({
     id: 'write-prd',
@@ -161,9 +162,7 @@ export const WRITE_PRD = createDeclarativeCodeSkill({
         const text = delegatedText(value);
         if (!text) return null;
         try { return JSON.parse(text); } catch {}
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) { try { return JSON.parse(match[0]); } catch {} }
-        return null;
+        return extractJsonObject(text);
         }
 
         let parsed = null;
