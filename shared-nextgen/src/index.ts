@@ -14,6 +14,7 @@ export * from './utils/agentMessages';
 export * from './errors';
 export * from './middleware/asyncHandler';
 export * from './middleware/requireServiceToken';
+export * from './data/mongo';
 export * from './utils/stripTrailingSlashes';
 export * from './utils/actionReceiptVerifier';
 export * from './config/brainSettings';

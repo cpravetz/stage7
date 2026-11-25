@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection, ObjectId } from 'mongodb';
+import { Collection, ObjectId, MongoClientOptions } from 'mongodb';
 import { createHash } from 'node:crypto';
 import {
   PersistenceDocument,
@@ -14,12 +14,10 @@ import {
   AgentState,
   AgentExecutionCheckpoint,
 } from '../types';
-import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
+import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig, MongoBaseStore, stripMongoId, ConnectMongoOptions } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { preserveCompletedMissionTaskResults } from './missionPlanPersistence';
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
-const MONGO_DB = process.env.MONGO_DB || 'stage7';
 // Bounded so an unreachable Mongo fails in seconds rather than the driver's
 // 30s default per attempt. Callers retry and then refuse to start.
 const MONGO_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 5000;
@@ -84,10 +82,15 @@ type VectorDoc = { _id: string; vector: number[] } & VectorUpsertMeta;
 type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
 type StoredBrainPerformanceMetric = BrainPerformanceMetric & { _id?: string };
 
-export class MongoStore {
-  private client: MongoClient | null = null;
-  private db: Db | null = null;
-  private connected = false;
+export class MongoStore extends MongoBaseStore {
+  protected readonly storeName = 'MongoStore';
+
+  protected override connectOptions(): ConnectMongoOptions {
+    return {
+      clientOptions: { serverSelectionTimeoutMS: MONGO_SERVER_SELECTION_TIMEOUT_MS },
+      connectTimeoutMs: null,
+    };
+  }
 
   private documents!: Collection<PersistenceDocument>;
   private brainLogs!: Collection<StoredBrainLogRecord>;
@@ -105,65 +108,40 @@ export class MongoStore {
   private missionTasks!: Collection<any>;
   private missionEvents!: Collection<any>;
 
-  async connect(): Promise<void> {
-    if (this.connected) return;
+  protected async initialize(): Promise<void> {
+    const db = this.db!;
 
-    try {
-      this.client = new MongoClient(MONGO_URI, {
-        serverSelectionTimeoutMS: MONGO_SERVER_SELECTION_TIMEOUT_MS,
-      });
-      await this.client.connect();
-      this.db = this.client.db(MONGO_DB);
+    this.documents = db.collection<PersistenceDocument>('documents');
+    this.brainLogs = db.collection<StoredBrainLogRecord>('brainLogs');
+    this.brainPerformanceMetrics = db.collection<StoredBrainPerformanceMetric>('brainPerformanceMetrics');
+    this.missions = db.collection<MissionState & { _id?: string }>('missions');
+    this.missionRecoveryLeases = db.collection<MissionRecoveryLease & { _id?: string }>('missionRecoveryLeases');
+    this.agents = db.collection<AgentState & { _id?: string }>('agents');
+    this.executionCheckpoints = db.collection<AgentExecutionCheckpoint & { _id?: string }>('executionCheckpoints');
+    this.vectors = db.collection<VectorDoc>('vectors');
+    this.assistants = db.collection<AssistantDefinition & { _id?: string }>('assistants');
+    this.assistantRuntimes = db.collection<AssistantRuntimeConfig & { _id?: string }>('assistantRuntimes');
+    this.assistantTemplates = db.collection<AssistantTemplate & { _id?: string }>('assistantTemplates');
+    this.missionPlans = db.collection<{ missionId: string; plan: any }>('missionPlans');
+    this.missionPhases = db.collection<any>('missionPhases');
+    this.missionTasks = db.collection<any>('missionTasks');
+    this.missionEvents = db.collection<any>('missionEvents');
 
-      this.documents = this.db.collection<PersistenceDocument>('documents');
-      this.brainLogs = this.db.collection<StoredBrainLogRecord>('brainLogs');
-      this.brainPerformanceMetrics = this.db.collection<StoredBrainPerformanceMetric>('brainPerformanceMetrics');
-      this.missions = this.db.collection<MissionState & { _id?: string }>('missions');
-      this.missionRecoveryLeases = this.db.collection<MissionRecoveryLease & { _id?: string }>('missionRecoveryLeases');
-      this.agents = this.db.collection<AgentState & { _id?: string }>('agents');
-      this.executionCheckpoints = this.db.collection<AgentExecutionCheckpoint & { _id?: string }>('executionCheckpoints');
-      this.vectors = this.db.collection<VectorDoc>('vectors');
-      this.assistants = this.db.collection<AssistantDefinition & { _id?: string }>('assistants');
-      this.assistantRuntimes = this.db.collection<AssistantRuntimeConfig & { _id?: string }>('assistantRuntimes');
-      this.assistantTemplates = this.db.collection<AssistantTemplate & { _id?: string }>('assistantTemplates');
-      this.missionPlans = this.db.collection<{ missionId: string; plan: any }>('missionPlans');
-      this.missionPhases = this.db.collection<any>('missionPhases');
-      this.missionTasks = this.db.collection<any>('missionTasks');
-      this.missionEvents = this.db.collection<any>('missionEvents');
+    await this.documents.createIndex({ id: 1 }, { unique: true });
+    await this.brainLogs.createIndex({ timestamp: -1, _id: -1 });
+    await this.missions.createIndex({ missionId: 1 }, { unique: true });
+    await this.missionRecoveryLeases.createIndex({ missionId: 1 }, { unique: true });
+    await this.agents.createIndex({ agentId: 1 }, { unique: true });
+    await this.executionCheckpoints.createIndex({ agentId: 1, taskId: 1 }, { unique: true });
+    await this.assistants.createIndex({ id: 1 }, { unique: true });
+    await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
+    await this.missionPlans.createIndex({ missionId: 1 }, { unique: true });
+    await this.missionPhases.createIndex({ missionId: 1, id: 1 }, { unique: true });
+    await this.missionTasks.createIndex({ missionId: 1, taskId: 1 }, { unique: true });
+    await this.missionEvents.createIndex({ missionId: 1, timestamp: 1 });
+    await this.missionEvents.createIndex({ missionId: 1, fingerprint: 1, timestamp: 1 });
 
-      await this.documents.createIndex({ id: 1 }, { unique: true });
-      await this.brainLogs.createIndex({ timestamp: -1, _id: -1 });
-      await this.missions.createIndex({ missionId: 1 }, { unique: true });
-      await this.missionRecoveryLeases.createIndex({ missionId: 1 }, { unique: true });
-      await this.agents.createIndex({ agentId: 1 }, { unique: true });
-      await this.executionCheckpoints.createIndex({ agentId: 1, taskId: 1 }, { unique: true });
-      await this.assistants.createIndex({ id: 1 }, { unique: true });
-      await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
-      await this.missionPlans.createIndex({ missionId: 1 }, { unique: true });
-      await this.missionPhases.createIndex({ missionId: 1, id: 1 }, { unique: true });
-      await this.missionTasks.createIndex({ missionId: 1, taskId: 1 }, { unique: true });
-      await this.missionEvents.createIndex({ missionId: 1, timestamp: 1 });
-      await this.missionEvents.createIndex({ missionId: 1, fingerprint: 1, timestamp: 1 });
-
-      this.connected = true;
-      logger.info({ uri: MONGO_URI, db: MONGO_DB }, 'MongoStore connected');
-    } catch (err) {
-      logger.error({ err }, 'MongoStore connection failed');
-      throw err;
-    }
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.client) {
-      await this.client.close();
-      this.connected = false;
-      this.client = null;
-      this.db = null;
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected;
+    logger.info({ uri: this.settings!.uri, db: this.settings!.dbName }, 'MongoStore connected');
   }
 
   async createDocument(doc: Omit<PersistenceDocument, 'createdAt' | 'updatedAt'>): Promise<PersistenceDocument> {
@@ -322,18 +300,13 @@ export class MongoStore {
 
   async getMissionState(missionId: string): Promise<MissionState | undefined> {
     const result = await this.missions.findOne({ missionId } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest;
+    return result ? stripMongoId<MissionState>(result) : undefined;
   }
 
   async listMissionStates(tenantId?: string): Promise<MissionState[]> {
     const query: Record<string, string> = tenantId ? { tenantId } : {};
     const results = await this.missions.find(query).toArray();
-    return results.map((r: any) => {
-      const { _id, ...rest } = r;
-      return rest;
-    });
+    return results.map((r) => stripMongoId<MissionState>(r));
   }
 
   async claimMissionRecoveryLease(
@@ -418,18 +391,13 @@ export class MongoStore {
 
   async getAgentState(agentId: string): Promise<AgentState | undefined> {
     const result = await this.agents.findOne({ agentId } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest;
+    return result ? stripMongoId<AgentState>(result) : undefined;
   }
 
   async listAgentStates(tenantId?: string): Promise<AgentState[]> {
     const query: Record<string, string> = tenantId ? { tenantId } : {};
     const results = await this.agents.find(query).toArray();
-    return results.map((r: any) => {
-      const { _id, ...rest } = r;
-      return rest;
-    });
+    return results.map((r) => stripMongoId<AgentState>(r));
   }
 
   async saveExecutionCheckpoint(checkpoint: AgentExecutionCheckpoint): Promise<void> {
@@ -442,9 +410,7 @@ export class MongoStore {
   async getExecutionCheckpoint(agentId: string, taskId: string): Promise<AgentExecutionCheckpoint | undefined> {
     const id = `${agentId}:${taskId}`;
     const result = await this.executionCheckpoints.findOne({ _id: id } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest;
+    return result ? stripMongoId<AgentExecutionCheckpoint>(result) : undefined;
   }
 
   async deleteExecutionCheckpoint(agentId: string, taskId: string): Promise<void> {
@@ -476,10 +442,7 @@ export class MongoStore {
   async listAssistants(tenantId?: string): Promise<AssistantDefinition[]> {
     const query: Record<string, string> = tenantId ? { tenantId } : {};
     const results = await this.assistants.find(query as any).toArray();
-    return results.map((r: any) => {
-      const { _id, ...rest } = r;
-      return rest;
-    });
+    return results.map((r) => stripMongoId<AssistantDefinition>(r));
   }
 
   async deleteAssistant(id: string): Promise<boolean> {
@@ -498,17 +461,12 @@ export class MongoStore {
 
   async getAssistantRuntime(assistantId: string): Promise<AssistantRuntimeConfig | undefined> {
     const result = await this.assistantRuntimes.findOne({ _id: assistantId } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest;
+    return result ? stripMongoId<AssistantRuntimeConfig>(result) : undefined;
   }
 
   async listAssistantRuntimes(): Promise<AssistantRuntimeConfig[]> {
     const results = await this.assistantRuntimes.find({}).toArray();
-    return results.map((r: any) => {
-      const { _id, ...rest } = r;
-      return rest;
-    });
+    return results.map((r) => stripMongoId<AssistantRuntimeConfig>(r));
   }
 
   async saveTemplate(template: AssistantTemplate): Promise<AssistantTemplate> {
@@ -531,10 +489,7 @@ export class MongoStore {
 
   async listTemplates(): Promise<AssistantTemplate[]> {
     const results = await this.assistantTemplates.find({}).toArray();
-    return results.map((r: any) => {
-      const { _id, ...rest } = r;
-      return rest;
-    });
+    return results.map((r) => stripMongoId<AssistantTemplate>(r));
   }
 
   async deleteTemplate(id: string): Promise<boolean> {

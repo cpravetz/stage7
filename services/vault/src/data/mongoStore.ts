@@ -1,44 +1,26 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { Collection } from 'mongodb';
+import { MongoBaseStore, stripMongoId, logger } from '@stage7-nextgen/shared';
 import { StoredSecret, SecretMetadata } from '../services/SecretStore';
-import { logger } from '@stage7-nextgen/shared';
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
-const MONGO_DB = process.env.MONGO_DB || 'stage7';
-
-export class MongoSecretStore {
-  private client: MongoClient | null = null;
-  private db: Db | null = null;
+export class MongoSecretStore extends MongoBaseStore {
+  protected readonly storeName = 'MongoSecretStore';
   private secrets: Collection<StoredSecret & { _id?: string }> | null = null;
-  private connected = false;
 
-  async connect(): Promise<void> {
-    if (this.secrets) return;
+  protected async initialize(): Promise<void> {
+    this.secrets = this.db!.collection<StoredSecret & { _id?: string }>('secrets');
+    await this.secrets.createIndex({ id: 1 }, { unique: true });
+    await this.secrets.createIndex({ tenantId: 1 });
     try {
-      this.client = new MongoClient(MONGO_URI);
-      const connectPromise = this.client.connect();
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('MongoDB connection timeout')), 3000)
-      );
-      await Promise.race([connectPromise, timeoutPromise]);
-      this.db = this.client.db(MONGO_DB);
-      this.secrets = this.db.collection<StoredSecret & { _id?: string }>('secrets');
-      await this.secrets.createIndex({ id: 1 }, { unique: true });
-      await this.secrets.createIndex({ tenantId: 1 });
-      try {
-        await this.secrets.createIndex({ tenantId: 1, name: 1 }, { unique: true });
-      } catch (err: any) {
-        // Existing duplicate legacy data can block unique index creation; keep running and rely on ensureSecret reconciliation.
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'MongoSecretStore could not enforce unique tenantId+name index');
-      }
-      this.connected = true;
-      logger.info('MongoSecretStore connected');
-    } catch (err) {
-      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'MongoSecretStore connection failed');
-      this.client = null;
-      this.db = null;
-      this.secrets = null;
-      throw err;
+      await this.secrets.createIndex({ tenantId: 1, name: 1 }, { unique: true });
+    } catch (err: any) {
+      // Existing duplicate legacy data can block unique index creation; keep running and rely on ensureSecret reconciliation.
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'MongoSecretStore could not enforce unique tenantId+name index');
     }
+    logger.info('MongoSecretStore connected');
+  }
+
+  protected override onConnectFailed(): void {
+    this.secrets = null;
   }
 
   async createSecret(secret: StoredSecret): Promise<StoredSecret> {
@@ -87,9 +69,7 @@ export class MongoSecretStore {
   async getSecret(id: string): Promise<StoredSecret | undefined> {
     if (!this.secrets) await this.connect();
     const result = await this.secrets!.findOne({ id } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest as StoredSecret;
+    return result ? stripMongoId<StoredSecret>(result) : undefined;
   }
 
   async listSecrets(tenantId?: string): Promise<SecretMetadata[]> {
@@ -113,26 +93,18 @@ export class MongoSecretStore {
     const query: Record<string, string> = { name };
     if (tenantId) query.tenantId = tenantId;
     const result = await this.secrets!.findOne(query as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest as StoredSecret;
+    return result ? stripMongoId<StoredSecret>(result) : undefined;
   }
 
   async getSecretForTenant(id: string, tenantId: string): Promise<StoredSecret | undefined> {
     if (!this.secrets) await this.connect();
     const result = await this.secrets!.findOne({ id, tenantId } as any);
-    if (!result) return undefined;
-    const { _id, ...rest } = result as any;
-    return rest as StoredSecret;
+    return result ? stripMongoId<StoredSecret>(result) : undefined;
   }
 
   async deleteSecretForTenant(id: string, tenantId: string): Promise<boolean> {
     if (!this.secrets) await this.connect();
     const result = await this.secrets!.deleteOne({ id, tenantId } as any);
     return result.deletedCount > 0;
-  }
-
-  isConnected(): boolean {
-    return this.connected;
   }
 }
