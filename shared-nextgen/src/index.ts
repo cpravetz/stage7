@@ -13,6 +13,7 @@ export * from './utils/embeddingsClient';
 export * from './utils/agentMessages';
 export * from './errors';
 export * from './middleware/asyncHandler';
+export * from './middleware/healthRouter';
 export * from './middleware/requireServiceToken';
 export * from './utils/stripTrailingSlashes';
 export * from './utils/actionReceiptVerifier';

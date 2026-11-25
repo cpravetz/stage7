@@ -1,6 +1,6 @@
 import { NextFunction, Router, Request, Response } from 'express';
 import { gatewayProxy } from '../utils/sharedInstances';
-import { asyncHandler, NextGenError, logger, requireServiceToken, stripTrailingSlashes } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, healthRouter, logger, requireServiceToken, stripTrailingSlashes } from '@stage7-nextgen/shared';
 import rateLimit from 'express-rate-limit';
 
 const router: Router = Router();
@@ -97,8 +97,6 @@ router.put('/:service/*', proxyLimiter, authGate, proxyHandler);
 router.delete('/:service/*', proxyLimiter, authGate, proxyHandler);
 router.patch('/:service/*', proxyLimiter, authGate, proxyHandler);
 
-router.get('/health', asyncHandler(async (req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'proxy' });
-}));
+router.use(healthRouter({ service: 'proxy' }));
 
 export default router;

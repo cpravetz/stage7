@@ -5,19 +5,20 @@ import missionRoutes from './routes/missions';
 import brainPersistenceRoutes from './routes/brainPersistence';
 import vectorRoutes from './routes/vectors';
 import { artifactsService } from './services/ArtifactsService';
-import { asyncHandler, logger } from '@stage7-nextgen/shared';
+import { healthRouter, logger } from '@stage7-nextgen/shared';
 
 const app: express.Application = express();
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/api/artifacts/health', asyncHandler(async (_req, res) => {
-  await artifactsService.ready();
-  const available = artifactsService.isPersistenceAvailable();
-  res.status(available ? 200 : 503).json({
-    status: available ? 'ok' : 'degraded',
-    service: 'artifacts',
-    durable: artifactsService.isDurable(),
-  });
+app.use('/api/artifacts', healthRouter({
+  service: 'artifacts',
+  check: {
+    fields: async () => {
+      await artifactsService.ready();
+      return { durable: artifactsService.isDurable() };
+    },
+    status: () => (artifactsService.isPersistenceAvailable() ? 'ok' : 'degraded'),
+  },
 }));
 
 app.use('/api/artifacts/documents', documentRoutes);

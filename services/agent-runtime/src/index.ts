@@ -1,16 +1,16 @@
 import express from 'express'
 import agentsRouter from './routes/agents'
 import { runtime } from './utils/sharedInstance'
-import { brainSettings } from '@stage7-nextgen/shared'
+import { brainSettings, healthRouter } from '@stage7-nextgen/shared'
 
 const app: express.Express = express()
 
 app.use(express.json({ limit: '50mb' }))
 
-app.get('/api/agent-runtime/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'agent-runtime', agents: runtime.listAgents().length });
-});
-
+app.use('/api/agent-runtime', healthRouter({
+  service: 'agent-runtime',
+  check: { fields: () => ({ agents: runtime.listAgents().length }) },
+}));
 app.use('/api/agent-runtime', agentsRouter)
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { CompletionOptions } from '../services/BrainService';
 import { getBrainInstance } from '../utils/sharedInstance';
 import { z } from 'zod';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
 import { logger } from '../utils/logger';
 import { EntityMemoryStore } from '../services/EntityMemoryStore';
@@ -19,14 +19,14 @@ async function getBrain() {
   return getBrainInstance();
 }
 
-router.get('/health', asyncHandler(async (_req, res) => {
-  const brain = await getBrain();
-  res.json({
-    status: 'ok',
-    service: 'brain',
-    providers: brain.listProviders(),
-    models: brain.listAvailableModels().length,
-  });
+router.use(healthRouter({
+  service: 'brain',
+  check: {
+    fields: async () => {
+      const brain = await getBrain();
+      return { providers: brain.listProviders(), models: brain.listAvailableModels().length };
+    },
+  },
 }));
 
 router.post('/memory/entity', asyncHandler(async (req: any, res: any) => {

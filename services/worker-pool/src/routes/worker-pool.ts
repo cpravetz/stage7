@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import { PersistentWorkerPool } from '../pool/PersistentWorkerPool';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { persistence } from '../utils/sharedInstance';
 
 const router: Router = Router();
 const pool = new PersistentWorkerPool(persistence);
 
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'worker-pool', running: pool.isRunning() });
-});
+router.use(healthRouter({
+  service: 'worker-pool',
+  check: { fields: () => ({ running: pool.isRunning() }) },
+}));
 
 router.post('/start', asyncHandler(async (req, res) => {
   pool.start();

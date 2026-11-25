@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
 import { LoginRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
@@ -35,9 +35,7 @@ ensureDefaultAdmin().catch((err) => {
   console.error('Failed to seed default admin:', err);
 });
 
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'auth' });
-});
+router.use(healthRouter({ service: 'auth' }));
 
 router.post('/login', asyncHandler(async (req: Request, res: Response) => {
   const { email, password, tenantId } = req.body as LoginRequest;
