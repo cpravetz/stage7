@@ -239,6 +239,13 @@ router.post('/assistants/:id/execute', asyncHandler(async (req, res) => {
   const result = context
     ? await executor.execute(definition, prompt, context)
     : await executor.execute(definition, prompt);
+  if (!result.success && result.spendRefusal) {
+    // The Brain refused the run at the user's spending cap; keeping the 429
+    // contract body lets the frontend's existing handler surface the
+    // limit-reached notice on assistant chat (OD-5 review finding B).
+    res.status(429).json(result.spendRefusal);
+    return;
+  }
   res.json(result);
 }));
 

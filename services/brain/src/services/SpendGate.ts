@@ -1,8 +1,9 @@
 import {
   NextGenError,
   MAX_BRAIN_SPEND_LIMIT_USD,
+  spendLimitsSettings,
 } from '@stage7-nextgen/shared';
-import type { SpendLimitConfig, SpendLimitPeriod } from '@stage7-nextgen/shared';
+import type { SpendLimitConfig, SpendLimitPeriod, SpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { SpendLedgerStore, UserSpendLimitStore } from '../data/spendStores';
 import type { SpendLedger, SpendWindow, UserLimitStore, UserSpendLimitDoc } from '../data/spendStores';
 import { logger } from '../utils/logger';
@@ -48,17 +49,11 @@ export function periodWindow(period: SpendLimitPeriod, now: Date): SpendWindow {
   }
 }
 
-export interface SpendLimitReachedPayload {
-  error: 'SPEND_LIMIT_REACHED';
-  userId: string;
-  period: SpendLimitPeriod;
-  /** The cap, in estimated USD. */
-  limit: number;
-  /** Estimated USD recorded for the period when the call was refused. */
-  spent: number;
-  /** When activity resumes: the period's UTC end. */
-  periodEnd: string;
-}
+/**
+ * The 429 contract body, defined in shared so callers (and the frontend's
+ * parser) build against one shape.
+ */
+export type SpendLimitReachedPayload = SpendLimitRefusalPayload;
 
 /**
  * The typed refusal thrown by the gate and mapped by the completion route to
@@ -233,11 +228,15 @@ let sharedGate: SpendGate | undefined;
 
 /**
  * Process-wide gate. Per-user limits come from the Mongo store; the operator's
- * `system`-bucket default is uncapped in this tree — the settings-doc lookup
- * returns when the backend PR re-homes operator defaults onto settingsDocSource
- * (main deleted the brainSettings module in the OD-8 revert).
+ * `system`-bucket default comes from the settings document, read through the
+ * shared TTL-cached source that BrainService refreshes on the completion path.
  */
 export function getSpendGate(): SpendGate {
-  sharedGate ??= new SpendGate({});
+  sharedGate ??= new SpendGate({
+    // The operator's `system`-bucket default lives in the settings document
+    // (`brain/settings/llm-config`); BrainService.refreshes the source on the
+    // completion path so it is hot-applied here.
+    operatorSystemDefault: () => spendLimitsSettings.current().overrides.system,
+  });
   return sharedGate;
 }

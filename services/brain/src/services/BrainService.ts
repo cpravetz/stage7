@@ -12,7 +12,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs, spendLimitsSettings } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 import { SpendGate, SpendLimitReachedError, getSpendGate } from './SpendGate';
@@ -921,6 +921,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     promptPreview: string,
   ): Promise<SpendReservation | null> {
     try {
+      // Operator defaults live in the settings document; refresh (TTL-cached,
+      // never rejects) so an operator-set `system` cap is hot-applied like the
+      // brain settings were before the OD-8 revert.
+      await spendLimitsSettings.refresh();
       const estimate = this.estimateMaxCompletionCostUsd(prompt, options.systemPrompt, options.maxTokens);
       return await this.spendGate.enforce(options.userId, estimate);
     } catch (err) {

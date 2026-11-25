@@ -1,10 +1,15 @@
 import {
   AssistantDefinition,
   AssistantExecutionResult,
+  logger,
+  httpRequest,
+  llmCallTimeoutMs,
+  DEFAULT_TENANT_ID,
   MCPToolCall,
   MCPToolResult,
+  parseSpendLimitRefusalPayload,
 } from '@stage7-nextgen/shared';
-import { logger, httpRequest, llmCallTimeoutMs, DEFAULT_TENANT_ID } from '@stage7-nextgen/shared';
+import type { SpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
 import {
   applyKnowledgeBudget,
@@ -137,6 +142,7 @@ export class AssistantExecutor {
           assistantId: definition.id,
           success: false,
           error: brainRes.error,
+          ...(brainRes.spendRefusal ? { spendRefusal: brainRes.spendRefusal } : {}),
           tokensUsed,
           durationMs: Date.now() - start,
         };
@@ -204,7 +210,7 @@ export class AssistantExecutor {
     definition: AssistantDefinition,
     systemPrompt: string,
     conversation: Array<{ role: string; content: string }>,
-  ): Promise<{ ok: boolean; error?: string; content?: string; tokensUsed?: number }> {
+  ): Promise<{ ok: boolean; error?: string; content?: string; tokensUsed?: number; spendRefusal?: SpendLimitRefusalPayload }> {
     const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
     const prompt = conversation
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
@@ -235,6 +241,15 @@ export class AssistantExecutor {
         timeoutMs: llmCallTimeoutMs(),
       });
       if (!res.ok) {
+        if (res.status === 429) {
+          // Preserve the Brain's spend-limit refusal contract so the caller
+          // can surface the limit-reached notice instead of a generic failure
+          // string (OD-5 review finding B). A malformed body is not a refusal.
+          const refusal = parseSpendLimitRefusalPayload(await res.json().catch(() => undefined));
+          if (refusal) {
+            return { ok: false, error: `Brain returned ${res.status}: LLM spending limit reached`, spendRefusal: refusal };
+          }
+        }
         const text = await res.text();
         return { ok: false, error: `Brain returned ${res.status}: ${text.slice(0, 200)}` };
       }

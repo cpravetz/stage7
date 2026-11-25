@@ -639,3 +639,83 @@ describe('Catalog validation', () => {
     expect(result.orphaned).toHaveLength(0);
   });
 });
+
+describe('brain spend-limit refusal propagation (OD-5 finding B)', () => {
+  const definition: AssistantDefinition = {
+    id: 'assistant-capped',
+    tenantId: 'tenant-1',
+    name: 'Capped Assistant',
+    description: 'An assistant whose owner is capped',
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [],
+    metadata: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  let executor: AssistantExecutor;
+
+  beforeEach(async () => {
+    executor = new AssistantExecutor(new KnowledgeService(createTestArtifactsService()));
+  });
+
+  function mockBrain(status: number, body: unknown): () => void {
+    const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+    (global.fetch as jest.Mock).mockImplementation(async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/api/brain/embeddings')) {
+        return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+      }
+      if (urlStr.includes('/api/brain/complete')) {
+        const text = typeof body === 'string' ? body : JSON.stringify(body);
+        return { ok: status < 400, status, statusText: 'Too Many Requests', json: async () => body, text: async () => text } as any;
+      }
+      return originalFetch(url, {});
+    });
+    return () => (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+  }
+
+  it('carries the Brain 429 refusal contract on the failed result', async () => {
+    const REFUSAL = {
+      error: 'SPEND_LIMIT_REACHED',
+      userId: 'usr_owner',
+      period: 'month',
+      limit: 25,
+      spent: 25.03,
+      periodEnd: '2026-12-01T00:00:00.000Z',
+    };
+    const restore = mockBrain(429, REFUSAL);
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toEqual(REFUSAL);
+      expect(result.error).toContain('spending limit');
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not fabricate a refusal from a malformed 429 body', async () => {
+    const restore = mockBrain(429, { error: 'SPEND_LIMIT_REACHED' });
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.error).toContain('Brain returned 429');
+    } finally {
+      restore();
+    }
+  });
+
+  it('leaves non-429 brain failures untouched', async () => {
+    const restore = mockBrain(503, { error: 'provider down' });
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.error).toContain('Brain returned 503');
+    } finally {
+      restore();
+    }
+  });
+});
