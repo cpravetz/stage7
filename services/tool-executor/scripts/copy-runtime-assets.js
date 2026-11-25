@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
-const assets = ['adk/shared/stage7-runtime.js'];
+const assets = ['adk/shared/stage7-runtime.js', 'adk/shared/stage7-auth.js'];
 
 for (const asset of assets) {
   const src = path.join(root, 'src', asset);

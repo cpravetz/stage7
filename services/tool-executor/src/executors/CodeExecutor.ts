@@ -264,6 +264,27 @@ urllib.request.urlopen = __stage7_mock_urlopen
 `;
 }
 
+/**
+ * The verbatim source of the sandbox auth module.
+ *
+ * `src/adk/shared/stage7-auth.js` is the single source of truth for the
+ * `__resolveAuth` auth-to-header logic; reading it here (the way the
+ * stage7-runtime.js copy works, with copy-runtime-assets.js placing it in
+ * dist/) keeps the generated prelude byte-identical to the real module instead
+ * of maintaining a second, hand-written string copy in this file. Empty when
+ * the module is missing — callers must fail the run rather than generate a
+ * script whose `__resolveAuth` is undefined.
+ */
+function readAuthPreludeSource(): string {
+  try {
+    const source = fs.readFileSync(path.resolve(__dirname, '../adk/shared/stage7-auth.js'), 'utf8');
+    if (source.trim()) return source;
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'stage7-auth.js unreadable; code tools cannot resolve auth');
+  }
+  return '';
+}
+
 export class CodeExecutor {
   private static readonly MAX_TIMEOUT_MS = 300000; // 5 minutes max
   private static readonly DEFAULT_TIMEOUT_MS = 30000;
@@ -370,6 +391,19 @@ export class CodeExecutor {
     const sandboxDir = fs.mkdtempSync('/tmp/js_sandbox_');
     const scriptPath = `${sandboxDir}/main.js`;
 
+    // The prelude's auth logic is read verbatim from the real module file — the
+    // same pattern as the stage7-runtime.js copy below. Generated tools call
+    // `__resolveAuth`, so a missing module fails the run instead of silently
+    // producing a script where it is undefined.
+    const authPrelude = readAuthPreludeSource();
+    if (!authPrelude) {
+      return {
+        success: false,
+        error: 'Sandbox auth module stage7-auth.js is missing; code tools rely on its __resolveAuth. Rebuild tool-executor so copy-runtime-assets.js restores it.',
+        durationMs: Date.now() - startTime,
+      };
+    }
+
     // Copy stage7-runtime into sandboxDir so skills can require('stage7-runtime')
     try {
       const runtimeJsSrc = path.resolve(__dirname, '../adk/shared/stage7-runtime.js');
@@ -409,55 +443,9 @@ const code = options.code;
     'function __getCredentialSource(logicalKey) {\n' +
     '  return __credential_sources.find(s => s.logicalKey === logicalKey);\n' +
     '}\n' +
-    'const __resolveAuth = async (auth) => {\n' +
-    '  const type = (auth && auth.type) || \'none\';\n' +
-    '  const headers = {};\n' +
-    '  const resolveVal = async (val) => {\n' +
-    '    if (val == null) return \'\';\n' +
-    '    if (typeof val === \'object\') {\n' +
-    '      if (val.vaultSecretId) {\n' +
-    '        try {\n' +
-    '          const r = await fetch((process.env.VAULT_URL || \'http://vault:4000\') + \'/api/vault/secrets/\' + val.vaultSecretId + \'/decrypt\', {\n' +
-    '            headers: { \'X-Tenant-Id\': \'system\' },\n' +
-    '          });\n' +
-    '          if (r.ok) { const d = await r.json(); return d.plaintext || \'\'; }\n' +
-    '        } catch {}\n' +
-    '        return \'\';\n' +
-    '      }\n' +
-    '      if (val.envVar) return process.env[val.envVar] || \'\';\n' +
-    '      if (val.configKey) return process.env[val.configKey] || \'\';\n' +
-    '      return \'\';\n' +
-    '    }\n' +
-    '    if (typeof val === \'string\') {\n' +
-    '      const m = val.match(/^\\$\\{(\\w+)\\}$/);\n' +
-    '      return m ? (process.env[m[1]] || \'\') : val;\n' +
-    '    }\n' +
-    '    return \'\';\n' +
-    '  };\n' +
-    '  switch (type) {\n' +
-    '    case \'bearer\': {\n' +
-    '      const t = await resolveVal(auth.token != null ? auth.token : auth.accessToken);\n' +
-    '      if (t) headers[\'Authorization\'] = \'Bearer \' + t;\n' +
-    '      break;\n' +
-    '    }\n' +
-    '    case \'basic\': {\n' +
-    '      const u = await resolveVal(auth.username);\n' +
-    '      const p = await resolveVal(auth.password);\n' +
-    '      if (u || p) headers[\'Authorization\'] = \'Basic \' + Buffer.from(u + \':\' + p).toString(\'base64\');\n' +
-    '      break;\n' +
-    '    }\n' +
-    '    case \'api_key\': {\n' +
-    '      const hn = auth.header || \'X-API-Key\';\n' +
-    '      const v = await resolveVal(auth.value != null ? auth.value : auth.apiKey);\n' +
-    '      if (v) headers[hn] = v;\n' +
-    '      break;\n' +
-    '    }\n' +
-    '    case \'custom\':\n' +
-    '      if (auth.headers) for (const [k, v] of Object.entries(auth.headers)) if (v != null) headers[k] = String(v);\n' +
-    '      break;\n' +
-    '  }\n' +
-    '  return { headers, type };\n' +
-    '};\n' +
+    // Inlined verbatim from src/adk/shared/stage7-auth.js — defines __resolveAuth
+    // (and __resolveAuthValue). Never hand-maintain this logic here.
+    authPrelude.replace(/\n$/, '') + '\n' +
     (options.httpMocks?.length ? javascriptHttpMockPrelude(options.httpMocks) : '') +
     code;
   const wrapped = prelude;
@@ -692,7 +680,8 @@ async def __resolve_auth(auth):
         return str(val)
     
     if type_ == 'bearer':
-        t = await resolve_val(auth.get('token') or auth.get('accessToken'))
+        tok = auth.get('token')
+        t = await resolve_val(tok if tok is not None else auth.get('accessToken'))
         if t:
             headers['Authorization'] = 'Bearer ' + t
     elif type_ == 'basic':
@@ -703,7 +692,8 @@ async def __resolve_auth(auth):
             headers['Authorization'] = 'Basic ' + base64.b64encode(raw.encode()).decode()
     elif type_ == 'api_key':
         hn = auth.get('header') or 'X-API-Key'
-        v = await resolve_val(auth.get('value') or auth.get('apiKey'))
+        raw_value = auth.get('value')
+        v = await resolve_val(raw_value if raw_value is not None else auth.get('apiKey'))
         if v:
             headers[hn] = v
     elif type_ == 'custom':
