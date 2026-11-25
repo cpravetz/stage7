@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
@@ -65,7 +64,7 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
       const NL = '\n';
       const SAFETY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.';
 
-      function fail(status, message, title) {
+      function fail(status: string, message: string, title: string) {
         return {
           success: false,
           status: status,
@@ -83,7 +82,7 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
       const accessThreshold = Number(input.accessWaitThresholdMinutes ?? 30);
       const billingThreshold = Number(input.billingDelayThresholdDays ?? 7);
 
-      const metrics = rows.map((row, index) => {
+      const metrics = rows.map((row: any, index: number) => {
         const item = row && typeof row === 'object' ? row : {};
         const scheduled = Math.max(0, Number(item.scheduled ?? item.scheduledCount ?? 0));
         const completed = Math.max(0, Number(item.completed ?? 0));
@@ -96,18 +95,18 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
         return { rowId: item.id || ('row_' + (index + 1)), facility: item.facility || 'unspecified', scheduled, completed, noShows, utilization, noShowRate, avgWaitMinutes: avgWait, billingDelayDays: billingDelay, bottleneck };
       });
 
-      const sum = (values) => values.reduce((total, value) => total + value, 0);
+      const sum = (values: number[]) => values.reduce((total: number, value: number) => total + value, 0);
       const recommendations = [];
-      if (metrics.some((item) => item.bottleneck === 'access')) recommendations.push('Review access capacity and wait-time handoffs.');
-      if (metrics.some((item) => item.bottleneck === 'billing')) recommendations.push('Review billing-cycle delays and follow-up ownership.');
-      if (metrics.some((item) => item.bottleneck === 'retention')) recommendations.push('Review no-show outreach and scheduling flexibility.');
+      if (metrics.some((item: any) => item.bottleneck === 'access')) recommendations.push('Review access capacity and wait-time handoffs.');
+      if (metrics.some((item: any) => item.bottleneck === 'billing')) recommendations.push('Review billing-cycle delays and follow-up ownership.');
+      if (metrics.some((item: any) => item.bottleneck === 'retention')) recommendations.push('Review no-show outreach and scheduling flexibility.');
 
       // ---- Report -----------------------------------------------------------------
       const lines = [];
       lines.push('Summary: clinical practice workflow review of ' + rows.length + ' record(s).');
       lines.push('');
       lines.push('Per-location metrics:');
-      metrics.forEach(function (m) {
+      metrics.forEach(function (m: any) {
         lines.push('  ' + m.facility + ' (' + m.rowId + ')');
         lines.push('    Scheduled: ' + m.scheduled + ', Completed: ' + m.completed + ', No-shows: ' + m.noShows);
         lines.push('    Utilization: ' + m.utilization + '%, No-show rate: ' + m.noShowRate + '%');
@@ -116,18 +115,18 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
       });
       lines.push('');
       lines.push('Set summary:');
-      lines.push('  Total scheduled: ' + sum(metrics.map((item) => item.scheduled)));
-      lines.push('  Total completed: ' + sum(metrics.map((item) => item.completed)));
-      lines.push('  Total no-shows: ' + sum(metrics.map((item) => item.noShows)));
-      lines.push('  avg utilization: ' + (metrics.length ? Math.round(sum(metrics.map((item) => item.utilization)) / metrics.length * 100) / 100 : 0) + '%');
-      lines.push('  avg wait: ' + (metrics.length ? Math.round(sum(metrics.map((item) => item.avgWaitMinutes)) / metrics.length * 100) / 100 : 0) + ' min');
-      lines.push('  avg billing delay: ' + (metrics.length ? Math.round(sum(metrics.map((item) => item.billingDelayDays)) / metrics.length * 100) / 100 : 0) + ' days');
-      const bottlenecks = metrics.filter((item) => item.bottleneck !== 'none identified').map((item) => item.bottleneck);
+      lines.push('  Total scheduled: ' + sum(metrics.map((item: any) => item.scheduled)));
+      lines.push('  Total completed: ' + sum(metrics.map((item: any) => item.completed)));
+      lines.push('  Total no-shows: ' + sum(metrics.map((item: any) => item.noShows)));
+      lines.push('  avg utilization: ' + (metrics.length ? Math.round(sum(metrics.map((item: any) => item.utilization)) / metrics.length * 100) / 100 : 0) + '%');
+      lines.push('  avg wait: ' + (metrics.length ? Math.round(sum(metrics.map((item: any) => item.avgWaitMinutes)) / metrics.length * 100) / 100 : 0) + ' min');
+      lines.push('  avg billing delay: ' + (metrics.length ? Math.round(sum(metrics.map((item: any) => item.billingDelayDays)) / metrics.length * 100) / 100 : 0) + ' days');
+      const bottlenecks = metrics.filter((item: any) => item.bottleneck !== 'none identified').map((item: any) => item.bottleneck);
       lines.push('  Bottlenecks identified: ' + (bottlenecks.length ? bottlenecks.join(', ') : 'none'));
       lines.push('');
       if (recommendations.length > 0) {
         lines.push('Recommendations:');
-        recommendations.forEach(function (r) { lines.push('  - ' + r); });
+        recommendations.forEach(function (r: string) { lines.push('  - ' + r); });
       } else {
         lines.push('Recommendations: none — no thresholds exceeded.');
       }
@@ -141,13 +140,13 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
     data: {
       metrics,
       summary: {
-        totalScheduled: sum(metrics.map((item) => item.scheduled)),
-        totalCompleted: sum(metrics.map((item) => item.completed)),
-        totalNoShows: sum(metrics.map((item) => item.noShows)),
-        avgUtilization: metrics.length ? Math.round(sum(metrics.map((item) => item.utilization)) / metrics.length * 100) / 100 : 0,
-        avgNoShowRate: metrics.length ? Math.round(sum(metrics.map((item) => item.noShowRate)) / metrics.length * 100) / 100 : 0,
-        avgWaitMinutes: metrics.length ? Math.round(sum(metrics.map((item) => item.avgWaitMinutes)) / metrics.length * 100) / 100 : 0,
-        avgBillingDelayDays: metrics.length ? Math.round(sum(metrics.map((item) => item.billingDelayDays)) / metrics.length * 100) / 100 : 0,
+        totalScheduled: sum(metrics.map((item: any) => item.scheduled)),
+        totalCompleted: sum(metrics.map((item: any) => item.completed)),
+        totalNoShows: sum(metrics.map((item: any) => item.noShows)),
+        avgUtilization: metrics.length ? Math.round(sum(metrics.map((item: any) => item.utilization)) / metrics.length * 100) / 100 : 0,
+        avgNoShowRate: metrics.length ? Math.round(sum(metrics.map((item: any) => item.noShowRate)) / metrics.length * 100) / 100 : 0,
+        avgWaitMinutes: metrics.length ? Math.round(sum(metrics.map((item: any) => item.avgWaitMinutes)) / metrics.length * 100) / 100 : 0,
+        avgBillingDelayDays: metrics.length ? Math.round(sum(metrics.map((item: any) => item.billingDelayDays)) / metrics.length * 100) / 100 : 0,
         bottlenecks: bottlenecks,
       },
       recommendations,
