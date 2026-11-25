@@ -16,6 +16,14 @@ export interface AgentLearning {
   confidence?: number
 }
 
+/** Brain routing criteria accepted by `POST /api/brain/complete`. */
+export const OPTIMIZE_FOR_VALUES = ['cost', 'speed', 'accuracy', 'creativity'] as const
+export type OptimizeFor = (typeof OPTIMIZE_FOR_VALUES)[number]
+
+export function isOptimizeFor(value: unknown): value is OptimizeFor {
+  return typeof value === 'string' && (OPTIMIZE_FOR_VALUES as readonly string[]).includes(value)
+}
+
 export interface TaskSpec {
   /** The text shown to the Brain as the task. */
   prompt: string
@@ -31,8 +39,8 @@ export interface TaskSpec {
   requiresExternalAction: boolean
   agentLearnings: AgentLearning[]
   routingSessionId?: string
-  /** Per-task Brain routing criterion lifted from `BRAIN_OPTIMIZE_FOR_CONTEXT_KEY`. */
-  optimizeFor?: string
+  /** Per-task Brain routing criterion lifted from `BRAIN_OPTIMIZE_FOR_CONTEXT_KEY`, validated. */
+  optimizeFor?: OptimizeFor
 }
 
 export function parseExpectedArtifacts(value: unknown): string[] {
@@ -126,7 +134,6 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
   }
   const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
   const optimizeFor = taskContext[BRAIN_OPTIMIZE_FOR_CONTEXT_KEY]
-  const optimizeForValues = ['cost', 'speed', 'accuracy', 'creativity']
   return {
     prompt,
     missionGoal: typeof taskContext.missionGoal === 'string' && taskContext.missionGoal.trim()
@@ -141,9 +148,7 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
     routingSessionId: typeof routingSessionId === 'string' && routingSessionId.trim()
       ? routingSessionId.trim()
       : undefined,
-    optimizeFor: typeof optimizeFor === 'string' && (optimizeForValues as readonly string[]).includes(optimizeFor)
-      ? optimizeFor
-      : undefined,
+    optimizeFor: isOptimizeFor(optimizeFor) ? optimizeFor : undefined,
   }
 }
 
