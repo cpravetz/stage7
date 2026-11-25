@@ -20,6 +20,15 @@ import {
 } from './knowledgeBudget';
 import type { AssistantLoader } from './AssistantLoader';
 
+/** Parses a response body as JSON; anything unparseable is not a refusal. */
+function parseJsonBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 export class AssistantExecutor {
   private toolExecutorUrl: string;
 
@@ -245,10 +254,13 @@ export class AssistantExecutor {
           // Preserve the Brain's spend-limit refusal contract so the caller
           // can surface the limit-reached notice instead of a generic failure
           // string (OD-5 review finding B). A malformed body is not a refusal.
-          const refusal = parseSpendLimitRefusalPayload(await res.json().catch(() => undefined));
+          // Read the body once: a buffered Response can be consumed a single time.
+          const text = await res.text();
+          const refusal = parseSpendLimitRefusalPayload(parseJsonBody(text));
           if (refusal) {
             return { ok: false, error: `Brain returned ${res.status}: LLM spending limit reached`, spendRefusal: refusal };
           }
+          return { ok: false, error: `Brain returned ${res.status}: ${text.slice(0, 200)}` };
         }
         const text = await res.text();
         return { ok: false, error: `Brain returned ${res.status}: ${text.slice(0, 200)}` };
@@ -329,6 +341,32 @@ export class AssistantExecutor {
               text: `CREDENTIAL_REQUIRED: ${data.error || 'Missing credentials'}\nRequired: ${data.request?.missingCredentials?.map((m: any) => m.label || m.key).join(', ') || 'unknown'}`,
             },
           ],
+          isError: true,
+        };
+      }
+
+      if (response.status === 429) {
+        // Preserve the spend-limit refusal contract the tool-executor now
+        // forwards from the Brain (OD-5 finding B): surface it as spendRefusal
+        // so the tools/execute route can answer 429 and the frontend's
+        // limit-reached notice fires. A malformed body is not a refusal.
+        // Read the body once: a buffered Response can be consumed a single time.
+        const text = await response.text();
+        const refusal = parseSpendLimitRefusalPayload(parseJsonBody(text));
+        if (refusal) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `LLM spending limit reached: ${refusal.spent} of ${refusal.limit} USD spent this ${refusal.period}`,
+              },
+            ],
+            isError: true,
+            spendRefusal: refusal,
+          };
+        }
+        return {
+          content: [{ type: 'text', text: `Tool executor returned ${response.status}: ${text.slice(0, 200)}` }],
           isError: true,
         };
       }

@@ -255,6 +255,13 @@ router.post('/assistants/:id/tools/execute', asyncHandler(async (req, res) => {
     throw NextGenError.badRequest('Missing tool name');
   }
   const result = await executor.executeToolCall({ name, arguments: args }, req.params.id as string, workspaceId);
+  if (result.spendRefusal) {
+    // The tool's LLM work was refused at the user's spending cap; keeping the
+    // 429 contract body lets the frontend's existing handler surface the
+    // limit-reached notice on refused tool runs (OD-5 review finding B).
+    res.status(429).json(result.spendRefusal);
+    return;
+  }
   res.json(result);
 }));
 
