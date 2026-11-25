@@ -14,7 +14,6 @@
     "express-rate-limit": "^8.7.0",
     "ioredis": "^5.3.2",
     "nodemailer": "^10.0.9",
-    "openai": "^6.49.0",
     "pino": "^8.16.0",
     "zod": "^4.6.6"
   },
