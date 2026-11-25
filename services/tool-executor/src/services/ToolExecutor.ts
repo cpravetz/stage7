@@ -17,6 +17,7 @@ import { createInMemoryEventLog, type EventLog } from './EventLog';
 import { createExecutionRecordStore, type ExecutionRecordStore } from './ExecutionRecordStore';
 import { ToolConfigResolver, redactSecrets } from './ToolConfig';
 import { ToolDispatcher } from './ToolDispatcher';
+import { reconciliationProvider, type ReconciliationProvider } from './ExecutorBindings';
 import { ToolEventDispatcher } from './ToolEventDispatcher';
 
 const MAX_NESTING_DEPTH = 4;
@@ -416,17 +417,8 @@ export class ToolExecutor {
     });
   }
 
-  private providerCapability(tool: Tool): 'email' | 'webhook' | 'api_client' | 'vendor' | 'unknown' {
-    const key = (tool.manifest as any)?.executor;
-    if (key === 'email') return 'email';
-    if (key === 'webhook') return 'webhook';
-    if (key === 'api_client') return 'api_client';
-    if (key === 'vendor') return 'vendor';
-    const name = (tool.name || '').toLowerCase();
-    if (name.includes('email')) return 'email';
-    if (name.includes('webhook')) return 'webhook';
-    if (name.includes('api')) return 'api_client';
-    return 'unknown';
+  private providerCapability(tool: Tool): ReconciliationProvider {
+    return reconciliationProvider(tool.manifest);
   }
 
   private async reconcileExternalExecution(tool: Tool, input: Record<string, unknown>, idempotencyKey: string, prior?: ExecutionRecord | null): Promise<ExecutionReconciliation | null> {
