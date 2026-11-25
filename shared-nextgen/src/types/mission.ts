@@ -98,6 +98,15 @@ export const PlanSchema = z.object({
   phases: z.array(PhaseSchema),
 });
 
+/**
+ * Per-user spend attribution (OD-5): missions record the creating user so
+ * LLM spend from mission execution can be keyed to them in the Brain's
+ * spend ledger when no explicit userId is sent.
+ */
+export interface MissionAttribution {
+  createdBy?: string;
+}
+
 export type RequiredActionBinding = z.infer<typeof RequiredActionBindingSchema>;
 export type RequiredAction = z.infer<typeof RequiredActionSchema>;
 export type ActionReceiptBinding = z.infer<typeof ActionReceiptBindingSchema>;

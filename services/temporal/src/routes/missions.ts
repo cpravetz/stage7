@@ -51,6 +51,7 @@ router.post(
       prompt,
       tenantId,
       assistantId,
+      createdBy,
       contextChunks,
       metadata,
       cronSchedule: requestedCronSchedule,
@@ -76,6 +77,7 @@ router.post(
       missionId,
       tenantId: tenantId || 'tenant-1',
       assistantId: assistantId || '',
+      createdBy: typeof createdBy === 'string' && createdBy.trim() ? createdBy.trim() : undefined,
       prompt,
       contextChunks,
       metadata,
@@ -170,6 +172,7 @@ router.post(
       missionId: missionId, // Keep the same mission ID
       tenantId: original.input?.tenantId || '',
       assistantId: original.input?.assistantId || '',
+      createdBy: original.input?.createdBy,
       prompt: originalPrompt,
       contextChunks: original.input?.contextChunks,
       retryGuidance: guidance,

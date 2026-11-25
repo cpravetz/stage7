@@ -69,6 +69,11 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   if (!definition.tenantId) {
     definition.tenantId = 'tenant-1';
   }
+  // Spend attribution (OD-5): the creator's id, taken from the verified
+  // service token when the gateway forwarded one, else from the body.
+  const tokenUser = (req as { serviceTokenPayload?: { sub?: unknown } }).serviceTokenPayload?.sub;
+  const ownerId = definition.ownerId ?? (typeof tokenUser === 'string' && tokenUser.trim() ? tokenUser : undefined);
+  definition.ownerId = typeof ownerId === 'string' && ownerId.trim() ? ownerId.trim() : undefined;
   if (!definition.createdAt) {
     definition.createdAt = new Date();
   }

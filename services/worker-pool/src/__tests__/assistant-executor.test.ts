@@ -283,6 +283,91 @@ describe('AssistantExecutor', () => {
     });
   });
 
+  describe('brain spend attribution', () => {
+    it('sends the assistant owner as userId on brain completions', async () => {
+      const definition: AssistantDefinition = {
+        id: 'assistant-owner',
+        tenantId: 'tenant-1',
+        ownerId: 'usr_owner',
+        name: 'Owned Assistant',
+        description: 'An owned assistant',
+        systemPrompt: 'You are a helpful assistant.',
+        tools: [],
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+      const brainBodies: Array<Record<string, unknown>> = [];
+      try {
+        (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+          const urlStr = String(url);
+          if (urlStr.includes('/api/brain/embeddings')) {
+            return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+          }
+          if (urlStr.includes('/api/brain/complete')) {
+            brainBodies.push(JSON.parse(init.body));
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ content: 'Final answer.', model: 'gpt-4o-mini' }),
+              text: async () => '',
+            } as any;
+          }
+          return originalFetch(url, init);
+        });
+
+        const result = await executor.execute(definition, 'Hello');
+        expect(result.success).toBe(true);
+        expect(brainBodies.length).toBeGreaterThan(0);
+        expect(brainBodies[0].userId).toBe('usr_owner');
+      } finally {
+        (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+      }
+    });
+
+    it('omits userId when the assistant has no owner, leaving spend to the system bucket', async () => {
+      const definition: AssistantDefinition = {
+        id: 'assistant-orphan',
+        tenantId: 'tenant-1',
+        name: 'Ownerless Assistant',
+        description: 'No owner recorded',
+        systemPrompt: 'You are a helpful assistant.',
+        tools: [],
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+      const brainBodies: Array<Record<string, unknown>> = [];
+      try {
+        (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+          const urlStr = String(url);
+          if (urlStr.includes('/api/brain/embeddings')) {
+            return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+          }
+          if (urlStr.includes('/api/brain/complete')) {
+            brainBodies.push(JSON.parse(init.body));
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ content: 'Final answer.', model: 'gpt-4o-mini' }),
+              text: async () => '',
+            } as any;
+          }
+          return originalFetch(url, init);
+        });
+
+        const result = await executor.execute(definition, 'Hello');
+        expect(result.success).toBe(true);
+        expect(brainBodies.length).toBeGreaterThan(0);
+        expect(brainBodies[0].userId).toBeUndefined();
+      } finally {
+        (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+      }
+    });
+  });
+
   describe('executeToolCall', () => {
     it('should return result for known tools', async () => {
       const toolCall: MCPToolCall = {
