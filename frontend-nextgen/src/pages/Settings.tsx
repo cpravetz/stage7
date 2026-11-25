@@ -6,13 +6,6 @@ type SettingsState = {
   llm: {
     freeModelsOnly?: boolean;
   };
-  brain: {
-    providerTimeoutMs?: number;
-    providerAttemptTimeoutMs?: number;
-    completionDeadlineMs?: number;
-    circuitThreshold?: number;
-    circuitCooldownMs?: number;
-  };
   mission: {
     approvalTimeoutMs?: number;
     approvalPollIntervalMs?: number;
@@ -21,30 +14,19 @@ type SettingsState = {
 
 const DEFAULT_SETTINGS: SettingsState = {
   llm: { freeModelsOnly: false },
-  brain: {},
   mission: {},
 };
 
-// The Brain settings document id and the fields it recognizes. Blank inputs
-// mean "no override": the environment variable (or built-in default) applies.
-const BRAIN_DOC_ID = 'brain/settings/llm-config';
-const BRAIN_KNOBS = [
-  { key: 'providerTimeoutMs', label: 'Provider Fetch Timeout (ms)', placeholder: 'default 300000', max: 600000, envVar: 'BRAIN_PROVIDER_TIMEOUT_MS' },
-  { key: 'providerAttemptTimeoutMs', label: 'Provider Attempt Ceiling (ms)', placeholder: 'default 310000', max: 1800000, envVar: 'BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS' },
-  { key: 'completionDeadlineMs', label: 'Completion Deadline (ms)', placeholder: 'derived from attempt ceiling', max: 7200000, envVar: 'BRAIN_COMPLETION_DEADLINE_MS' },
-  { key: 'circuitThreshold', label: 'Circuit Breaker Threshold (failures)', placeholder: 'default 8', max: 1000, envVar: 'BRAIN_CIRCUIT_THRESHOLD' },
-  { key: 'circuitCooldownMs', label: 'Circuit Breaker Cooldown (ms)', placeholder: 'default 60000', max: 3600000, envVar: 'BRAIN_CIRCUIT_COOLDOWN_MS' },
-] as const;
-
 // The mission approval settings document id and the fields it recognizes.
-// Same contract as the Brain knobs: a blank input means "no override".
+// A blank input means "no override": the environment variable (or built-in
+// default) applies.
 const MISSION_DOC_ID = 'mission/settings/approval-config';
 const MISSION_KNOBS = [
   { key: 'approvalTimeoutMs', label: 'Approval Window (ms)', placeholder: 'default 86400000 (24h)', max: 604800000, envVar: 'APPROVAL_TIMEOUT_MS' },
   { key: 'approvalPollIntervalMs', label: 'Approval Poll Interval (ms)', placeholder: 'default 3000', max: 3600000, envVar: 'APPROVAL_POLL_INTERVAL_MS' },
 ] as const;
 
-function parseBrainKnob(value: unknown): number | undefined {
+function parseKnob(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
@@ -79,19 +61,10 @@ const Settings = () => {
             freeModelsOnly: typeof doc.data.freeModelsOnly === 'boolean' ? (doc.data.freeModelsOnly as boolean) : DEFAULT_SETTINGS.llm.freeModelsOnly,
           };
         }
-        if (doc.id === BRAIN_DOC_ID && doc.data) {
-          next.brain = {
-            providerTimeoutMs: parseBrainKnob(doc.data.providerTimeoutMs),
-            providerAttemptTimeoutMs: parseBrainKnob(doc.data.providerAttemptTimeoutMs),
-            completionDeadlineMs: parseBrainKnob(doc.data.completionDeadlineMs),
-            circuitThreshold: parseBrainKnob(doc.data.circuitThreshold),
-            circuitCooldownMs: parseBrainKnob(doc.data.circuitCooldownMs),
-          };
-        }
         if (doc.id === MISSION_DOC_ID && doc.data) {
           next.mission = {
-            approvalTimeoutMs: parseBrainKnob(doc.data.approvalTimeoutMs),
-            approvalPollIntervalMs: parseBrainKnob(doc.data.approvalPollIntervalMs),
+            approvalTimeoutMs: parseKnob(doc.data.approvalTimeoutMs),
+            approvalPollIntervalMs: parseKnob(doc.data.approvalPollIntervalMs),
           };
         }
       }
@@ -129,15 +102,7 @@ const Settings = () => {
     });
   };
 
-  // Blank or unchanged-empty fields are omitted so an operator clearing an
-  // input removes the override instead of saving an invalid value.
-  const [brainDraft, setBrainDraft] = useState<Record<string, string>>({});
-
-  const updateBrain = (key: string, value: string) => {
-    setBrainDraft((prev) => ({ ...prev, [key]: value }));
-  };
-
-  // Numeric-knob save shared by the Brain and mission cards. Blank or invalid
+  // Numeric-knob save shared by the settings cards. Blank or invalid
   // fields are omitted so an operator clearing an input removes the override
   // instead of saving an invalid value (document replace semantics).
   const saveKnobDocument = (
@@ -155,10 +120,6 @@ const Settings = () => {
       }
     }
     saveDocument(docId, data);
-  };
-
-  const handleSaveBrain = () => {
-    saveKnobDocument(BRAIN_DOC_ID, BRAIN_KNOBS, brainDraft);
   };
 
   const [missionDraft, setMissionDraft] = useState<Record<string, string>>({});
@@ -235,34 +196,6 @@ const Settings = () => {
             <div style={{ marginTop: 12 }}>
               <button type="submit" disabled={saving === 'llm-config'}>
                 {saving === 'llm-config' ? 'Saving...' : 'Save Preferences'}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div className="card">
-          <h3>Brain Runtime</h3>
-          <p style={{ color: '#94a3b8', fontSize: 13 }}>
-            Timeouts and circuit-breaker settings for model calls. Values here override the
-            environment variables at runtime; leave a field blank to keep the environment value.
-          </p>
-          <form className="form" onSubmit={(e) => { e.preventDefault(); handleSaveBrain(); }}>
-            {BRAIN_KNOBS.map((knob) => (
-              <label key={knob.key} style={{ ...labelStyle, marginTop: 8 }}>
-                <span style={labelTextStyle}>{knob.label}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={knob.max}
-                  placeholder={`${knob.placeholder} (${knob.envVar})`}
-                  value={brainDraft[knob.key] ?? (settings.brain[knob.key] !== undefined ? String(settings.brain[knob.key]) : '')}
-                  onChange={(e) => updateBrain(knob.key, e.target.value)}
-                />
-              </label>
-            ))}
-            <div style={{ marginTop: 12 }}>
-              <button type="submit" disabled={saving === BRAIN_DOC_ID}>
-                {saving === BRAIN_DOC_ID ? 'Saving...' : 'Save Brain Settings'}
               </button>
             </div>
           </form>

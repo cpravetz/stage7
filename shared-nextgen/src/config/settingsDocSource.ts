@@ -1,7 +1,7 @@
 /**
  * Generic TTL-cached reader for a settings document stored in the artifacts
- * documents API — the machinery behind the Tier-1 Brain knobs
- * (`brainSettings.ts`) and the mission approval settings (`missionSettings.ts`).
+ * documents API — the machinery behind the mission approval settings
+ * (`missionSettings.ts`).
  *
  * Semantics (shared by every consumer):
  * - A missing (404) or unreachable document keeps the last known values, so an

@@ -12,9 +12,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError, httpRequest, interServiceTimeoutMs, publishResolvedBrainSettings, resolveBrainSettings } from '@stage7-nextgen/shared';
-import type { BrainSettings } from '@stage7-nextgen/shared';
-import { createBrainSettingsSource } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
 
@@ -140,10 +138,15 @@ function modelRoutingKey(model: Pick<ModelDefinition, 'id' | 'provider'>): strin
   return `${model.provider}:${model.id}`;
 }
 
-async function withProviderTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+function providerAttemptTimeoutMs(): number {
+  const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 310000;
+}
+
+async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(`Provider attempt timed out after ${timeoutMs}ms`)), timeoutMs);
+    timeout = setTimeout(() => reject(new Error(`Provider attempt timed out after ${providerAttemptTimeoutMs()}ms`)), providerAttemptTimeoutMs());
   });
   try {
     return await Promise.race([operation, deadline]);
@@ -168,10 +171,6 @@ export class BrainService {
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
   private embeddingProbe: { result: { provider: LLMProvider; modelId: string } | null; expiresAt: number } | null = null;
-  // Per-instance so each BrainService reads its own settings snapshot, like
-  // the previous llmSettingsCache; the document is shared, the cache is not.
-  private readonly settingsSource = createBrainSettingsSource();
-  private defaultCircuitSettings = { threshold: 8, cooldownMs: 60_000 };
 
   // Performance tracking - persisted to artifacts service
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
@@ -202,25 +201,14 @@ export class BrainService {
 
   constructor() {
     this.providers = buildProviderRegistry();
-    this.applyCircuitSettings(resolveBrainSettings(this.settingsSource.current().overrides, process.env));
+    const defaultThreshold = Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8;
+    const defaultCooldown = Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000; // 60s
     for (const p of this.providers) {
-      this.circuitBreakers.set(p.id, new CircuitBreaker(this.defaultCircuitSettings.threshold, this.defaultCircuitSettings.cooldownMs));
+      this.circuitBreakers.set(p.id, new CircuitBreaker(defaultThreshold, defaultCooldown));
     }
     this.modelCatalogReady = Promise.all(this.providers.map((provider) => this.registerProviderModels(provider)))
       .then(() => undefined);
     logger.info({ providers: this.providers.map((p) => p.id) }, 'Brain initialized with providers');
-  }
-
-  /**
-   * Applies circuit-breaker settings to existing breakers and to the defaults
-   * used for breakers created later, preserving failure history so operator
-   * changes take effect without resetting the breakers.
-   */
-  private applyCircuitSettings(settings: BrainSettings): void {
-    this.defaultCircuitSettings = { threshold: settings.circuitThreshold, cooldownMs: settings.circuitCooldownMs };
-    for (const breaker of this.circuitBreakers.values()) {
-      breaker.configure(settings.circuitThreshold, settings.circuitCooldownMs);
-    }
   }
 
   private async registerProviderModels(provider: LLMProvider): Promise<void> {
@@ -391,25 +379,18 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
        if (memoryNudge) systemPrompt = [memoryNudge, systemPrompt].filter(Boolean).join('\n\n');
      }
      const requestId = `brain_${startTime}_${crypto.randomBytes(6).toString('hex')}`;
-    // Resolve the Tier-1 knobs (settings doc first, then environment, then
-    // defaults) and publish them so sync hot paths without request context —
-    // e.g. the provider fetch timeout — pick up the same values. Breaker
-    // settings are applied here too, so operator changes land on the next
-    // completion without a restart.
-    await this.settingsSource.refresh();
-    const resolved = resolveBrainSettings(this.settingsSource.current().overrides, process.env);
-    publishResolvedBrainSettings(resolved);
-    this.applyCircuitSettings(resolved);
-     const attemptTimeout = resolved.providerAttemptTimeoutMs;
+     const attemptTimeout = providerAttemptTimeoutMs();
      // A candidate attempt cannot cost more than the lower of the two
      // ceilings: the provider fetch timeout fires before the attempt ceiling,
      // so the completion deadline has to be budgeted against that smaller
      // cost. Budgeting against the attempt ceiling alone made the deadline
      // fit fewer candidates than it was meant to, and the leftover budget
      // then expired between candidates instead of paying for another one.
-     const attemptCostMs = Math.min(attemptTimeout, resolved.providerTimeoutMs);
+     const attemptCostMs = Math.min(attemptTimeout, providerTimeoutMs());
      const maxRetries = 2;
-     const completionDeadline = startTime + resolved.completionDeadlineMs;
+     const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
+     const defaultDeadline = Math.max(attemptTimeout, Math.min(attemptTimeout * 3, 900000));
+     const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : defaultDeadline);
      const promptPreview = prompt.slice(0, 120);
 
      const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
@@ -566,7 +547,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const candidateStartTime = Date.now();
       logger.info({ provider: provider.id, model: candidate.model.id }, 'Dispatching completion (candidate)');
       lastCandidate = { id: candidate.model.id, provider: provider.id };
-      const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(this.defaultCircuitSettings.threshold, this.defaultCircuitSettings.cooldownMs);
+      const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
       if (breaker.getState() === 'open') {
         attemptedModelIds.add(routingKey);
         attemptedThisCall.add(routingKey);
@@ -599,7 +580,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         try {
           attemptedModelIds.add(routingKey);
           attemptedThisCall.add(routingKey);
-          const response: CompletionResponse = await withProviderTimeout(provider.complete(req), attemptTimeout);
+          const response: CompletionResponse = await withProviderTimeout(provider.complete(req));
           if (typeof response.content !== 'string' || response.content.trim().length === 0) {
             const emptyCompletionError = new Error('Provider returned an empty completion');
             lastErr = emptyCompletionError;
