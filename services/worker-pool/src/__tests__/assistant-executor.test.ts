@@ -1,6 +1,6 @@
 import { AssistantExecutor } from '../services/AssistantExecutor';
 import { KnowledgeService } from '../services/KnowledgeService';
-import { AssistantDefinition, MCPToolCall } from '@stage7-nextgen/shared';
+import { AssistantDefinition, MCPToolCall, logger } from '@stage7-nextgen/shared';
 import { validateCatalogIntegrity } from '../routes/assistants';
 import { createTestArtifactsService } from './testArtifactsService';
 
@@ -358,6 +358,136 @@ describe('AssistantExecutor', () => {
       expect(result.output).not.toContain('my-secret-password');
       expect(result.output).not.toContain('my-api-key-456');
       expect(result.output).toContain('hello');
+    });
+  });
+
+  describe('knowledge injection budgeting', () => {
+    beforeEach(() => {
+      (global.fetch as jest.Mock).mockImplementation(async (_url: any, init: any) => {
+        const body = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: `[Brain says] ${body.systemPrompt}`,
+            model: 'brain-selected-model',
+            provider: 'openrouter',
+            tokensUsed: 42,
+          }),
+          text: async () => '',
+        } as any;
+      });
+    });
+
+    afterEach(() => {
+      delete process.env.KNOWLEDGE_BUDGET_CHARS;
+    });
+
+    const definitionFor = (id: string, name: string): AssistantDefinition => ({
+      id,
+      tenantId: 'tenant-1',
+      name,
+      description: 'Knowledge budgeting test assistant',
+      systemPrompt: 'You are a helpful assistant.',
+      tools: [],
+      metadata: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    it('injects every entry at today\'s volumes (small set under budget)', async () => {
+      await knowledgeService.publish({
+        id: 'legal-1',
+        title: 'Contract Rules',
+        content: 'Always cite the governing law.',
+        assistantId: 'legal-advisor',
+        scope: 'assistant',
+        origin: 'authored',
+        tags: ['legal'],
+      });
+      await knowledgeService.publish({
+        id: 'shared-1',
+        title: 'Tone Guide',
+        content: 'Be concise and precise.',
+        assistantId: null,
+        scope: 'shared',
+        origin: 'authored',
+        tags: ['tone'],
+      });
+
+      const result = await executor.execute(definitionFor('legal-advisor', 'Legal Advisor'), 'Draft a summary');
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('### Contract Rules');
+      expect(result.output).toContain('Always cite the governing law.');
+      expect(result.output).toContain('### Tone Guide');
+      expect(result.output).toContain('Be concise and precise.');
+    });
+
+    it('ranks tag-matched entries first and drops entries beyond the budget', async () => {
+      const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+      process.env.KNOWLEDGE_BUDGET_CHARS = '900';
+      jest.useFakeTimers();
+      try {
+        await knowledgeService.publish({
+          id: 'kb-tag',
+          title: 'Legal Rules',
+          content: 'G'.repeat(300),
+          assistantId: 'legal-advisor',
+          scope: 'assistant',
+          origin: 'authored',
+          tags: ['legal'],
+        });
+        jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+        await knowledgeService.publish({
+          id: 'kb-older',
+          title: 'Older Notes',
+          content: 'R'.repeat(300),
+          assistantId: null,
+          scope: 'shared',
+          origin: 'acquired',
+        });
+        jest.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+        await knowledgeService.publish({
+          id: 'kb-newer',
+          title: 'Newer Notes',
+          content: 'O'.repeat(300),
+          assistantId: null,
+          scope: 'shared',
+          origin: 'acquired',
+        });
+
+        const result = await executor.execute(definitionFor('legal-advisor', 'Legal Advisor'), 'Draft a summary');
+
+        expect(result.success).toBe(true);
+        expect(result.output).toContain('### Legal Rules');
+        expect(result.output).toContain('### Newer Notes');
+        expect(result.output).not.toContain('### Older Notes');
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ droppedCount: 1, dropped: [expect.objectContaining({ id: 'kb-older' })] }),
+          'Knowledge injection budget: dropped low-ranked entries',
+        );
+      } finally {
+        warnSpy.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+
+    it('still injects the top entry when it alone exceeds the budget', async () => {
+      process.env.KNOWLEDGE_BUDGET_CHARS = '100';
+      await knowledgeService.publish({
+        id: 'kb-huge',
+        title: 'Huge Entry',
+        content: 'H'.repeat(500),
+        assistantId: null,
+        scope: 'shared',
+        origin: 'authored',
+      });
+
+      const result = await executor.execute(definitionFor('any-advisor', 'Any Advisor'), 'Draft a summary');
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('### Huge Entry');
     });
   });
 });

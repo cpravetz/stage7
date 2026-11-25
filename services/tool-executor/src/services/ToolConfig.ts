@@ -1,6 +1,8 @@
 import { Tool, ToolExecution, CredentialRequest, CredentialRequiredError, SchemaRecord } from '../types';
+import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import { credentialProvider, NamedCredentialSource } from './CredentialProvider';
+import { decryptVaultSecret, ensureVaultSecret } from '../utils/vaultClient';
 import { parseToolOutputJson } from '../utils/schemaValidator';
 
 export function schemaRecord(value: unknown): Record<string, unknown> | undefined {
@@ -49,30 +51,17 @@ export class ToolConfigResolver {
     try {
       const tenantId = (tool as any)?.tenantId || (input as any)?.tenantId || 'system';
       const secretName = ToolConfigResolver.vaultSecretName(credentialKey);
-      const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-      try {
-        const res = await fetch(
-          `${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(secretName)}/decrypt?tenantId=${encodeURIComponent(tenantId)}`,
-        );
-        if (res.ok) {
-          const data = (await res.json()) as { plaintext?: string };
-          if (data.plaintext && data.plaintext.trim().length > 0) {
-            return data.plaintext;
-          }
-        } else if (res.status === 404) {
-          // Try to ensure/create empty secret
-          try {
-            await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
-            });
-          } catch (err) {
-            logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to ensure secret for credential');
-          }
+      const result = await decryptVaultSecret({ byName: secretName }, tenantId);
+      if (result.ok && result.plaintext && result.plaintext.trim().length > 0) {
+        return result.plaintext;
+      }
+      if (result.status === 404) {
+        // Try to ensure/create empty secret
+        try {
+          await ensureVaultSecret(secretName, tenantId);
+        } catch (err) {
+          logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to ensure secret for credential');
         }
-      } catch (err) {
-        logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to resolve credential from vault');
       }
     } catch (err) {
       logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to resolve credential from vault');
@@ -237,10 +226,11 @@ export class ToolConfigResolver {
     for (const field of missing) {
       try {
         const secretName = ToolConfigResolver.vaultSecretName(field);
-        const ensureRes = await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
+        const ensureRes = await httpRequest(`${vaultUrl}/api/vault/secrets/ensure`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
+          timeoutMs: interServiceTimeoutMs(),
         });
         if (ensureRes.ok) {
           const data = (await ensureRes.json()) as { existed?: boolean; name?: string };

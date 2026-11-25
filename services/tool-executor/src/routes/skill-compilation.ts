@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { SkillCategory, TrajectoryAgentRole } from '@stage7-nextgen/shared';
 import { MissionToSkillCompiler } from '../adk/compilers/mission-skill-compiler';
 import { toolRegistry } from '../utils/sharedInstance';
-import asyncHandler from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 
 const roles: TrajectoryAgentRole[] = [
   'Coordinator',

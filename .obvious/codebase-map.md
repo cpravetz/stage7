@@ -7,7 +7,6 @@ Depth-2 overview. All buildable packages are npm workspaces except `frontend-nex
 | `services/gateway/` | Unified API gateway: routing, service registry, health, WebSocket gateway (`/ws`) | `src/routes/` (gateway, proxy, messaging, workers), `src/services/WebSocketGateway` |
 | `services/brain/` | LLM orchestration: structured sampling (Zod), semantic Redis cache, provider routing, circuit breakers | `src/providers/`, `src/routes/` |
 | `services/worker-pool/` | Assistant task execution, Redis-backed task queue, assistant loader; requires MongoDB | `src/routes/`, `src/__tests__/`, `assistants/` (canonical assistant definitions + knowledge) |
-| `services/mcp-runtime/` | MCP server runtime, tool registry, stdio/HTTP transport | `src/` |
 | `services/agent-runtime/` | Agent lifecycle, role assignment, collaboration | `src/services/` (PersistentAgentRuntime) |
 | `services/tool-executor/` | ADK tool/skill registry + execution, workflow/workspaces, trigger scheduler, plugin generation & sandboxing | `src/routes/`, `src/adk/`, `src/data/`, `scripts/copy-runtime-assets.js` |
 | `services/temporal/` | Durable mission execution (artifacts-backed workflow runner), recurring schedules, recovery scans | `src/` |

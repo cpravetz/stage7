@@ -19,6 +19,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { httpRequest } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import type { PersistedTriggerRecord } from '../adk/triggers';
 
@@ -84,7 +85,7 @@ function readLocal(target: string): PersistedTriggerRecord | null {
  * so callers fall back to local files rather than failing a scheduler tick
  * because persistence is briefly unavailable.
  */
-async function artifactsFetch(route: string, init?: RequestInit): Promise<any | null> {
+async function artifactsFetch(route: string, init?: { method?: string; body?: string }): Promise<any | null> {
   if (!ARTIFACTS_URL) return null;
   try {
     const res = await artifactsRequest(route, init);
@@ -97,18 +98,12 @@ async function artifactsFetch(route: string, init?: RequestInit): Promise<any | 
   }
 }
 
-async function artifactsRequest(route: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
-  try {
-    return await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      ...init,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+async function artifactsRequest(route: string, init?: { method?: string; body?: string }): Promise<Response> {
+  return await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
+    headers: { 'Content-Type': 'application/json' },
+    timeoutMs: REMOTE_TIMEOUT_MS,
+    ...init,
+  });
 }
 
 async function persistRemoteRecord(record: PersistedTriggerRecord): Promise<void> {

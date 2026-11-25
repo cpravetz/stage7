@@ -2,8 +2,7 @@ import { Router } from 'express';
 import { CompletionOptions } from '../services/BrainService';
 import { getBrainInstance } from '../utils/sharedInstance';
 import { z } from 'zod';
-import { asyncHandler } from '../utils/asyncHandler';
-import { BrainError } from '../utils/errors';
+import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
 import { logger } from '../utils/logger';
 import { EntityMemoryStore } from '../services/EntityMemoryStore';
@@ -88,7 +87,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     outputFormat?: string;
   };
   if (!prompt) {
-    throw BrainError.badRequest('Missing prompt');
+    throw NextGenError.badRequest('Missing prompt');
   }
   logger.info({ requestId, promptLength: prompt.length }, 'Brain completion request started');
   const mergedOptions: CompletionOptions = {
@@ -125,7 +124,7 @@ router.post('/validate', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
   const { schema, data } = req.body as { schema: unknown; data: unknown };
   if (!schema || !data) {
-    throw BrainError.badRequest('Missing schema or data');
+    throw NextGenError.badRequest('Missing schema or data');
   }
   const parsed = z.object({ schema: z.unknown(), data: z.unknown() }).parse({ schema, data });
   const sampler = new StructuredOutputSampler(parsed.schema as z.ZodSchema);
@@ -149,7 +148,7 @@ router.post('/route', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
   const { task, maxTokens, budget } = req.body as { task: string; maxTokens?: number; budget?: number };
   if (!task) {
-    throw BrainError.badRequest('Missing task description');
+    throw NextGenError.badRequest('Missing task description');
   }
   const all = brain.listAvailableModels();
   res.json({ candidates: all, count: all.length });
@@ -189,7 +188,7 @@ router.post('/complaint', asyncHandler(async (req: any, res: any) => {
     missionId?: string;
   };
   if (!requestId) {
-    throw BrainError.badRequest('Missing requestId');
+    throw NextGenError.badRequest('Missing requestId');
   }
   const recorded = await brain.recordComplaint(requestId);
   if (!recorded) {

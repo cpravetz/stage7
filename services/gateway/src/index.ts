@@ -14,7 +14,6 @@ const app: express.Application = express();
 const NEXTGEN_SERVICES: ServiceDefinition[] = [
   { id: 'brain', name: 'Brain / LLM Layer', baseUrl: 'http://brain:3100', healthPath: '/api/brain/health' },
   { id: 'workers', name: 'Worker Pool', baseUrl: 'http://worker-pool:3200', healthPath: '/api/workers/health' },
-  { id: 'mcp-runtime', name: 'MCP Runtime', baseUrl: 'http://mcp-runtime:3300', healthPath: '/api/mcp-runtime/health' },
   { id: 'agent-runtime', name: 'Agent Runtime', baseUrl: 'http://agent-runtime:3400', healthPath: '/api/agent-runtime/health' },
   { id: 'tool-executor', name: 'Tool Executor', baseUrl: 'http://tool-executor:3500', healthPath: '/api/tool-executor/health' },
   { id: 'temporal', name: 'Temporal Workflow Engine', baseUrl: 'http://temporal:4100', healthPath: '/api/temporal/health' },

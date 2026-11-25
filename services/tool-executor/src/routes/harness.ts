@@ -17,7 +17,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import asyncHandler from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { harnessEditService } from '../utils/sharedInstance';
 import type { AssistantHarness } from '@stage7-nextgen/shared';
 import type { HarnessEditCandidate, HarnessSkillFacts } from '../adk/harness-loop';

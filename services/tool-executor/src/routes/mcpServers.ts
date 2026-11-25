@@ -4,7 +4,7 @@ import path from 'path'
 import { z } from 'zod'
 import { MCPServerConfig } from '../services/MCPClient'
 import { ValidationError } from '../utils/errors'
-import asyncHandler from '../utils/asyncHandler'
+import { asyncHandler } from '@stage7-nextgen/shared'
 import logger from '../utils/logger'
 import { executor } from '../utils/sharedInstance'
 

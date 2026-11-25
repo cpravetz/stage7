@@ -10,7 +10,7 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
 } from '../types'
-import { BadRequestError, ConflictError } from '../utils/errors'
+import { NextGenError } from '@stage7-nextgen/shared'
 import {
   AgentExecutionCheckpoint,
   AgentExecutionResult,
@@ -137,41 +137,41 @@ export class AgentRuntime {
   }
 
   registerAgentForMission(missionId: string, definition: AgentDefinition): AgentDefinition {
-    if (!missionId.trim()) throw new BadRequestError('Mission ID is required to register a mission Agent')
+    if (!missionId.trim()) throw NextGenError.badRequest('Mission ID is required to register a mission Agent')
     if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
-      throw new BadRequestError('Mission Agent definition must be an object')
+      throw NextGenError.badRequest('Mission Agent definition must be an object')
     }
     if (typeof definition.tenantId !== 'string' || !definition.tenantId.trim()) {
-      throw new BadRequestError('Mission Agent definition requires a tenant ID')
+      throw NextGenError.badRequest('Mission Agent definition requires a tenant ID')
     }
     if (
       !Array.isArray(definition.tools)
       || !definition.tools.every((tool) => typeof tool === 'string' && tool.trim().length > 0)
     ) {
-      throw new BadRequestError('Mission Agent definition tools must be an array of non-empty tool IDs')
+      throw NextGenError.badRequest('Mission Agent definition tools must be an array of non-empty tool IDs')
     }
     if (
       definition.metadata !== undefined
       && (!definition.metadata || typeof definition.metadata !== 'object' || Array.isArray(definition.metadata))
     ) {
-      throw new BadRequestError('Mission Agent definition metadata must be an object')
+      throw NextGenError.badRequest('Mission Agent definition metadata must be an object')
     }
     if (
       definition.toolPolicy !== undefined
       && (!definition.toolPolicy || !['all', 'allowlist'].includes(definition.toolPolicy.mode))
     ) {
-      throw new BadRequestError('Mission Agent definition has an invalid tool policy')
+      throw NextGenError.badRequest('Mission Agent definition has an invalid tool policy')
     }
     const metadata = definition.metadata && typeof definition.metadata === 'object' && !Array.isArray(definition.metadata)
       ? definition.metadata
       : {}
     if (metadata.missionId !== undefined && metadata.missionId !== missionId) {
-      throw new BadRequestError('Mission Agent metadata missionId must match its registration scope')
+      throw NextGenError.badRequest('Mission Agent metadata missionId must match its registration scope')
     }
 
     const map = this.missionAgents.get(missionId) || new Map<string, AgentDefinition>()
     const id = definition.id || `${missionId}:agent-${uuidv4()}`
-    if (!id.trim()) throw new BadRequestError('Mission Agent ID cannot be empty')
+    if (!id.trim()) throw NextGenError.badRequest('Mission Agent ID cannot be empty')
     const defWithId: AgentDefinition = {
       ...definition,
       id,
@@ -180,7 +180,7 @@ export class AgentRuntime {
     const existing = this.agents.get(id)
     const existingMissionAgent = map.get(id)
     if (existing && !existingMissionAgent) {
-      throw new ConflictError(`Agent ID ${id} is already registered outside mission ${missionId}`)
+      throw new NextGenError(`Agent ID ${id} is already registered outside mission ${missionId}`, 409)
     }
     if (existingMissionAgent) {
       const currentMode = existingMissionAgent.toolPolicy?.mode || 'all'
@@ -193,7 +193,7 @@ export class AgentRuntime {
         || currentTools.length !== requestedTools.length
         || currentTools.some((tool, index) => tool !== requestedTools[index])
       ) {
-        throw new ConflictError(`Mission Agent ${id} cannot be re-registered with a different tenant or tool policy`)
+        throw new NextGenError(`Mission Agent ${id} cannot be re-registered with a different tenant or tool policy`, 409)
       }
       return existingMissionAgent
     }

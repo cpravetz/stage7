@@ -20,9 +20,10 @@ describe('MCPLibrarySourceRegistry', () => {
     registry = new MCPLibrarySourceRegistry()
   })
 
-  it('initializes with the default curated source', () => {
-    const ids = registry.allSources().map((s) => s.id)
-    expect(ids).toContain('stage7-curated')
+  it('initializes with no sources when MCP_DISCOVERY_SOURCES is unset', () => {
+    // No built-in defaults: the former stage7-curated source pointed at the
+    // removed mcp-runtime service. Sources come from MCP_DISCOVERY_SOURCES.
+    expect(registry.allSources()).toEqual([])
   })
 
   it('enabledSources returns only enabled sources', () => {

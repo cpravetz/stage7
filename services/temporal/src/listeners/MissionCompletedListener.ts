@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, httpRequest } from '@stage7-nextgen/shared';
 import type {
   MissionTrajectoryLog,
   SkillCategory,
@@ -77,10 +77,10 @@ export class MissionCompletedListener {
     const url = `${(process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '')}/api/v1/compile-skill`;
 
     try {
-      const response = await fetch(url, {
+      const response = await httpRequest(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(35 * 60_000),
+        timeoutMs: 35 * 60_000,
         body: JSON.stringify({
           trajectory,
           targetSkillName,

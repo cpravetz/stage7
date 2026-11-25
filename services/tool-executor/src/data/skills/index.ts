@@ -38,9 +38,6 @@ export { supportSkills, supportWorkflow } from '../../assistants/support';
 export {
   assistantRegistries,
   detectOverlappingSkills,
-  getAssistantByName,
-  getAssistantsByObject,
-  getAssistantsWithSkillCount,
   getOverlappingSkills,
   getRetainedOverlapDecision,
   getRetainedOverlapDecisionIds,

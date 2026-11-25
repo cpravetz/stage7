@@ -1,5 +1,6 @@
 import { Tool } from '../types';
 import logger from '../utils/logger';
+import { httpRequest, llmCallTimeoutMs } from '@stage7-nextgen/shared';
 import { ErrorHandler } from '../utils/ErrorHandler';
 import path from 'path';
 import type { CodeExecutorCredentials } from '../executors/CodeExecutor';
@@ -94,7 +95,7 @@ export class ToolDispatcher {
     const userPrompt = `ERROR: ${errorMessage}\n\nINPUT: ${JSON.stringify(input, null, 2)}\n\nCODE:\n${sourceCode}\n\nProvide the corrected code.`;
 
     try {
-      const response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
+      const response = await httpRequest(`${BRAIN_URL}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -102,6 +103,8 @@ export class ToolDispatcher {
           systemPrompt: HEALING_SYSTEM_PROMPT,
           options: { temperature: 0.2, maxTokens: 4096 },
         }),
+        // Code healing is an LLM completion; it needs the long ceiling.
+        timeoutMs: llmCallTimeoutMs(),
       });
 
       if (!response.ok) {

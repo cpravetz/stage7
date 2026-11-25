@@ -48,6 +48,29 @@ function resolveDispatcher(): Promise<FetchDispatcher | undefined> {
 
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
+function envTimeoutMs(name: string, fallback: number): number {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+/**
+ * Timeout for service-to-service calls: persistence reads and writes,
+ * broadcasts, registry lookups. These are fast, local calls, so a short
+ * ceiling surfaces an unresponsive dependency instead of hanging the caller.
+ */
+export function interServiceTimeoutMs(): number {
+  return envTimeoutMs('INTER_SERVICE_TIMEOUT_MS', 30_000);
+}
+
+/**
+ * Timeout for calls that transit an LLM completion (e.g. X → brain → provider).
+ * These can legitimately run for minutes, so the ceiling must sit above the
+ * provider timeout, not below it.
+ */
+export function llmCallTimeoutMs(): number {
+  return envTimeoutMs('LLM_CALL_TIMEOUT_MS', 330_000);
+}
+
 /**
  * Performs an HTTP request and resolves with a standard `Response`.
  *

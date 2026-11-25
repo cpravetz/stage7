@@ -1,5 +1,5 @@
 import { TemporalClient } from './client/TemporalClient'
-import { logger } from '@stage7-nextgen/shared'
+import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared'
 
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
 const POLL_MS = Number(process.env.WATCH_SCHEDULER_POLL_MS || '60000')
@@ -14,10 +14,11 @@ export function startWatchScheduler(client: TemporalClient): () => void {
 
   async function poll() {
     try {
-      const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents/search`, {
+      const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ collection: 'watches', limit: 1000 }),
+        timeoutMs: interServiceTimeoutMs(),
       })
       if (!res.ok) {
         logger.warn('Failed to fetch watches for scheduler')

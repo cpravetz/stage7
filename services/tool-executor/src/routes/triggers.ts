@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import asyncHandler from '../utils/asyncHandler';
+import { asyncHandler } from '@stage7-nextgen/shared';
 import { triggerScheduler } from '../utils/sharedInstance';
 import { parseCron } from '../adk/cron';
 

@@ -27,8 +27,20 @@ beforeAll(() => {
   process.env.TOOL_DENIAL_STORE_DIR = TEST_DIR
   process.env.TOOL_PERMISSION_REQUEST_STORE_DIR = TEST_DIR
   process.env.TOOL_AUDIT_LOG_DIR = '/tmp/stage7-perm-audit-test'
+  // Curated pre-approval (§4.3) requires the candidate's source to be a
+  // registered curated source. There is no built-in default since the
+  // mcp-runtime fold, so declare one explicitly for these tests.
+  mcpLibrarySourceRegistry.register({
+    id: 'stage7-curated',
+    name: 'Stage7 Curated MCP Library',
+    transport: 'remote',
+    config: {},
+    tier: 'curated',
+    enabled: true,
+  })
 })
 afterAll(() => {
+  mcpLibrarySourceRegistry.unregister('stage7-curated')
   delete process.env.TOOL_GRANT_STORE_DIR
   delete process.env.TOOL_DENIAL_STORE_DIR
   delete process.env.TOOL_PERMISSION_REQUEST_STORE_DIR

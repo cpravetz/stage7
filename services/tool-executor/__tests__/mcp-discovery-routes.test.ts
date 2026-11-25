@@ -21,7 +21,9 @@ describe('mcpDiscovery routes', () => {
     const res = await request(app).get('/mcp/sources')
     expect(res.status).toBe(200)
     expect(res.body.sources).toBeInstanceOf(Array)
-    expect(res.body.sources.find((s: any) => s.id === 'stage7-curated')).toBeDefined()
+    // No built-in default sources since the mcp-runtime fold: an empty
+    // MCP_DISCOVERY_SOURCES means an empty registry.
+    expect(res.body.sources).toEqual([])
   })
 
   it('GET /mcp/grants returns active grants', async () => {
