@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentTask } from '../types'
-import { httpRequest } from '@stage7-nextgen/shared'
+import { getBrainUrl, httpRequest } from '@stage7-nextgen/shared'
 import { ActionExecutor } from './agent-executor/ActionExecutor'
 import { BrainClient, brainRequestTimeout } from './agent-executor/BrainClient'
 import { CapabilityResolver } from './agent-executor/CapabilityResolver'
@@ -44,7 +44,7 @@ export class AgentExecutor {
   readonly maxDelegationDepth: number
 
   constructor(options: AgentExecutorOptions = {}) {
-    const brainUrl = (options.brainUrl || process.env.BRAIN_URL || 'http://brain:3100').replace(/\/$/, '')
+    const brainUrl = options.brainUrl || getBrainUrl()
     const toolExecutorUrl = (options.toolExecutorUrl || process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/$/, '')
     const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.maxDelegationDepth = options.maxDelegationDepth ?? DEFAULT_MAX_DELEGATION_DEPTH

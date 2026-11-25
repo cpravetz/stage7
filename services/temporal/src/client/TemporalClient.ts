@@ -3,7 +3,7 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { logger, Plan, PlanSchema, sanitizeAgentMessage, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs, HeuristicEntry } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema, sanitizeAgentMessage, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs, HeuristicEntry, getBrainUrl } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
@@ -671,7 +671,7 @@ export class TemporalClient {
             timestamp: result.completedAt || Date.now(),
           });
           try {
-            const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+            const brainUrl = getBrainUrl();
             const artifacts = (process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200');
             // Fetch assistant and trigger distillation via Brain service
             httpRequest(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(input.assistantId || '')}`, { timeoutMs: interServiceTimeoutMs() })
@@ -2012,7 +2012,7 @@ export class TemporalClient {
   ): Promise<'ANSWER' | 'FEEDBACK' | 'UNCLEAR'> {
     if (!pendingInteraction.question) return 'UNCLEAR';
 
-    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+    const brainUrl = getBrainUrl();
     try {
       const response = await httpRequest(`${brainUrl}/api/brain/complete`, {
         method: 'POST',

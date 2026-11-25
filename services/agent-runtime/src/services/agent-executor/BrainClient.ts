@@ -2,7 +2,7 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
   brainSettings,
-  logger,
+  reportBrainComplaint,
   resolveBrainSettings,
 } from '@stage7-nextgen/shared'
 import type { AgentDefinition } from '../../types'
@@ -131,36 +131,6 @@ export class BrainClient {
     reason: string,
     missionId: string,
   ): Promise<void> {
-    if (!requestId) {
-      logger.warn({ missionId, reason }, 'Cannot report Brain response validation failure without a request ID')
-      return
-    }
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5_000)
-    try {
-      const response = await this.fetcher(`${this.brainUrl}/api/brain/complaint`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, reason, missionId }),
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        const details = await response.text()
-        logger.error(
-          { requestId, missionId, status: response.status, details: details.slice(0, 300) },
-          'Brain rejected an Agent response quality complaint',
-        )
-        return
-      }
-      logger.info({ requestId, missionId, reason }, 'Agent reported a Brain response quality complaint')
-    } catch (error) {
-      logger.error(
-        { requestId, missionId, error: error instanceof Error ? error.message : String(error) },
-        'Failed to report an Agent response quality complaint',
-      )
-    } finally {
-      clearTimeout(timeout)
-    }
+    await reportBrainComplaint({ requestId, reason, missionId });
   }
 }
