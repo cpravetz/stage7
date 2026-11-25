@@ -127,6 +127,8 @@ describe('requireServiceToken', () => {
   });
 
   it('calls next with the error surface as a 401 response, never an unhandled rejection', async () => {
+    // Test-only app: exists for this one assertion, never served or exposed.
+    // codeql[js/missing-rate-limiting]
     const app = express();
     const crashingNext: NextFunction = jest.fn();
     app.use('/protected', requireServiceToken(), crashingNext);
