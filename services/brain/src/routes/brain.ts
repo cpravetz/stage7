@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { CompletionOptions } from '../services/BrainService';
 import { getBrainInstance } from '../utils/sharedInstance';
 import { z } from 'zod';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
 import { logger } from '../utils/logger';
 import { EntityMemoryStore } from '../services/EntityMemoryStore';
@@ -15,18 +15,30 @@ const entityMemoryExtractionSchema = z.object({
   decisions: z.array(z.string().min(1).max(500)).max(20),
 });
 
+// Shapes a model definition the router will accept. inputFormat/outputFormat
+// are loose strings to match ModelFormat (string | string[]).
+const modelRegistrationSchema = z.object({
+  id: z.string().min(1).max(200),
+  provider: z.string().min(1).max(100),
+  costPer1kTokens: z.number().min(0),
+  maxTokens: z.number().int().positive(),
+  capabilities: z.array(z.string().min(1).max(100)).max(50),
+  inputFormat: z.union([z.string().max(100), z.array(z.string().max(100)).max(10)]).optional(),
+  outputFormat: z.union([z.string().max(100), z.array(z.string().max(100)).max(10)]).optional(),
+});
+
 async function getBrain() {
   return getBrainInstance();
 }
 
-router.get('/health', asyncHandler(async (_req, res) => {
-  const brain = await getBrain();
-  res.json({
-    status: 'ok',
-    service: 'brain',
-    providers: brain.listProviders(),
-    models: brain.listAvailableModels().length,
-  });
+router.use(healthRouter({
+  service: 'brain',
+  check: {
+    fields: async () => {
+      const brain = await getBrain();
+      return { providers: brain.listProviders(), models: brain.listAvailableModels().length };
+    },
+  },
 }));
 
 router.post('/memory/entity', asyncHandler(async (req: any, res: any) => {
@@ -139,9 +151,14 @@ router.get('/models', asyncHandler(async (_req: any, res: any) => {
 
 router.post('/models', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
-  const model = req.body;
-  brain.registerModel(model);
-  res.status(201).json({ registered: true, model });
+  const parsed = modelRegistrationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    // A bad payload is a client error, not a server fault: reject it with a
+    // 400 (asyncHandler maps NextGenError to its status) and register nothing.
+    throw NextGenError.badRequest('Invalid model definition', { issues: parsed.error.issues });
+  }
+  brain.registerModel(parsed.data);
+  res.status(201).json({ registered: true, model: parsed.data });
 }));
 
 router.post('/route', asyncHandler(async (req: any, res: any) => {
@@ -199,5 +216,8 @@ router.post('/complaint', asyncHandler(async (req: any, res: any) => {
   logger.info({ requestId, reason, missionId }, 'Quality complaint recorded');
   res.json({ recorded: true, requestId });
 }));
+
+// (Validation errors are rejected inside their handlers with
+// NextGenError.badRequest; asyncHandler maps those to 400 responses.)
 
 export default router;

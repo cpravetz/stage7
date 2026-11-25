@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
@@ -42,25 +41,25 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
       var store = ctx.store.load('storePath', []);
       if (!Array.isArray(store)) store = [];
 
-      function fmtMoney(v) { return v == null ? 'N/A' : '$' + Number(v).toFixed(2); }
-      function fmtPct(v) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
-      function iso(d) { try { return new Date(d).toISOString().slice(0, 10); } catch (e) { return String(d); } }
-      function fmtDate(d) { try { return new Date(d).toISOString().slice(0, 10); } catch (e) { return String(d); } }
+      function fmtMoney(v: any) { return v == null ? 'N/A' : '$' + Number(v).toFixed(2); }
+      function fmtPct(v: any) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
+      function iso(d: any) { try { return new Date(d).toISOString().slice(0, 10); } catch (e) { return String(d); } }
+      function fmtDate(d: any) { try { return new Date(d).toISOString().slice(0, 10); } catch (e) { return String(d); } }
 
-      function trackObligations(input) {
-        const obligations = Array.isArray(input.obligations) ? input.obligations.filter(o => o && Number.isFinite(Number(o.amount)) && Number(o.amount) >= 0 && !Number.isNaN(Date.parse(o.dueDate))) : [];
+      function trackObligations(input: any) {
+        const obligations = Array.isArray(input.obligations) ? input.obligations.filter((o: any) => o && Number.isFinite(Number(o.amount)) && Number(o.amount) >= 0 && !Number.isNaN(Date.parse(o.dueDate))) : [];
         const now = new Date();
-        const upcoming = obligations.filter(o => new Date(o.dueDate) >= now).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-        const overdue = obligations.filter(o => new Date(o.dueDate) < now);
-        return { upcoming, overdue, totalDue: obligations.reduce((sum, o) => sum + Number(o.amount), 0), count: obligations.length, source: 'supplied-input', notice: obligations.length ? 'Obligations are filtered to those with a valid amount and parseable due date.' : 'No obligations with valid amounts and due dates were supplied.' };
+        const upcoming = obligations.filter((o: any) => new Date(o.dueDate) >= now).sort((a: any, b: any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+        const overdue = obligations.filter((o: any) => new Date(o.dueDate) < now);
+        return { upcoming, overdue, totalDue: obligations.reduce((sum: number, o: any) => sum + Number(o.amount), 0), count: obligations.length, source: 'supplied-input', notice: obligations.length ? 'Obligations are filtered to those with a valid amount and parseable due date.' : 'No obligations with valid amounts and due dates were supplied.' };
       }
-      function flagFees(input) {
-        const fees = Array.isArray(input.fees) ? input.fees.filter(f => f && Number.isFinite(Number(f.amount)) && Number(f.amount) >= 0) : [];
+      function flagFees(input: any) {
+        const fees = Array.isArray(input.fees) ? input.fees.filter((f: any) => f && Number.isFinite(Number(f.amount)) && Number(f.amount) >= 0) : [];
         const threshold = Number.isFinite(Number(input.feeThreshold)) ? Number(input.feeThreshold) : null;
-        const flagged = threshold === null ? [] : fees.filter(f => Number(f.amount) > threshold);
-        return { flagged, threshold, totalFees: fees.reduce((sum, f) => sum + Number(f.amount), 0), unusualCount: flagged.length, feeCount: fees.length, source: 'supplied-input', notice: threshold === null ? 'No fee threshold was supplied; no fees were flagged.' : 'Fees are flagged only when their supplied amount exceeds the supplied threshold.' };
+        const flagged = threshold === null ? [] : fees.filter((f: any) => Number(f.amount) > threshold);
+        return { flagged, threshold, totalFees: fees.reduce((sum: number, f: any) => sum + Number(f.amount), 0), unusualCount: flagged.length, feeCount: fees.length, source: 'supplied-input', notice: threshold === null ? 'No fee threshold was supplied; no fees were flagged.' : 'Fees are flagged only when their supplied amount exceeds the supplied threshold.' };
       }
-      function createTransfer(input, dryRun) {
+      function createTransfer(input: any, dryRun: any): any {
         const amount = Number(input.amount);
         if (!input.from || !input.to || !Number.isFinite(amount) || amount <= 0) {
           return { error: 'A source account, destination account, and positive transfer amount are required.' };
@@ -72,28 +71,28 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
         }
         return transfer;
       }
-      function calculateDrift(input) {
-        const holdings = Array.isArray(input.holdings) ? input.holdings.filter(h => h && Number.isFinite(Number(h.value ?? h.amount)) && Number(h.value ?? h.amount) > 0) : [];
+      function calculateDrift(input: any): any {
+        const holdings = Array.isArray(input.holdings) ? input.holdings.filter((h: any) => h && Number.isFinite(Number(h.value ?? h.amount)) && Number(h.value ?? h.amount) > 0) : [];
         const targets = input.targets || {};
-        const totalValue = holdings.reduce((sum, h) => sum + Number(h.value ?? h.amount), 0);
+        const totalValue = holdings.reduce((sum: number, h: any) => sum + Number(h.value ?? h.amount), 0);
         if (!totalValue) return { drift: [], totalValue: 0, maxDrift: 0, notice: 'No positive-value holdings were supplied; no drift was calculated.', source: 'supplied-input' };
         const threshold = Number.isFinite(Number(input.rebalanceThreshold)) ? Number(input.rebalanceThreshold) : 0.05;
-        const drift = holdings.map(h => {
+        const drift = holdings.map((h: any) => {
           const current = Number(h.value ?? h.amount) / totalValue;
           const target = Number(targets[h.symbol] || 0);
           const driftPct = current - target;
           return { symbol: h.symbol, currentPct: current, targetPct: target, driftPct, needsRebalance: Math.abs(driftPct) > threshold };
         });
-        return { drift, totalValue, maxDrift: Math.max(0, ...drift.map(d => Math.abs(d.driftPct))), threshold, notice: 'Drift is calculated only from supplied holdings and target weights.', source: 'supplied-input' };
+        return { drift, totalValue, maxDrift: Math.max(0, ...drift.map((d: any) => Math.abs(d.driftPct))), threshold, notice: 'Drift is calculated only from supplied holdings and target weights.', source: 'supplied-input' };
       }
-      function stageRebalance(input, dryRun) {
+      function stageRebalance(input: any, dryRun: any): any {
         const analysis = calculateDrift(input);
-        const transfers = analysis.drift.filter(item => item.needsRebalance).map(item => createTransfer({ from: input.from, to: input.to || item.symbol, amount: Math.abs(item.driftPct) * analysis.totalValue, purpose: 'Rebalance ' + item.symbol }, dryRun));
-        const staged = transfers.filter(transfer => !transfer.error);
-        return { ...analysis, transfers: staged, blocked: transfers.filter(transfer => transfer.error), status: staged.length ? 'staged' : 'no-action', requiresConfirmation: true, dryRun: dryRun, notice: staged.length ? 'Rebalancing instructions are ' + (dryRun ? 'staged for preview (dry run); no account was changed.' : 'staged for explicit user approval; no account was changed.') : 'No supplied holding crossed the rebalancing threshold.' };
+        const transfers = analysis.drift.filter((item: any) => item.needsRebalance).map((item: any) => createTransfer({ from: input.from, to: input.to || item.symbol, amount: Math.abs(item.driftPct) * analysis.totalValue, purpose: 'Rebalance ' + item.symbol }, dryRun));
+        const staged = transfers.filter((transfer: any) => !transfer.error);
+        return { ...analysis, transfers: staged, blocked: transfers.filter((transfer: any) => transfer.error), status: staged.length ? 'staged' : 'no-action', requiresConfirmation: true, dryRun: dryRun, notice: staged.length ? 'Rebalancing instructions are ' + (dryRun ? 'staged for preview (dry run); no account was changed.' : 'staged for explicit user approval; no account was changed.') : 'No supplied holding crossed the rebalancing threshold.' };
       }
 
-      function buildPresent(action, data, error, isDryRun) {
+      function buildPresent(action: any, data: any, error: any, isDryRun: any) {
         const L = [];
         var d = data || {};
 
@@ -106,12 +105,12 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (obs.upcoming.length) {
             L.push('');
             L.push('Upcoming bills (' + obs.upcoming.length + '):');
-            obs.upcoming.forEach(function (o) { L.push('  - ' + (o.description || '(untitled)') + ': ' + fmtMoney(o.amount) + ' (due ' + fmtDate(o.dueDate) + (o.category ? ', ' + o.category : '') + ')'); });
+            obs.upcoming.forEach(function (o: any) { L.push('  - ' + (o.description || '(untitled)') + ': ' + fmtMoney(o.amount) + ' (due ' + fmtDate(o.dueDate) + (o.category ? ', ' + o.category : '') + ')'); });
           }
           if (obs.overdue.length) {
             L.push('');
             L.push('Overdue bills (' + obs.overdue.length + '):');
-            obs.overdue.forEach(function (o) { L.push('  - ' + (o.description || '(untitled)') + ': ' + fmtMoney(o.amount) + ' (due ' + fmtDate(o.dueDate) + ')'); });
+            obs.overdue.forEach(function (o: any) { L.push('  - ' + (o.description || '(untitled)') + ': ' + fmtMoney(o.amount) + ' (due ' + fmtDate(o.dueDate) + ')'); });
           }
           if (obs.notice) { L.push(''); L.push('Note: ' + obs.notice); }
         } else if (action === 'flag-fees' && d.fees) {
@@ -124,7 +123,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (fees.flagged.length) {
             L.push('');
             L.push('Flagged fees (' + fees.flagged.length + '):');
-            fees.flagged.forEach(function (f) { L.push('  - ' + (f.description || '(untitled)') + ': ' + fmtMoney(f.amount) + (f.source ? ' (' + f.source + ')' : '') + ' (on ' + fmtDate(f.date) + ')'); });
+            fees.flagged.forEach(function (f: any) { L.push('  - ' + (f.description || '(untitled)') + ': ' + fmtMoney(f.amount) + (f.source ? ' (' + f.source + ')' : '') + ' (on ' + fmtDate(f.date) + ')'); });
           } else if (fees.threshold !== null) {
             L.push('');
             L.push('No fees exceeded the threshold of ' + fmtMoney(fees.threshold) + '.');
@@ -156,7 +155,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (r.transfers && r.transfers.length) {
             L.push('');
             L.push('Staging ' + r.transfers.length + ' rebalancing transfer(s):');
-            r.transfers.forEach(function (t, i) { L.push('  ' + (i + 1) + '. ' + t.from + ' -> ' + t.to + ': ' + fmtMoney(t.amount) + ' (for ' + t.purpose + ')'); });
+            r.transfers.forEach(function (t: any, i: number) { L.push('  ' + (i + 1) + '. ' + t.from + ' -> ' + t.to + ': ' + fmtMoney(t.amount) + ' (for ' + t.purpose + ')'); });
           } else {
             L.push('');
             L.push('No rebalancing transfers are needed — no holding crossed the threshold.');
@@ -164,7 +163,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (r.drift && r.drift.length) {
             L.push('');
             L.push('Drift analysis:');
-            r.drift.forEach(function (h) {
+            r.drift.forEach(function (h: any) {
               var flag = h.needsRebalance ? ' — REBALANCE' : '';
               L.push('  ' + h.symbol + ': ' + fmtPct(h.currentPct) + ' current vs ' + fmtPct(h.targetPct) + ' target (drift ' + fmtPct(h.driftPct) + ')' + flag);
             });
@@ -172,7 +171,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (r.blocked && r.blocked.length) {
             L.push('');
             L.push('Blocked transfers (' + r.blocked.length + '):');
-            r.blocked.forEach(function (t) { L.push('  - ' + t.error); });
+            r.blocked.forEach(function (t: any) { L.push('  - ' + t.error); });
           }
           if (r.notice) { L.push(''); L.push('Note: ' + r.notice); }
         } else if (action === 'calculate-drift' && d.drift) {
@@ -185,7 +184,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           if (dr.drift && dr.drift.length) {
             L.push('');
             L.push('Holdings drift:');
-            dr.drift.forEach(function (h) {
+            dr.drift.forEach(function (h: any) {
               var flag = h.needsRebalance ? ' — REBALANCE' : '';
               L.push('  ' + h.symbol + ': ' + fmtPct(h.currentPct) + ' current vs ' + fmtPct(h.targetPct) + ' target (drift ' + fmtPct(h.driftPct) + ')' + flag);
             });
@@ -203,6 +202,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
         return [{ id: 'report', title: action, kind: 'text', body: L.join(NL) }];
       }
 
+      let action = 'unspecified';
       try {
         function resolveOperation(input: Record<string, unknown>): string {
       // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
@@ -222,7 +222,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
       if (all('holdings', 'targets')) return 'calculate-drift';
       return 'track-obligations';
     }
-    const action = resolveOperation(input as Record<string, unknown>);
+    action = resolveOperation(input as Record<string, unknown>);
         let resultData = null;
         let resultError = null;
         let success = true;
@@ -266,7 +266,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
         const present = buildPresent(action, resultData, resultError, dryRun);
         return { success: success, status: success ? (dryRun ? 'dry-run' : 'ok') : 'error', data: resultData, error: resultError, present: present };
       } catch (error) {
-        const msg = (error && error.message) ? error.message : String(error);
+        const msg = ((error as any) && (error as any).message) ? (error as any).message : String(error);
         return { success: false, status: 'error', data: null, error: msg, present: [{
           id: 'error',
           title: 'Error',

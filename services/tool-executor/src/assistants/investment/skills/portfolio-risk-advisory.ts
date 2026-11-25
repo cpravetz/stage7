@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { SchemaRecord } from '../../../types';
@@ -49,12 +48,12 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
 
       const store = ctx.store.load('portfolio-advisory', []);
 
-      function fmtPct(v) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
-      function fmtMoney(v) { return v == null ? 'N/A' : '$' + Number(v).toFixed(2); }
-      function fmtNum(v, d) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
-      function roundMoney(value) { return Math.round((Number(value) || 0) * 100) / 100; }
+      function fmtPct(v: any) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
+      function fmtMoney(v: any) { return v == null ? 'N/A' : '$' + Number(v).toFixed(2); }
+      function fmtNum(v: any, d?: number) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
+      function roundMoney(value: any) { return Math.round((Number(value) || 0) * 100) / 100; }
 
-      function formatAllocation(result) {
+      function formatAllocation(result: any) {
         const L = [];
         L.push('Total value: ' + fmtMoney(result.totalValue));
         L.push('Risk tolerance: ' + result.riskTolerance);
@@ -72,7 +71,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         return L;
       }
 
-      function formatWeights(result) {
+      function formatWeights(result: any) {
         const L = [];
         L.push('Objective: ' + result.objective);
         const weightKeys = Object.keys(result.weights || {});
@@ -98,7 +97,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         return L;
       }
 
-      function formatRisk(result) {
+      function formatRisk(result: any) {
         const L = [];
         L.push('Portfolio value: ' + fmtMoney(result.portfolioValue));
         L.push('Confidence level: ' + fmtPct(result.confidenceLevel));
@@ -121,13 +120,13 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         if (weightEntries.length) {
           L.push('');
           L.push('Weights:');
-          weightEntries.slice(0, 5).forEach(function (w) { L.push('  ' + (w.symbol || 'unknown') + ': ' + fmtPct(w.weight)); });
+          weightEntries.slice(0, 5).forEach(function (w: any) { L.push('  ' + (w.symbol || 'unknown') + ': ' + fmtPct(w.weight)); });
           if (weightEntries.length > 5) L.push('  ... and ' + (weightEntries.length - 5) + ' more.');
         }
         return L;
       }
 
-      function formatEvaluation(result) {
+      function formatEvaluation(result: any) {
         const L = [];
         const criteriaKeys = Object.keys(result.criteria || {});
         const weightKeys = Object.keys(result.weights || {});
@@ -138,29 +137,29 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         if (ranked.length) {
           L.push('');
           L.push('Ranking (best first):');
-          ranked.forEach(function (item) { L.push('  ' + item.symbol + ': ' + fmtNum(item.score, 4)); });
+          ranked.forEach(function (item: any) { L.push('  ' + item.symbol + ': ' + fmtNum(item.score, 4)); });
         }
         return L;
       }
 
-      function formatNotice(result) {
+      function formatNotice(result: any) {
         const L = [];
         if (result.notice) L.push(result.notice);
         L.push('Source: ' + result.source);
         return L;
       }
 
-      async function analyzePortfolio(holdings, riskTolerance) {
-        const validHoldings = Array.isArray(holdings) ? holdings.filter(h => h && Number(h.value ?? h.amount) > 0) : [];
-        const totalValue = validHoldings.reduce((sum, h) => sum + Number(h.value ?? h.amount), 0);
-        const allocation = {};
-        validHoldings.forEach(h => {
+      async function analyzePortfolio(holdings: any, riskTolerance: any) {
+        const validHoldings = Array.isArray(holdings) ? holdings.filter((h: any) => h && Number(h.value ?? h.amount) > 0) : [];
+        const totalValue = validHoldings.reduce((sum: number, h: any) => sum + Number(h.value ?? h.amount), 0);
+        const allocation: Record<string, number> = {};
+        validHoldings.forEach((h: any) => {
           const assetClass = h.assetClass || h.class || 'Unspecified';
           allocation[assetClass] = (allocation[assetClass] || 0) + Number(h.value ?? h.amount);
         });
         Object.keys(allocation).forEach(key => { allocation[key] = totalValue > 0 ? allocation[key] / totalValue : 0; });
-        const suppliedReturns = validHoldings.filter(h => Number.isFinite(Number(h.expectedReturn)));
-        const expectedReturn = totalValue > 0 && suppliedReturns.length ? suppliedReturns.reduce((sum, h) => sum + Number(h.expectedReturn) * Number(h.value ?? h.amount), 0) / totalValue : null;
+        const suppliedReturns = validHoldings.filter((h: any) => Number.isFinite(Number(h.expectedReturn)));
+        const expectedReturn = totalValue > 0 && suppliedReturns.length ? suppliedReturns.reduce((sum: number, h: any) => sum + Number(h.expectedReturn) * Number(h.value ?? h.amount), 0) / totalValue : null;
         const risk = riskTolerance || 'unspecified';
         return {
           totalValue,
@@ -176,10 +175,10 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         };
       }
 
-      async function optimizePortfolio(params) {
+      async function optimizePortfolio(params: any) {
         const { expectedReturns, covarianceMatrix, objective = 'max-sharpe', constraints = {} } = params;
         const assets = Object.keys(expectedReturns || {});
-        const weights = {};
+        const weights: Record<string, number> = {};
         assets.forEach(a => { weights[a] = assets.length ? 1 / assets.length : 0; });
         const suppliedReturns = assets.map(a => Number(expectedReturns[a]));
         const expectedReturn = suppliedReturns.length && suppliedReturns.every(Number.isFinite) ? suppliedReturns.reduce((sum, value) => sum + value, 0) / suppliedReturns.length : null;
@@ -199,19 +198,19 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         };
       }
 
-      async function assessRisk(params) {
+      async function assessRisk(params: any) {
         const portfolio = params.portfolio || params.holdings || [];
         let holdings = portfolio;
         if (portfolio && typeof portfolio === 'object' && !Array.isArray(portfolio) && Array.isArray(portfolio.holdings)) {
           holdings = portfolio.holdings;
         }
-        const values = holdings.map(p => Number(p.value ?? p.amount ?? 0)).filter(value => Number.isFinite(value) && value > 0);
-        const portfolioValue = values.reduce((sum, value) => sum + value, 0) || null;
-        const weights = portfolioValue ? holdings.map(p => ({ symbol: p.symbol || p.asset || 'unknown', weight: (Number(p.value ?? p.amount ?? 0) / portfolioValue) })) : [];
+        const values = holdings.map((p: any) => Number(p.value ?? p.amount ?? 0)).filter((value: number) => Number.isFinite(value) && value > 0);
+        const portfolioValue = values.reduce((sum: number, value: number) => sum + value, 0) || null;
+        const weights = portfolioValue ? holdings.map((p: any) => ({ symbol: p.symbol || p.asset || 'unknown', weight: (Number(p.value ?? p.amount ?? 0) / portfolioValue) })) : [];
         const volatility = Number(params.volatility);
         const holdingPeriod = Number.isFinite(Number(params.holdingPeriod)) ? Number(params.holdingPeriod) : null;
         const confidenceLevel = Number.isFinite(Number(params.confidenceLevel)) ? Number(params.confidenceLevel) : null;
-        const results = {};
+        const results: Record<string, any> = {};
         const hasVolatility = Number.isFinite(volatility) && volatility >= 0 && portfolioValue;
         if (params.methods?.includes('var-parametric') && hasVolatility && holdingPeriod !== null && confidenceLevel !== null) {
           const z = confidenceLevel >= 0.99 ? 2.326 : confidenceLevel >= 0.95 ? 1.645 : 1.282;
@@ -219,7 +218,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         }
         if (params.methods?.includes('stress-test')) {
           const scenarios = Array.isArray(params.scenarios) ? params.scenarios : [];
-          results['stress-test'] = scenarios.map(s => ({ name: s.name || 'supplied-scenario', impact: Number.isFinite(Number(s.impact)) ? Number(s.impact) : null }));
+          results['stress-test'] = scenarios.map((s: any) => ({ name: s.name || 'supplied-scenario', impact: Number.isFinite(Number(s.impact)) ? Number(s.impact) : null }));
         }
         return {
           portfolioValue,
@@ -232,22 +231,22 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         };
       }
 
-      async function evaluateInvestment(params) {
+      async function evaluateInvestment(params: any) {
         const symbols = params.symbols || [];
         const criteria = params.criteria || {};
         const weights = params.weights || {};
-        const scored = symbols.map(symbol => {
+        const scored = symbols.map((symbol: any) => {
           const symbolCriteria = criteria[symbol] || {};
           const entries = Object.entries(symbolCriteria).filter(([, value]) => Number.isFinite(Number(value)));
           const totalWeight = entries.reduce((sum, [key]) => sum + (Number(weights[key]) || 0), 0);
           const score = entries.length && totalWeight > 0 ? entries.reduce((sum, [key, value]) => sum + Number(value) * (Number(weights[key]) || 0), 0) / totalWeight : null;
           return { symbol, score, factors: score === null ? null : Object.fromEntries(entries), source: score === null ? 'insufficient-input' : 'supplied-input' };
         });
-        const ranked = scored.filter(item => item.score !== null).sort((a, b) => b.score - a.score);
+        const ranked = scored.filter((item: any) => item.score !== null).sort((a: any, b: any) => b.score - a.score);
         return { scores: scored, ranked, criteria, weights, source: 'supplied-input', notice: ranked.length ? 'Scores are weighted calculations from supplied criteria and weights.' : 'No numeric criteria were supplied; no ranking was produced.' };
       }
 
-      function buildPresent(action, result) {
+      function buildPresent(action: any, result: any) {
         const lines = [];
         if (action === 'analyze-portfolio') {
           lines.push('Portfolio Analysis');
@@ -275,6 +274,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         return [{ id: 'report', title: action, kind: 'text', body: lines.join(NL) }];
       }
 
+      let action = 'unspecified';
       try {
         const OPERATIONS = ['analyze-portfolio', 'optimize', 'rebalance', 'efficient-frontier',
       'risk-budgeting', 'risk-assessment', 'stress-test', 'evaluate', 'factor-exposure', 'scenario-analysis'];
@@ -294,8 +294,8 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
       if (has('holdings', 'portfolio')) return 'analyze-portfolio';
       return 'analyze-portfolio';
     }
-    const action = resolveOperation(input as Record<string, unknown>);
-        let result;
+    action = resolveOperation(input as Record<string, unknown>);
+        let result: any;
         switch (action) {
           case 'analyze-portfolio':
             result = await analyzePortfolio(input.holdings || [], input.riskTolerance);
@@ -325,7 +325,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
         const present = buildPresent(action, result);
         return { success: true, status: 'ok', data: result, error: null, present: present };
       } catch (error) {
-        const msg = (error && error.message) ? error.message : String(error);
+        const msg = ((error as any) && (error as any).message) ? (error as any).message : String(error);
         return { success: false, status: 'error', data: null, error: msg, present: [{
           id: 'error',
           title: 'Error',

@@ -16,7 +16,8 @@
  * field never discards good ones.
  */
 
-import { httpRequest } from '../utils/httpClient';
+import { createSettingsDocSource, resolveOverride, intFromEnv } from './settingsDocSource';
+import type { SettingsDocStatus, SettingsDocSnapshot } from './settingsDocSource';
 
 /** Upper bounds so a settings typo cannot wedge the service. */
 export const MAX_BRAIN_PROVIDER_TIMEOUT_MS = 600_000;
@@ -64,7 +65,7 @@ const KNOB_LIMITS: Record<keyof BrainSettingsOverrides, number> = {
   circuitCooldownMs: MAX_BRAIN_CIRCUIT_COOLDOWN_MS,
 };
 
-export type BrainSettingsDocStatus = 'ok' | 'missing' | 'unreachable' | 'unfetched';
+export type BrainSettingsDocStatus = SettingsDocStatus;
 
 export interface BrainSettingsSnapshot {
   status: BrainSettingsDocStatus;
@@ -77,41 +78,32 @@ export interface BrainSettingsSnapshot {
 
 /**
  * Validates an artifacts documents-API payload for the settings doc.
- * Returns 'ok' with the whitelisted numeric overrides, 'missing' for an absent
- * document, or 'unreachable' for a service error / malformed body. Field-level
- * problems (wrong type, non-integer, out of bounds) are dropped individually
- * with a warning — a bad field never discards good ones.
+ * Returns 'ok' with the whitelisted numeric overrides, or 'unreachable' for a
+ * malformed body. Field-level problems (wrong type, non-integer, out of
+ * bounds) are dropped individually with a warning — a bad field never
+ * discards good ones.
  */
 export function parseBrainSettingsDoc(
   payload: unknown,
   logger?: Pick<Console, 'warn'>,
-): { status: BrainSettingsDocStatus; overrides: BrainSettingsOverrides; reason?: string; fromCache: false } {
+): { status: BrainSettingsDocStatus; overrides: BrainSettingsOverrides; reason?: string } {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     logger?.warn('[brainSettings] Settings document body is not a JSON object; ignoring it');
-    return { status: 'unreachable', overrides: {}, reason: 'invalid JSON', fromCache: false };
+    return { status: 'unreachable', overrides: {}, reason: 'invalid JSON' };
   }
   const record = payload as Record<string, unknown>;
   const overrides: BrainSettingsOverrides = {};
   for (const key of KNOB_KEYS) {
     const value = record[key];
     if (value === undefined) continue;
-    const valid = typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= KNOB_LIMITS[key];
-    if (!valid) {
+    const resolved = resolveOverride(value, KNOB_LIMITS[key]);
+    if (resolved === undefined) {
       logger?.warn(`[brainSettings] Ignoring invalid ${key} value in settings document: ${String(value)}`);
       continue;
     }
-    overrides[key] = value;
+    overrides[key] = resolved;
   }
-  return { status: 'ok', overrides, fromCache: false };
-}
-
-function intFromEnv(env: Record<string, string | undefined>, key: string, fallback: number, max: number): number {
-  const parsed = Number(env[key]);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
-}
-
-function resolveOverride(value: unknown, max: number): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= max ? value : undefined;
+  return { status: 'ok', overrides };
 }
 
 /**
@@ -174,77 +166,40 @@ export interface BrainSettingsSourceOptions {
   logger?: Pick<Console, 'warn'>;
 }
 
+function snapshotWithOverrides({ status, value, reason, fromCache }: SettingsDocSnapshot<BrainSettingsOverrides>): BrainSettingsSnapshot {
+  return { status, overrides: value, ...(reason !== undefined ? { reason } : {}), fromCache };
+}
+
 /**
  * Creates a TTL-cached reader for the settings document. Overrides seen in any
  * snapshot — even a failed or missing one — are kept so an operator's
  * correction never flickers off while the artifacts service is unavailable.
  */
 export function createBrainSettingsSource(options: BrainSettingsSourceOptions = {}): BrainSettingsSource {
-  const artifactsUrl = (options.artifactsUrl ?? process.env.ARTIFACTS_URL ?? 'http://artifacts:4200').replace(/\/$/, '');
-  const docId = options.docId ?? DEFAULT_BRAIN_SETTINGS_DOC_ID;
-  const ttlMs = options.ttlMs ?? 30_000;
-  const fetcher = options.fetcher ?? ((url) => httpRequest(url));
-  const now = options.now ?? Date.now;
-  const logger = options.logger ?? console;
-
-  let cached: BrainSettingsSnapshot = { status: 'unfetched', overrides: {}, fromCache: true };
-  let fetchedAt = -Infinity; // -Infinity forces the first refresh to fetch
-  let inFlight: Promise<BrainSettingsSnapshot> | undefined;
-  let pollTimer: NodeJS.Timeout | undefined;
-
-  function keepOverridesOnFailure(
-    status: Extract<BrainSettingsDocStatus, 'missing' | 'unreachable'>,
-    reason?: string,
-  ): BrainSettingsSnapshot {
-    return { status, reason, overrides: { ...cached.overrides }, fromCache: true };
-  }
-
-  async function fetchOnce(): Promise<BrainSettingsSnapshot> {
-    let snapshot: BrainSettingsSnapshot;
-    try {
-      const response = await fetcher(`${artifactsUrl}/api/artifacts/documents/${docId}`);
-      if (response.status === 404) {
-        // The document has never been written: an expected state until an
-        // operator saves settings, so no warning.
-        snapshot = keepOverridesOnFailure('missing');
-      } else if (!response.ok) {
-        const reason = response.statusText || String(response.status);
-        logger.warn(`[brainSettings] Settings document request failed with ${response.status}; Brain knobs fall back to environment values`);
-        snapshot = keepOverridesOnFailure('unreachable', reason);
-      } else {
-        const parsed = parseBrainSettingsDoc(await response.json(), logger);
-        snapshot = { ...parsed, fromCache: false };
-      }
-    } catch (reason) {
-      logger.warn(`[brainSettings] Failed to read settings document (${reason instanceof Error ? reason.message : String(reason)}); Brain knobs fall back to environment values`);
-      snapshot = keepOverridesOnFailure('unreachable', reason instanceof Error ? reason.message : String(reason));
-    }
-    cached = snapshot;
-    if (snapshot.status === 'ok') fetchedAt = now();
-    return { ...cached };
-  }
-
-  function refresh(): Promise<BrainSettingsSnapshot> {
-    if (inFlight) return inFlight;
-    if (now() - fetchedAt < ttlMs) return Promise.resolve({ ...cached });
-    inFlight = fetchOnce().finally(() => {
-      inFlight = undefined;
-    });
-    return inFlight;
-  }
-
+  const source = createSettingsDocSource<BrainSettingsOverrides>({
+    parse: (payload, logger) => {
+      const parsed = parseBrainSettingsDoc(payload, logger);
+      if (parsed.status === 'unreachable') return { status: 'unreachable', value: parsed.overrides, reason: parsed.reason };
+      return { status: 'ok', value: parsed.overrides };
+    },
+    initialValue: () => ({}),
+    logPrefix: 'brainSettings',
+    artifactsUrl: options.artifactsUrl,
+    docId: options.docId ?? DEFAULT_BRAIN_SETTINGS_DOC_ID,
+    ttlMs: options.ttlMs,
+    fetcher: options.fetcher,
+    now: options.now,
+    logger: options.logger,
+  });
   return {
     current() {
-      return { ...cached };
+      return snapshotWithOverrides(source.current());
     },
-    refresh,
-    startPolling(intervalMs = ttlMs) {
-      if (pollTimer) return;
-      void refresh();
-      pollTimer = setInterval(() => {
-        void refresh();
-      }, intervalMs);
-      pollTimer.unref?.();
+    async refresh() {
+      return snapshotWithOverrides(await source.refresh());
+    },
+    startPolling(intervalMs) {
+      source.startPolling(intervalMs);
     },
   };
 }

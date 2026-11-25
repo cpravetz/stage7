@@ -67,3 +67,35 @@ describe('Brain completion route model selection', () => {
     expect(recordComplaint).toHaveBeenCalledWith('unknown-brain-request');
   });
 });
+
+describe('Model registration route', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('registers a valid model definition', async () => {
+    jest.spyOn(sharedInstance, 'getBrainInstance').mockResolvedValue(brainInstance);
+    const registerModel = jest.spyOn(brainInstance, 'registerModel');
+
+    const response = await request(app)
+      .post('/api/brain/models')
+      .send({ id: 'llama3:8b', provider: 'ollama', costPer1kTokens: 0, maxTokens: 8192, capabilities: ['reasoning'] });
+
+    expect(response.status).toBe(201);
+    expect(response.body.registered).toBe(true);
+    expect(registerModel).toHaveBeenCalledWith(expect.objectContaining({ id: 'llama3:8b', provider: 'ollama' }));
+  });
+
+  it('rejects an invalid model definition with a 400 and does not register it', async () => {
+    jest.spyOn(sharedInstance, 'getBrainInstance').mockResolvedValue(brainInstance);
+    const registerModel = jest.spyOn(brainInstance, 'registerModel');
+
+    const response = await request(app)
+      .post('/api/brain/models')
+      .send({ id: '', provider: 'ollama', costPer1kTokens: -1, maxTokens: 8192, capabilities: ['reasoning'] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Invalid model definition');
+    expect(registerModel).not.toHaveBeenCalled();
+  });
+});

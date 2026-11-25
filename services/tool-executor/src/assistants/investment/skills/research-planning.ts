@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
@@ -458,6 +457,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
 
       function fmtNum(v: any, d?: any) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
 
+      let action = 'unspecified';
       try {
         function resolveOperation(input: Record<string, unknown>): string {
       // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
@@ -488,7 +488,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
       if (has('query', 'searchType', 'freshness', 'documents')) return 'search';
       return 'search';
     }
-    const action = resolveOperation(input as Record<string, unknown>);
+    action = resolveOperation(input as Record<string, unknown>);
         let result: any;
         switch (action) {
           case 'search':

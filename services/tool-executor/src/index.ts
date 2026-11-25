@@ -14,6 +14,7 @@ import batchExecutionRoutes from './routes/batch-execution';
 import { Tool, MCPToolDiscoveryRequiredError } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import logger from './utils/logger';
+import { healthRouter } from '@stage7-nextgen/shared';
 import { ToolNotFoundError, ValidationError } from './utils/errors';
 import { renderPermissionPrompt } from './services/ToolPermissionService';
 import { PluginGenerator } from './services/PluginGenerator';
@@ -205,21 +206,24 @@ logger.info({ count: toolRegistry.list().length }, 'Registered default tools');
   logger.info({ adopted, skipped: skippedPlugins, total: deployed.length }, 'Adopted deployed plugins');
 }
 
-app.get('/api/tool-executor/health', (_req, res) => {
-  const skillScheduleCount = triggerScheduler.list().schedules.length;
-  const missionScheduleCount = triggerScheduler.listMissionSchedules().schedules.length;
-  res.json({
-    status: 'ok',
-    service: 'tool-executor',
-    tools: toolRegistry.list().length,
-    scheduler: {
-      running: triggerScheduler.isRunning(),
-      schedules: skillScheduleCount + missionScheduleCount,
-      skillSchedules: skillScheduleCount,
-      missionSchedules: missionScheduleCount,
+app.use('/api/tool-executor', healthRouter({
+  service: 'tool-executor',
+  check: {
+    fields: () => {
+      const skillScheduleCount = triggerScheduler.list().schedules.length;
+      const missionScheduleCount = triggerScheduler.listMissionSchedules().schedules.length;
+      return {
+        tools: toolRegistry.list().length,
+        scheduler: {
+          running: triggerScheduler.isRunning(),
+          schedules: skillScheduleCount + missionScheduleCount,
+          skillSchedules: skillScheduleCount,
+          missionSchedules: missionScheduleCount,
+        },
+      };
     },
-  });
-});
+  },
+}));
 
 app.get('/api/tool-executor/tools', (_req, res) => {
   res.json({ tools: toolRegistry.list().filter((t) => t.isSkill !== true) });

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { EnvelopeEncryption } from '../encryption/envelopeEncryption';
 import { SecretStore } from '../services/SecretStore';
 import { requireTenantContext, resolveTenantContext, assertTenantMatch, defaultTenantForDiscovery } from '../utils/tenant';
@@ -8,9 +8,7 @@ const router: Router = Router();
 const encryption = new EnvelopeEncryption();
 const secretStore = new SecretStore(encryption);
 
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'vault' });
-});
+router.use(healthRouter({ service: 'vault' }));
 
 router.post('/encrypt', asyncHandler(async (req, res) => {
   const { plaintext } = req.body;
