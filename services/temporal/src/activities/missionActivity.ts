@@ -123,6 +123,9 @@ const orchestrator = new MissionOrchestrator();
     metadata: {
       ...input.metadata,
       assistantId: input.assistantId,
+      // Spend attribution: agent-runtime brain calls key to the mission's
+      // creator when no explicit user is known.
+      createdBy: input.createdBy,
       entityId: typeof input.metadata?.entityId === 'string' && input.metadata.entityId.trim()
         ? input.metadata.entityId.trim()
         : input.missionId,

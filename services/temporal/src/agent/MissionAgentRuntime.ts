@@ -346,6 +346,8 @@ export interface PromptTaskRequest {
 export class MissionAgentRuntime {
   private missionId: string;
   private tenantId: string;
+  /** Mission creator, stamped onto agents so brain calls attribute spend (OD-5). */
+  private createdBy?: string;
   private readonly agentApi: AgentApi;
   private broadcast: MissionAgentConfig['broadcast'];
   private agentToolPolicies: Map<string, MissionAgentToolGrant>;
@@ -403,6 +405,9 @@ export class MissionAgentRuntime {
     this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
     this.entityId = typeof config.metadata?.entityId === 'string' ? config.metadata.entityId : undefined;
     this.assistantId = typeof config.metadata?.assistantId === 'string' ? config.metadata.assistantId : undefined;
+    this.createdBy = typeof config.metadata?.createdBy === 'string' && config.metadata.createdBy.trim()
+      ? config.metadata.createdBy.trim()
+      : undefined;
     const retryCount = config.metadata?.retryCount;
     if (
       retryCount !== undefined
@@ -452,7 +457,7 @@ export class MissionAgentRuntime {
       systemPrompt,
       tools: toolAccess.tools,
       ...(toolAccess.policy ? { toolPolicy: toolAccess.policy } : {}),
-      metadata: { missionId: this.missionId, agentRole: identity.agentRole },
+      metadata: { missionId: this.missionId, agentRole: identity.agentRole, ...(this.createdBy ? { createdBy: this.createdBy } : {}) },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1137,6 +1142,7 @@ export class MissionAgentRuntime {
         agentRole: roleLabel,
         ...(this.entityId ? { entityId: this.entityId } : {}),
         ...(this.assistantId ? { assistantId: this.assistantId } : {}),
+        ...(this.createdBy ? { createdBy: this.createdBy } : {}),
       },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1640,7 +1646,11 @@ export class MissionAgentRuntime {
         missionId?: string;
         routingSessionId?: string;
         attempt: number;
+        userId?: string;
       }) => {
+        // Spend attribution: an explicit request userId wins; otherwise the
+        // mission's creator (stamped into agent metadata too) carries it.
+        const attributionUserId = request.userId ?? this.createdBy;
         const agentId = await this.getOrCreateAgent('brain', request.systemPrompt.slice(0, 200));
         const result = await this.executePromptTask(agentId, {
           taskId: `${this.missionId}:brain:${request.routingSessionId || 'default'}:attempt-${request.attempt}`,
@@ -1649,6 +1659,7 @@ export class MissionAgentRuntime {
           phaseId: 'brain',
           context: {
             ...(request.routingSessionId ? { [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: request.routingSessionId } : {}),
+            ...(attributionUserId ? { userId: attributionUserId } : {}),
           },
           executionPolicy: {
             ...DEFAULT_AGENT_EXECUTION_POLICY,
