@@ -110,6 +110,8 @@ export interface StoredKnowledgeEntry extends AssistantKnowledgeEntry {
 export interface AssistantDefinition {
   id: string;
   tenantId: string;
+  /** Owning user, recorded at creation for per-user LLM spend attribution. */
+  ownerId?: string;
   name: string;
   description: string;
   systemPrompt: string;
