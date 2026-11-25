@@ -9,10 +9,8 @@ COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/worker-pool/package*.json ./services/worker-pool/
 COPY services/artifacts/package*.json ./services/artifacts/
-COPY services/mcp-runtime/package*.json ./services/mcp-runtime/
 COPY services/worker-pool/tsconfig.json ./services/worker-pool/
 COPY services/artifacts/tsconfig.json ./services/artifacts/
-COPY services/mcp-runtime/tsconfig.json ./services/mcp-runtime/
 COPY shared-nextgen/tsconfig.json ./shared-nextgen/
 
 # Install deps with cache
@@ -26,10 +24,6 @@ RUN --mount=type=cache,target=/usr/src/app/shared-nextgen/node_modules/.cache \
 COPY services/artifacts/src ./services/artifacts/src/
 RUN --mount=type=cache,target=/usr/src/app/services/artifacts/node_modules/.cache \
     cd services/artifacts && rm -rf dist && npx tsc --incremental
-
-COPY services/mcp-runtime/src ./services/mcp-runtime/src/
-RUN --mount=type=cache,target=/usr/src/app/services/mcp-runtime/node_modules/.cache \
-    cd services/mcp-runtime && rm -rf dist && npx tsc --incremental
 
 COPY services/worker-pool/src ./services/worker-pool/src/
 COPY services/worker-pool/assistants ./services/worker-pool/assistants/
@@ -58,8 +52,8 @@ RUN set -eu; \
       rm -rf services/worker-pool/assistants; \
       mkdir -p services/worker-pool/assistants; \
       cp -r /tmp/keep/. services/worker-pool/assistants/; \
-      for f in services/worker-pool/knowledge/assistants/*.txt 2>/dev/null || true; do \
-        [ -f "$f" ] || continue; \
+      for f in services/worker-pool/knowledge/assistants/*.txt; do \
+        [ -e "$f" ] || continue; \
         b=$(basename "$f" .txt); \
         [ -d "services/worker-pool/assistants/$b" ] || rm -f "$f"; \
       done; \
