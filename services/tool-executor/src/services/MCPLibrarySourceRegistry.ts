@@ -3,24 +3,15 @@
  *
  * Organization policy sets which MCP library sources are searched. Phase 1
  * uses curated and org-approved sources only. Sources are loaded from the
- * MCP_DISCOVERY_SOURCES env var (JSON array) and merged with defaults.
+ * MCP_DISCOVERY_SOURCES env var (JSON array). There is no built-in default:
+ * the former stage7-curated source pointed at the mcp-runtime service, which
+ * has been folded away, so operators declare their own sources explicitly.
  */
 
 import { MCPLibrarySource, MCPTrustTier, isMCPTrustTier } from '../types/mcp-discovery';
 import logger from '../utils/logger';
 
-const DEFAULT_SOURCES: MCPLibrarySource[] = [
-  {
-    id: 'stage7-curated',
-    name: 'Stage7 Curated MCP Library',
-    transport: 'remote',
-    config: {
-      url: process.env.MCP_RUNTIME_URL || 'http://mcp-runtime:3300/mcp',
-    },
-    tier: 'curated',
-    enabled: true,
-  },
-];
+const DEFAULT_SOURCES: MCPLibrarySource[] = [];
 
 function parseSourcesEnv(): MCPLibrarySource[] {
   const raw = process.env.MCP_DISCOVERY_SOURCES;

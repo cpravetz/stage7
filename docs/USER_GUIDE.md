@@ -86,7 +86,6 @@ Useful service health endpoints exposed by the local Docker Compose environment:
 
 - Gateway: `http://localhost:3900/health`
 - Worker Pool: `http://localhost:3200/api/workers/health`
-- MCP Runtime: `http://localhost:3300/api/mcp-runtime/health`
 - Stage7 Temporal service (mission API, in-process workflow runner, and recovery status): `http://localhost:4100/api/temporal/health`
 - Auth: `http://localhost:4300/api/auth/health`
 
