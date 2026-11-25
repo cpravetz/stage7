@@ -167,7 +167,7 @@ router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
 }));
 
 router.post('/services', asyncHandler(async (req: Request, res: Response) => {
-  const { name, serviceId, scopes, apiKey } = req.body;
+  const { name, serviceId, scopes, apiKey, tenantId } = req.body;
 
   if (!name || !serviceId) {
     throw NextGenError.badRequest('name and serviceId are required');
@@ -182,7 +182,10 @@ router.post('/services', asyncHandler(async (req: Request, res: Response) => {
 
   const service: ServiceAccount = {
     id: `service-${Date.now()}`,
-    tenantId: 'tenant-1',
+    // A service token carries its tenant (vault derives tenant identity from
+    // the verified token), so the caller may register the account in the
+    // tenant it serves; 'tenant-1' stays the default for operator convenience.
+    tenantId: typeof tenantId === 'string' && tenantId.trim() ? tenantId.trim() : 'tenant-1',
     name,
     serviceId,
     scopes: scopes || ['read'],

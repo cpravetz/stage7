@@ -1,5 +1,4 @@
 import { Tool, ToolExecution, CredentialRequest, CredentialRequiredError, SchemaRecord } from '../types';
-import { httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import logger from '../utils/logger';
 import { credentialProvider, NamedCredentialSource } from './CredentialProvider';
 import { decryptVaultSecret, ensureVaultSecret } from '../utils/vaultClient';
@@ -51,7 +50,7 @@ export class ToolConfigResolver {
     try {
       const tenantId = (tool as any)?.tenantId || (input as any)?.tenantId || 'system';
       const secretName = ToolConfigResolver.vaultSecretName(credentialKey);
-      const result = await decryptVaultSecret({ byName: secretName }, tenantId);
+      const result = await decryptVaultSecret({ byName: secretName });
       if (result.ok && result.plaintext && result.plaintext.trim().length > 0) {
         return result.plaintext;
       }
@@ -219,24 +218,16 @@ export class ToolConfigResolver {
 
     if (missing.length === 0) return null;
 
-    // Ensure secrets exist in vault for missing config schema fields
+    // Ensure secrets exist in vault for missing config schema fields. Routed
+    // through the canonical vault client so the call carries the service token.
     const tenantId = (input as any)?.tenantId || (tool as any)?.tenantId || 'system';
     const createdSecrets: string[] = [];
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     for (const field of missing) {
       try {
         const secretName = ToolConfigResolver.vaultSecretName(field);
-        const ensureRes = await httpRequest(`${vaultUrl}/api/vault/secrets/ensure`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
-          timeoutMs: interServiceTimeoutMs(),
-        });
-        if (ensureRes.ok) {
-          const data = (await ensureRes.json()) as { existed?: boolean; name?: string };
-          if (!data.existed) {
-            createdSecrets.push(data.name || secretName);
-          }
+        const ensured = await ensureVaultSecret(secretName, tenantId);
+        if (ensured && !ensured.existed) {
+          createdSecrets.push(ensured.name || secretName);
         }
       } catch (err) {
         logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool config');
