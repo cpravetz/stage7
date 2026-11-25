@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
@@ -49,7 +48,6 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: marketDataInputSchema,
   outputSchema: investmentResultSchema('Market data request metadata, response, and staging record'),
-  timeoutMs: 15000,
   tier: 'represent',
   emitEvent: 'investment.market_data.refreshed',
   domainKnowledge: 'Market data retrieval, ticker symbols, OHLCV time series, fundamental ratios, options chains, economic calendar events',
@@ -66,7 +64,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   handler: async function handler(input, ctx) {
       const NL = '\n';
 
-      function arr(v) { return Array.isArray(v) ? v : (v != null ? [v] : []); }
+      function arr(v: any) { return Array.isArray(v) ? v : (v != null ? [v] : []); }
 
       // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
       // operation is what the caller supplied, not a label they chose.
@@ -105,7 +103,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
         sent: false,
       };
 
-      function formatRequest(title) {
+      function formatRequest(title: string) {
         const L = [];
         L.push(title);
         L.push('  System: ' + requestSummary.system);
@@ -155,7 +153,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
 
       var apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
 
-      var headers = { 'Content-Type': 'application/json' };
+      var headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) headers['X-API-Key'] = apiKey;
 
       var url = new URL(endpoint);
@@ -168,7 +166,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
       if (fields.length) url.searchParams.set('fields', fields.join(','));
       if (adjustments) url.searchParams.set('adjustments', adjustments);
 
-      var respLines = [];
+      var respLines: string[] = [];
       respLines.push('Live market data request sent');
       respLines.push('  Endpoint: ' + endpoint);
       respLines.push('  Action: ' + action);
@@ -179,7 +177,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
       try {
         var res = await fetch(url.toString(), { method: 'GET', headers: headers });
         var contentType = res.headers.get('content-type') || '';
-        var payload = null;
+        var payload: any = null;
         if (contentType.includes('application/json')) {
           try { payload = await res.json(); } catch (e) { payload = null; }
         } else {
@@ -187,7 +185,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
           payload = { raw: text.slice(0, 2000) };
         }
 
-        var detailLines = [];
+        var detailLines: string[] = [];
         detailLines.push('Response received from ' + endpoint + '.');
         detailLines.push('  HTTP status: ' + res.status + ' ' + res.statusText);
         detailLines.push('  Content type: ' + contentType);
@@ -207,7 +205,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
         return { success: res.ok, status: res.ok ? 'ok' : 'error', data: { action: action, system: 'investment-advisor', endpoint: endpoint, request: { action: action, symbols: symbols, symbol: symbol, interval: interval, startDate: startDate, endDate: endDate, fields: fields, adjustments: adjustments }, response: { status: res.status, ok: res.ok, contentType: contentType, payload: payload }, sent: true, storePath: ctx.store.getFilePath('market-data') }, error: res.ok ? null : 'Market data request to ' + endpoint + ' returned HTTP ' + res.status + ' ' + res.statusText, present: [{ id: 'response', title: 'Market data response', kind: 'text', body: respLines.join(NL) },
            { id: 'details', title: 'Response details', kind: 'text', body: detailLines.join(NL) }] };
       } catch (error) {
-        var msg = (error && error.message) ? error.message : String(error);
+        var msg = ((error as any) && (error as any).message) ? (error as any).message : String(error);
         var errLines = respLines.slice();
         errLines.push('  Error: ' + msg);
         return { success: false, status: 'error', data: null, error: msg, present: [{ id: 'notice', title: 'Market data request failed', kind: 'text', body: errLines.join(NL) }] };
