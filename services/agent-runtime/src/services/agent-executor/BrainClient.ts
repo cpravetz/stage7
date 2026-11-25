@@ -45,8 +45,8 @@ export class BrainClient {
     const base = {
       // Task threading sets optimizeFor per mission task (planner selectionCriteria /
       // estimatedComplexity); callers that pass nothing — phase review, completion
-      // review, planner self-completions — keep the historical accuracy routing.
-      options: { optimizeFor: optimizeFor || 'accuracy' },
+      // review, planner self-completions — route on cost, the platform default.
+      options: { optimizeFor: optimizeFor || 'cost' },
       maxTokens,
       temperature: 0.3,
       missionId,
