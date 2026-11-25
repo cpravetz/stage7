@@ -1,4 +1,4 @@
-import { MissionArtifact, MissionArtifactSchema, type Task } from '@stage7-nextgen/shared';
+import { MissionArtifact, MissionArtifactSchema, type Task, AgentTask, logger, sanitizeAgentMessage } from '@stage7-nextgen/shared';
 import type { TaskExecutionResult } from './TaskExecutionResult';
 
 const ASK_USER_MARKER = '__ASK_USER__:';
@@ -248,4 +248,204 @@ export function extractArtifacts(content: string, expected: string[]): MissionAr
     });
   }
   return artifacts;
+}
+
+// ---------------------------------------------------------------------------
+// Lenient parsing — the live mission-execution path.
+//
+// Unlike the strict variants above (used where a malformed task result must
+// abort), the execution path degrades gracefully: malformed metadata is
+// logged and skipped so a bad receipt never loses a good task output.
+// ---------------------------------------------------------------------------
+
+export interface RecoveredTaskMonologue {
+  type: 'monologue';
+  missionId: string;
+  timestamp: number;
+  data: Record<string, unknown>;
+}
+
+export interface ParsedTaskResultContext {
+  missionId: string;
+  /** Broadcasts a monologue event; omit when no broadcast sink is configured. */
+  broadcast?: (event: RecoveredTaskMonologue) => Promise<void>;
+  /** Resolves the agent that owns a task, for attribution in the monologue. */
+  agentIdForTask?: (taskId: string) => string | undefined;
+}
+
+export function parseArtifactsLenient(
+  value: unknown,
+  output: string,
+  expected: string[],
+  taskId: string,
+): MissionArtifact[] {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return extractArtifacts(output, expected);
+  }
+  if (!Array.isArray(value)) {
+    logger.warn({ taskId }, 'Ignoring malformed Agent artifact metadata and preserving textual task output');
+    return extractArtifacts(output, expected);
+  }
+  return value.flatMap((candidate) => {
+    if (
+      !candidate
+      || typeof candidate !== 'object'
+      || Array.isArray(candidate)
+    ) {
+      logger.warn({ taskId }, 'Ignoring an invalid Agent artifact entry');
+      return [];
+    }
+    const parsed = MissionArtifactSchema.safeParse(candidate);
+    if (!parsed.success) {
+      logger.warn({ taskId, issues: parsed.error.issues }, 'Ignoring an invalid Agent artifact entry');
+      return [];
+    }
+    return [parsed.data];
+  });
+}
+
+/** Warn-only variant of `assertExpectedArtifacts`: logs gaps but never throws. */
+export function warnExpectedArtifacts(
+  artifacts: MissionArtifact[],
+  expected: string[],
+  taskId: string,
+): void {
+  const missing = missingExpectedArtifacts(artifacts, expected);
+  if (missing.length > 0) {
+    logger.warn(
+      { taskId, missingArtifacts: missing },
+      'Task completed without all planned deliverable artifacts; preserving its output for phase review and recovery',
+    );
+  }
+}
+
+export function parseActionReceiptsLenient(
+  value: unknown,
+  taskId: string,
+): NonNullable<TaskExecutionResult['actionReceipts']> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    logger.warn({ taskId }, 'Ignoring malformed action-receipt metadata; task output remains available for review');
+    return [];
+  }
+  if (value.length > MAX_ACTION_RECEIPTS) {
+    logger.warn({ taskId, receiptCount: value.length }, 'Truncating oversized action-receipt metadata');
+  }
+  return value.slice(0, MAX_ACTION_RECEIPTS).flatMap((candidate) => {
+    if (
+      !candidate
+      || typeof candidate !== 'object'
+      || Array.isArray(candidate)
+    ) {
+      logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
+      return [];
+    }
+    const c = candidate as Record<string, unknown>;
+    if (
+      typeof c.toolId !== 'string'
+      || !c.toolId.trim()
+      || typeof c.isError !== 'boolean'
+      || typeof c.content !== 'string'
+      || (c.actionKey !== undefined && (typeof c.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(c.actionKey)))
+      || (c.fallbackForToolId !== undefined && (typeof c.fallbackForToolId !== 'string' || !c.fallbackForToolId.trim()))
+      || (c.resolvedToolId !== undefined && (typeof c.resolvedToolId !== 'string' || !c.resolvedToolId.trim()))
+      || (c.executionId !== undefined && (typeof c.executionId !== 'string' || !c.executionId.trim()))
+      || (c.operation !== undefined && (typeof c.operation !== 'string' || !c.operation.trim()))
+      || (c.providerRequestId !== undefined && (typeof c.providerRequestId !== 'string' || !c.providerRequestId.trim()))
+      || (c.outcomeKnown !== undefined && typeof c.outcomeKnown !== 'boolean')
+      || (c.binding !== undefined && (typeof c.binding !== 'object' || !c.binding || Array.isArray(c.binding)))
+      || (c.reconciliation !== undefined && (typeof c.reconciliation !== 'object' || !c.reconciliation || Array.isArray(c.reconciliation)))
+      || (c.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(c.outcome)))
+    ) {
+      logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
+      return [];
+    }
+    const content = c.content.slice(0, 4_096);
+    const outcome = (c.outcome as NonNullable<TaskExecutionResult['actionReceipts']>[number]['outcome'] | undefined)
+      || (c.isError ? 'failure' : 'success');
+    return [{
+      toolId: c.toolId,
+      isError: c.isError,
+      content,
+      outcome,
+      ...(typeof c.actionKey === 'string' ? { actionKey: c.actionKey } : {}),
+      ...(typeof c.executionId === 'string' ? { executionId: c.executionId } : {}),
+      ...(typeof c.operation === 'string' ? { operation: c.operation } : {}),
+      ...(typeof c.providerRequestId === 'string' ? { providerRequestId: c.providerRequestId } : {}),
+      ...(typeof c.outcomeKnown === 'boolean' ? { outcomeKnown: c.outcomeKnown } : {}),
+      ...(c.binding && typeof c.binding === 'object' && !Array.isArray(c.binding) ? { binding: c.binding as Record<string, unknown> } : {}),
+      ...(c.reconciliation && typeof c.reconciliation === 'object' && !Array.isArray(c.reconciliation) ? { reconciliation: c.reconciliation as Record<string, unknown> } : {}),
+      ...(typeof c.fallbackForToolId === 'string' ? { fallbackForToolId: c.fallbackForToolId } : {}),
+      ...(typeof c.resolvedToolId === 'string' ? { resolvedToolId: c.resolvedToolId } : {}),
+    }];
+  });
+}
+
+export function withActionReceiptArtifactLenient(
+  artifacts: MissionArtifact[],
+  actionReceipts: NonNullable<TaskExecutionResult['actionReceipts']>,
+  taskId: string,
+): MissionArtifact[] {
+  if (actionReceipts.length === 0) return artifacts;
+  const name = 'system-action-receipts.json';
+  const deliverables = artifacts.filter((artifact) => artifact.name.toLocaleLowerCase() !== name);
+  if (deliverables.length !== artifacts.length) {
+    logger.warn({ taskId }, 'Discarded an Agent artifact that collided with the reserved action-receipt name');
+  }
+  return [
+    ...deliverables,
+    { id: generateArtifactId(), name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
+  ];
+}
+
+/** Parse a terminal AgentTask update into a TaskExecutionResult (lenient path). */
+export function parseAgentTaskResult(task: AgentTask, ctx: ParsedTaskResultContext): TaskExecutionResult {
+  const result = task.result as { output?: unknown; incompleteReason?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown; reasoning?: unknown } | null;
+  const output = String(result?.output || JSON.stringify(result || {}));
+  const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+    ? task.input as Record<string, unknown>
+    : {};
+  const context = input.context && typeof input.context === 'object' && !Array.isArray(input.context)
+    ? input.context as Record<string, unknown>
+    : {};
+  const expectedArtifacts = parseExpectedArtifacts(context.expectedArtifacts, task.taskId);
+  const artifacts = parseArtifactsLenient(result?.artifacts, output, expectedArtifacts, task.taskId);
+  warnExpectedArtifacts(artifacts, expectedArtifacts, task.taskId);
+  const actionReceipts = parseActionReceiptsLenient(result?.actionReceipts, task.taskId);
+  const tokensUsed = result?.tokensUsed || 0;
+  const model = result?.model;
+  const provider = result?.provider;
+  const requestId = result?.requestId;
+  const reasoning = typeof result?.reasoning === 'string' && result.reasoning.trim().length > 0
+    ? result.reasoning
+    : undefined;
+  if (reasoning && ctx.broadcast) {
+    const agentId = ctx.agentIdForTask?.(task.taskId);
+    const phaseId = typeof context.phaseId === 'string' ? context.phaseId : undefined;
+    if (agentId) {
+      ctx.broadcast({
+        type: 'monologue',
+        missionId: ctx.missionId,
+        timestamp: Date.now(),
+        data: {
+          agentId,
+          taskId: task.taskId,
+          phaseId,
+          thought: reasoning,
+          text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
+        },
+      }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), taskId: task.taskId }, 'Failed to broadcast monologue for recovered task result'));
+    }
+  }
+  return {
+    output,
+    ...(typeof result?.incompleteReason === 'string' ? { incompleteReason: result.incompleteReason } : {}),
+    artifacts: withActionReceiptArtifactLenient(artifacts, actionReceipts, task.taskId),
+    actionReceipts,
+    tokensUsed: Number(tokensUsed) || 0,
+    model: model == null ? undefined : String(model),
+    provider: provider == null ? undefined : String(provider),
+    requestId: requestId == null ? undefined : String(requestId),
+    reasoning,
+  };
 }
