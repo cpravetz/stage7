@@ -10,6 +10,7 @@ import { MissionRecurrenceOptions, type MissionRecurrence } from '../components/
 import type { MissionScheduleRow } from '../stores/missionsStore';
 import { describeMissionSchedule } from '../utils/missionSchedule';
 import { Link } from 'react-router-dom';
+import { withAuthHeaders } from '../utils/api';
 
 interface OverviewPanelProps {
   entity: Entity;
@@ -84,11 +85,11 @@ export const OverviewPanel = ({
     setField(entity.id, 'runningMap', { ...runningMap, [tool.name]: true });
     try {
       const args = runInputs[tool.name] || {};
-      const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`, {
+      const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`, withAuthHeaders({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: tool.name, arguments: args }),
-      });
+      }));
       const resultText = await res.text();
       setField(entity.id, 'runResults', { ...runResults, [tool.name]: resultText });
     } catch (err) {

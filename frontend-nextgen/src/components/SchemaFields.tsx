@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { withAuthHeaders } from '../utils/api';
 
 export type SchemaRecord = Record<string, unknown>;
 
@@ -198,7 +199,7 @@ export const sfFetchReferenceItems = async (sourceId: string, valueField = 'id',
       const url = filter
         ? `/api/tool-executor/tools/reference-data/${encodeURIComponent(sourceId)}?filter=${encodeURIComponent(filter)}`
         : `/api/tool-executor/tools/reference-data/${encodeURIComponent(sourceId)}`;
-      const response = await fetch(url);
+      const response = await fetch(url, withAuthHeaders());
       if (!response.ok) return [];
       const items = sfReferenceItemsFrom(await response.json(), valueField);
       sfReferenceCache.set(cacheKey, items);

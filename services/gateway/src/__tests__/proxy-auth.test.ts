@@ -26,6 +26,18 @@ const SERVICE_TOKEN_PAYLOAD: TokenPayload = {
 };
 
 const VALID_TOKEN = 'valid-service-token';
+const VALID_USER_TOKEN = 'valid-user-token';
+
+const USER_TOKEN_PAYLOAD: TokenPayload = {
+  sub: 'user-admin',
+  tenantId: 'tenant-1',
+  orgId: 'org-1',
+  roles: ['admin'],
+  permissions: ['read', 'write', 'delete'],
+  type: 'user',
+  iat: 0,
+  exp: 0,
+};
 
 describe('Gateway proxy authentication', () => {
   let app: express.Application;
@@ -48,6 +60,11 @@ describe('Gateway proxy authentication', () => {
       if (token === VALID_TOKEN) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, payload: SERVICE_TOKEN_PAYLOAD }));
+        return;
+      }
+      if (token === VALID_USER_TOKEN) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, payload: USER_TOKEN_PAYLOAD }));
         return;
       }
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -101,6 +118,15 @@ describe('Gateway proxy authentication', () => {
     const response = await request(app)
       .get('/api/downstream/items')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(downstreamHits).toBe(1);
+  });
+
+  it('forwards requests carrying a valid user token — what the frontend sends after login', async () => {
+    const response = await request(app)
+      .get('/api/downstream/items')
+      .set('Authorization', `Bearer ${VALID_USER_TOKEN}`);
     expect(response.status).toBe(200);
     expect(response.body.ok).toBe(true);
     expect(downstreamHits).toBe(1);

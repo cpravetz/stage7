@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
+import { fetchJSON, postJSON, putJSON, deleteResource, withAuthHeaders } from '../utils/api';
 import { SchemaFields } from '../components/SchemaFields';
 import OutputTemplate from '../components/OutputTemplate';
 import { getInitialInputValues } from '../utils/workspaceHelpers';
@@ -422,17 +422,12 @@ const Tools = () => {
     setConfigSuccess(null);
     const newValues: Record<string, string> = {};
     try {
-      const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
       for (const field of fields) {
         const name = `tool:${tool.id}:${field}`;
         try {
-          const res = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt?tenantId=system`);
-          if (res.ok) {
-            const data = await res.json();
-            newValues[field] = data.plaintext || '';
-          } else {
-            newValues[field] = '';
-          }
+          // Through the gateway; the vault scopes by the bearer token's tenant.
+          const data = await fetchJSON<{ plaintext: string }>(`/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt`);
+          newValues[field] = data.plaintext || '';
         } catch {
           newValues[field] = '';
         }
@@ -456,19 +451,18 @@ const Tools = () => {
     setConfigError(null);
     setConfigSuccess(null);
     try {
-      const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
       for (const field of fields) {
         const name = `tool:${tool.id}:${field}`;
         const value = configValues[field] ?? '';
         // Skip empty optional fields — the Vault rejects empty plaintext and
         // optional credential fields are resolved at execution time, not save time.
         if (value === '') continue;
-        const response = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plaintext: value, tenantId: 'system' }),
-        });
-        if (!response.ok) throw new Error(`Failed to save Vault setting "${field}" (${response.status})`);
+        try {
+          // Through the gateway; the vault scopes by the bearer token's tenant.
+          await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext: value });
+        } catch (err) {
+          throw new Error(`Failed to save Vault setting "${field}" (${err instanceof Error ? err.message : err})`);
+        }
       }
       setConfigSuccess('Configuration saved to Vault');
     } catch (err: any) {
@@ -484,11 +478,11 @@ const Tools = () => {
     setExecuteError(null);
     setExecuteResult(null);
     try {
-      const response = await fetch(`/api/tool-executor/tools/${selectedTool.id}/execute`, {
+      const response = await fetch(`/api/tool-executor/tools/${selectedTool.id}/execute`, withAuthHeaders({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: executeInputValues }),
-      });
+      }));
       const result = await response.json() as ExecutionResult & {
         request?: { missingCredentials?: Array<{ key: string; label?: string }> };
       };
