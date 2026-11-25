@@ -2,8 +2,7 @@ import express from 'express';
 import missionRoutes, { temporalClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
 import { startMissionScheduler } from './schedules/missionScheduler';
-import { logger } from '@stage7-nextgen/shared';
-import { brainSettings } from '@stage7-nextgen/shared';
+import { brainSettings, healthRouter, logger } from '@stage7-nextgen/shared';
 
 export { TemporalClient } from './client/TemporalClient';
 
@@ -11,13 +10,10 @@ const app: express.Express = express();
 
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/api/temporal/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'temporal',
-    ...temporalClient.getRuntimeStatus(),
-  });
-});
+app.use('/api/temporal', healthRouter({
+  service: 'temporal',
+  check: { fields: () => temporalClient.getRuntimeStatus() },
+}));
 
 app.use('/api/temporal', missionRoutes);
 

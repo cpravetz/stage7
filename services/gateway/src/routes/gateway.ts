@@ -1,15 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { asyncHandler, NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { gatewayRegistry, getWsGateway } from '../utils/sharedInstances';
 import { ServiceHealth } from '../utils/serviceRegistry';
 
 const router: Router = Router();
 
-router.get('/health', asyncHandler(async (req: Request, res: Response) => {
-  logger.debug('Health check requested');
-  res.json({ status: 'ok', service: 'gateway' });
-}));
+router.use(healthRouter({ service: 'gateway' }));
 
 router.get('/services', asyncHandler(async (req: Request, res: Response) => {
   logger.debug('Services list requested');
