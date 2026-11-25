@@ -323,3 +323,69 @@ describe('ModelRouter performance outcomes', () => {
     expect(sorted).toContain('alpha')
   })
 })
+
+describe('ModelRouter preferred and forbidden model lists', () => {
+  // Fresh router per test: forbidden/preferred are operator policy applied per
+  // call, and the describe-scoped router above accumulates models across tests.
+  let router: ModelRouter;
+
+  beforeEach(() => {
+    router = new ModelRouter();
+    router.registerModels([model('alpha'), model('bravo'), model('charlie')]);
+    router.setPerformanceMetrics(new Map());
+  });
+
+  it('never returns a forbidden model in getCandidates output, by bare id or provider:id', () => {
+    const bare = router.getCandidates({ task: 'chat response', forbiddenModelIds: ['bravo'] })
+      .map(({ model: candidate }) => candidate.id);
+    expect(bare).not.toContain('bravo');
+    expect(bare).toEqual(expect.arrayContaining(['alpha', 'charlie']));
+
+    const keyed = router.getCandidates({ task: 'chat response', forbiddenModelIds: ['provider:charlie'] })
+      .map(({ model: candidate }) => candidate.id);
+    expect(keyed).not.toContain('charlie');
+    expect(keyed).toEqual(expect.arrayContaining(['alpha', 'bravo']));
+  });
+
+  it('ranks a preferred model first without excluding the other candidates', () => {
+    // Default balanced order is alpha before bravo; the +100 preferred bonus
+    // must bubble bravo to candidates[0] while the candidate set stays intact.
+    const candidates = router.getCandidates({ task: 'chat response', preferredModelIds: ['bravo'] });
+    expect(candidates[0]?.model.id).toBe('bravo');
+    expect(candidates.map(({ model: candidate }) => candidate.id)).toContain('alpha');
+    expect(candidates.map(({ model: candidate }) => candidate.id)).toContain('charlie');
+  });
+
+  it('intersects freeOnly with the preferred and forbidden lists', () => {
+    router.registerModel(model('paid-a', 0.1));
+    router.registerModel(model('free-b', 0));
+
+    // A preferred paid model must not bypass freeOnly: preferred is a score
+    // bonus, never an eligibility grant. free-b wins inside the free tier;
+    // free-a is removed by the forbidden filter next to freeOnly.
+    const candidates = router.getCandidates({
+      task: 'chat response',
+      freeOnly: true,
+      preferredModelIds: ['free-b', 'paid-a'],
+      forbiddenModelIds: ['free-a'],
+    }).map(({ model: candidate }) => candidate.id);
+
+    expect(candidates).toEqual(['free-b']);
+    expect(candidates).not.toContain('paid-a');
+  });
+
+  it('returns an empty candidate set when forbidden filters every model', () => {
+    // This is the empty-result path behind exhaustion: BrainService derives
+    // "No models are eligible" metadata (including the reported preferred and
+    // forbidden lists, asserted at the service level in brain-settings.test.ts)
+    // from getCandidates returning zero candidates — forbidden models are hard-
+    // filtered here rather than pre-seeded into excludedModelIds, so they are
+    // never counted as attempted.
+    const none = router.getCandidates({
+      task: 'chat response',
+      forbiddenModelIds: ['alpha', 'provider:bravo', 'charlie'],
+      preferredModelIds: ['alpha'],
+    });
+    expect(none).toEqual([]);
+  });
+})

@@ -21,7 +21,10 @@ import { httpRequest, getServiceAuthorizationHeaders } from '@stage7-nextgen/sha
 import logger from '../utils/logger';
 import type { SkillEvent } from '../adk/events';
 
-const ARTIFACTS_URL = process.env.ARTIFACTS_URL || '';
+// Read lazily inside the fetch path, not at module load: a boot-time const
+// pins the URL before tests (or callers) can set the env var. Same pattern as
+// watchActivity.ts's artifactsUrl().
+const artifactsUrl = (): string => process.env.ARTIFACTS_URL || '';
 const LOCAL_LOG_DIR = process.env.EVENT_LOG_DIR || '/tmp/stage7-events';
 const REMOTE_TIMEOUT_MS = Number(process.env.EVENT_LOG_TIMEOUT_MS) || 3000;
 
@@ -36,9 +39,10 @@ function safeId(value: string): string {
 }
 
 async function artifactsFetch(route: string, init?: { method?: string; body?: string }): Promise<any | null> {
-  if (!ARTIFACTS_URL) return null;
+  const base = artifactsUrl();
+  if (!base) return null;
   try {
-    const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
+    const res = await httpRequest(`${base}/api/artifacts/documents${route}`, {
       headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       timeoutMs: REMOTE_TIMEOUT_MS,
       ...init,
