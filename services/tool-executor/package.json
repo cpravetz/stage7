@@ -7,7 +7,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn src/index.ts",
     "test": "jest",
-    "lint": "eslint src --ext .ts,.js && node --check src/adk/shared/stage7-runtime.js"
+    "lint": "eslint src --ext .ts,.js && node --check src/adk/shared/stage7-runtime.js",
+    "adk:validate": "ts-node src/adk/cli.ts"
   },
   "dependencies": {
     "express": "^4.18.2",

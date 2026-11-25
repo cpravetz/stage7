@@ -1,0 +1,26 @@
+name: ADK Validate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/tool-executor/**'
+      - '.github/workflows/adk-validate.yml'
+  pull_request:
+    paths:
+      - 'services/tool-executor/**'
+      - '.github/workflows/adk-validate.yml'
+
+jobs:
+  adk-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install workspaces
+        run: npm ci
+      - name: Validate Assistant blueprints
+        run: npm run adk:validate -w @stage7-nextgen/tool-executor
