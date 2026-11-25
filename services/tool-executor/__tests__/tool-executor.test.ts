@@ -150,6 +150,14 @@ describe('ToolRegistry', () => {
 })
 
 describe('ToolExecutor', () => {
+  // Vault calls authenticate with a service token minted from the auth
+  // service; the fetch stubs below answer the mint endpoint, and these env
+  // credentials make the mint happen at all.
+  const serviceAuthEnv: Record<string, string> = {
+    TOOL_EXECUTOR_SERVICE_ID: 'tool-executor-test',
+    TOOL_EXECUTOR_SERVICE_API_KEY: 'test-api-key',
+  };
+
   const codeTool: Tool = {
     id: 'tool-code-1',
     name: 'Code Runner',
@@ -173,9 +181,14 @@ describe('ToolExecutor', () => {
 
   it('resolves schema-marked Vault inputs only for tool execution and redacts the result', async () => {
     const previousFetch = global.fetch
-    const vaultRequests: string[] = []
+    for (const [key, value] of Object.entries(serviceAuthEnv)) process.env[key] = value
+    // The vault requires service-token auth: the mock answers the auth
+    // service's mint endpoint and the vault's decrypt endpoint per-URL.
     global.fetch = jest.fn(async (url: string | URL | Request) => {
-      vaultRequests.push(String(url))
+      const target = String(url)
+      if (target.includes('/api/auth/')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, token: 'test-service-token' }) } as Response
+      }
       return {
         ok: true,
         status: 200,
@@ -207,16 +220,25 @@ describe('ToolExecutor', () => {
       expect(execution.status).toBe('completed')
       expect(execution.input).toEqual({ token: 'vault://secret-123' })
       expect(JSON.parse(String((execution.output as { output?: string }).output))).toEqual({ received: '[REDACTED]' })
+      const vaultRequests = (global.fetch as jest.Mock).mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => url.includes('/api/vault/'))
       expect(vaultRequests).toEqual(['http://vault:4000/api/vault/secrets/secret-123/decrypt'])
     } finally {
       global.fetch = previousFetch
+      for (const key of Object.keys(serviceAuthEnv)) delete process.env[key]
     }
   })
 
   it('stores schema-marked secret outputs in Vault and returns only a reference', async () => {
     const previousFetch = global.fetch
+    for (const [key, value] of Object.entries(serviceAuthEnv)) process.env[key] = value
     const storedBodies: Array<Record<string, unknown>> = []
-    global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    global.fetch = jest.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const target = String(url)
+      if (target.includes('/api/auth/')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, token: 'test-service-token' }) } as Response
+      }
       storedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
       return {
         ok: true,
@@ -257,6 +279,7 @@ describe('ToolExecutor', () => {
       }])
     } finally {
       global.fetch = previousFetch
+      for (const key of Object.keys(serviceAuthEnv)) delete process.env[key]
     }
   })
 

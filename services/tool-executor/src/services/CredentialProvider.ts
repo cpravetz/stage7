@@ -1,4 +1,4 @@
-import { logger, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { logger } from '@stage7-nextgen/shared';
 import { assertVaultBaseUrl, decryptVaultSecret, listVaultSecretNames, storeVaultSecret, vaultBaseUrl } from '../utils/vaultClient';
 
 export interface ToolCredentials {
@@ -200,7 +200,7 @@ export class CredentialProvider {
       return this.secretNameCache.names;
     }
     try {
-      const names = await listVaultSecretNames('system');
+      const names = await listVaultSecretNames();
       this.secretNameCache = { names, expiresAt: Date.now() + 30_000, vaultUrl };
       return names;
     } catch (err) {
@@ -238,14 +238,9 @@ export class CredentialProvider {
   }
 
   private async fromVaultByNameExact(name: string): Promise<string | undefined> {
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     try {
-      const target = new URL(`/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt`, vaultUrl);
-      const response = await httpRequest(target.toString(), { headers: { 'X-Tenant-Id': 'system' }, timeoutMs: interServiceTimeoutMs() });
-      if (response.ok) {
-        const data = await response.json() as { plaintext?: string };
-        if (data.plaintext !== undefined) return data.plaintext;
-      }
+      const result = await decryptVaultSecret({ byName: name });
+      if (result.ok && result.plaintext !== undefined) return result.plaintext;
     } catch (err) {
       logger.warn({ name, err: err instanceof Error ? err.message : String(err) }, 'Vault name lookup failed');
     }

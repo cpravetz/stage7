@@ -338,7 +338,7 @@ export async function listVaultSecretNames(): Promise<string[]> {
   try {
     // A short deadline keeps a slow or absent Vault from delaying generation: the
     // secret list only sharpens the prompt, and generation must not depend on it.
-    return await listVaultSecretNamesFromVault('system', 3_000);
+    return await listVaultSecretNamesFromVault(3_000);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed for plugin generation');
     return [];
