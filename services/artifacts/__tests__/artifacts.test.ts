@@ -14,6 +14,7 @@ function mockArtifactsService(store: InMemoryStore): void {
   jest.spyOn(artifactsService, 'isDurable').mockReturnValue(true);
   jest.spyOn(artifactsService, 'createDocument').mockImplementation((document) => store.createDocument(document));
   jest.spyOn(artifactsService, 'getDocument').mockImplementation((id) => store.getDocument(id));
+  jest.spyOn(artifactsService, 'queryDocuments').mockImplementation((query) => store.queryDocuments(query));
   jest.spyOn(artifactsService, 'updateDocument').mockImplementation((id, updates) => store.updateDocument(id, updates));
   jest.spyOn(artifactsService, 'deleteDocument').mockImplementation((id) => store.deleteDocument(id));
   jest.spyOn(artifactsService, 'saveMissionState').mockImplementation((state) => store.saveMissionState(state));
@@ -788,10 +789,28 @@ describe('Artifacts Routes', () => {
   let app: express.Application;
   let routeStore: InMemoryStore;
 
+  const SERVICE_TOKEN = 'svc-artifacts-test-token';
+
+  /** Documents requests now require a bearer token; attach the test one. */
+  function authed<T extends { set(name: string, value: string): unknown }>(req: T): T {
+    req.set('Authorization', `Bearer ${SERVICE_TOKEN}`);
+    return req;
+  }
+
   beforeEach(() => {
     jest.restoreAllMocks();
     routeStore = new InMemoryStore();
     mockArtifactsService(routeStore);
+    // The documents router verifies bearer tokens against the auth service;
+    // answer those verify calls without a network, and fail anything else so
+    // a surprise request is loud.
+    jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/auth/verify')) {
+        return new Response(JSON.stringify({ success: true, payload: { sub: 'svc-test', type: 'service' } }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch in artifacts routes test: ${url}`);
+    });
     app = express();
     app.use(express.json());
     app.use('/api/artifacts/documents', documentRoutes);
@@ -803,37 +822,101 @@ describe('Artifacts Routes', () => {
   });
 
   it('should create a document via API', async () => {
-    const response = await request(app)
-      .post('/api/artifacts/documents')
-      .send({
-        id: 'api-doc-1',
-        tenantId: 'tenant-1',
-        collection: 'test',
-        data: { name: 'API Test' },
-      });
+    const response = await authed(
+      request(app)
+        .post('/api/artifacts/documents')
+        .send({
+          id: 'api-doc-1',
+          tenantId: 'tenant-1',
+          collection: 'test',
+          data: { name: 'API Test' },
+        }),
+    );
 
     expect(response.status).toBe(201);
     expect(response.body.id).toBe('api-doc-1');
   });
 
   it('should retrieve a document via API', async () => {
-    await request(app)
-      .post('/api/artifacts/documents')
-      .send({
-        id: 'api-doc-2',
-        tenantId: 'tenant-1',
-        collection: 'test',
-        data: { name: 'API Test 2' },
-      });
+    await authed(
+      request(app)
+        .post('/api/artifacts/documents')
+        .send({
+          id: 'api-doc-2',
+          tenantId: 'tenant-1',
+          collection: 'test',
+          data: { name: 'API Test 2' },
+        }),
+    );
 
-    const response = await request(app).get('/api/artifacts/documents/api-doc-2');
+    const response = await authed(request(app).get('/api/artifacts/documents/api-doc-2'));
     expect(response.status).toBe(200);
     expect(response.body.data.name).toBe('API Test 2');
   });
 
   it('should return 404 for missing document', async () => {
-    const response = await request(app).get('/api/artifacts/documents/missing');
+    const response = await authed(request(app).get('/api/artifacts/documents/missing'));
     expect(response.status).toBe(404);
+  });
+
+  it('rejects unauthenticated documents CRUD and search with 401', async () => {
+    const create = await request(app)
+      .post('/api/artifacts/documents')
+      .send({ id: 'no-auth', tenantId: 'tenant-1', collection: 'test', data: {} });
+    expect(create.status).toBe(401);
+
+    const get = await request(app).get('/api/artifacts/documents/llm-config');
+    expect(get.status).toBe(401);
+
+    const search = await request(app)
+      .post('/api/artifacts/documents/search')
+      .send({ collection: 'settings' });
+    expect(search.status).toBe(401);
+  });
+
+  it('accepts token-carrying documents CRUD and search', async () => {
+    const create = await authed(
+      request(app)
+        .post('/api/artifacts/documents')
+        .send({ id: 'authed-doc', tenantId: 'system', collection: 'settings', data: { freeModelsOnly: true } }),
+    );
+    expect(create.status).toBe(201);
+
+    const update = await authed(
+      request(app)
+        .put('/api/artifacts/documents/authed-doc')
+        .send({ data: { freeModelsOnly: false } }),
+    );
+    expect(update.status).toBe(200);
+    expect(update.body.data.freeModelsOnly).toBe(false);
+
+    const search = await authed(
+      request(app)
+        .post('/api/artifacts/documents/search')
+        .send({ collection: 'settings' }),
+    );
+    expect(search.status).toBe(200);
+    expect(search.body.documents).toHaveLength(1);
+    expect(search.body.documents[0].id).toBe('authed-doc');
+
+    const remove = await authed(request(app).delete('/api/artifacts/documents/authed-doc'));
+    expect(remove.status).toBe(204);
+  });
+
+  it('rejects a request whose token the auth service refuses with 401', async () => {
+    (global.fetch as jest.Mock).mockImplementation(async (input) => {
+      if (String(input).includes('/api/auth/verify')) {
+        return new Response(JSON.stringify({ success: false }), { status: 401 });
+      }
+      throw new Error('Unexpected fetch');
+    });
+
+    const response = await request(app)
+      .post('/api/artifacts/documents')
+      .set('Authorization', 'Bearer bad-token')
+      .send({ id: 'bad-token', tenantId: 'tenant-1', collection: 'test', data: {} });
+
+    expect(response.status).toBe(401);
   });
 
   it('migrates legacy Brain history into the dedicated log store', async () => {

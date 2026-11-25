@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { artifactsService as service } from '../services/ArtifactsService';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, requireServiceAuth } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 
 const router: Router = Router();
@@ -11,6 +11,11 @@ router.use(asyncHandler(async (_req, _res, next) => {
   }
   next();
 }));
+
+// Documents carry tenant and settings state, so every request must present a
+// bearer token the auth service verifies. Internal callers authenticate as
+// service accounts; the frontend attaches the user token.
+router.use(requireServiceAuth);
 
 const CreateDocumentSchema = z.object({
   id: z.string().optional(),

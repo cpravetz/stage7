@@ -40,6 +40,11 @@ services:
       - "3100:3100"
     env_file:
       - .env
+    environment:
+      # Documents API service-account credentials, exchanged for a bearer token
+      # by the shared service-token client (see auth-bootstrap below).
+      - SERVICE_AUTH_ID=${BRAIN_SERVICE_AUTH_ID:-brain}
+      - SERVICE_API_KEY=${BRAIN_SERVICE_API_KEY:-}
     depends_on:
       artifacts:
         condition: service_healthy
@@ -80,6 +85,9 @@ services:
       - "4100:4100"
     env_file:
       - .env
+    environment:
+      - SERVICE_AUTH_ID=${TEMPORAL_SERVICE_AUTH_ID:-temporal}
+      - SERVICE_API_KEY=${TEMPORAL_SERVICE_API_KEY:-}
     depends_on:
       - artifacts
       - gateway
@@ -154,6 +162,8 @@ services:
       - .env
     environment:
       - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
+      - SERVICE_AUTH_ID=${TOOL_EXECUTOR_SERVICE_AUTH_ID:-tool-executor}
+      - SERVICE_API_KEY=${TOOL_EXECUTOR_SERVICE_API_KEY:-}
       - TOOL_STORE_DIR=/var/lib/stage7/tool-executor/tools
       - PLUGIN_DEPLOY_DIR=/var/lib/stage7/tool-executor/plugins
     # Generated plugins are validated in an isolated bubblewrap sandbox that
@@ -170,6 +180,30 @@ services:
       - redis
       - artifacts
     restart: unless-stopped
+
+  auth-bootstrap:
+    # One-shot seeding of the documents API service accounts (brain, temporal,
+    # tool-executor). The artifacts documents router requires a bearer token;
+    # callers exchange SERVICE_AUTH_ID / SERVICE_API_KEY for one at runtime, and
+    # this step registers the matching accounts with the auth service. Re-seeding
+    # an existing account is refused by auth and ignored here, so the step is
+    # safe to run on every stack start.
+    image: curlimages/curl:8.10.1
+    depends_on:
+      - auth
+    environment:
+      - BRAIN_SERVICE_AUTH_ID=${BRAIN_SERVICE_AUTH_ID:-brain}
+      - BRAIN_SERVICE_API_KEY=${BRAIN_SERVICE_API_KEY:-}
+      - TEMPORAL_SERVICE_AUTH_ID=${TEMPORAL_SERVICE_AUTH_ID:-temporal}
+      - TEMPORAL_SERVICE_API_KEY=${TEMPORAL_SERVICE_API_KEY:-}
+      - TOOL_EXECUTOR_SERVICE_AUTH_ID=${TOOL_EXECUTOR_SERVICE_AUTH_ID:-tool-executor}
+      - TOOL_EXECUTOR_SERVICE_API_KEY=${TOOL_EXECUTOR_SERVICE_API_KEY:-}
+    volumes:
+      # The seeding script is mounted, not inlined, so compose's $-interpolation
+      # cannot eat the shell variables the script itself expands.
+      - ./services/auth/scripts/seed-service-accounts.sh:/seed-service-accounts.sh:ro
+    entrypoint: ["sh", "/seed-service-accounts.sh"]
+    restart: "no"
 
   frontend:
     image: stage7-frontend

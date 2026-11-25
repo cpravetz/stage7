@@ -1,4 +1,4 @@
-import { logger, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs } from '@stage7-nextgen/shared'
+import { logger, httpRequest, interServiceTimeoutMs, llmCallTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared'
 
 /** Where watch run records are stored. */
 export const WATCH_RESULTS_COLLECTION = 'watch-results'
@@ -26,7 +26,10 @@ async function requireOk(res: Response, what: string): Promise<void> {
 async function readWatch(watchId: string): Promise<Record<string, unknown> | null> {
   const base = artifactsUrl()
   if (!base) throw new Error('ARTIFACTS_URL not configured')
-  const res = await httpRequest(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, { timeoutMs: interServiceTimeoutMs() })
+  const res = await httpRequest(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, {
+    headers: await getServiceAuthorizationHeaders(),
+    timeoutMs: interServiceTimeoutMs(),
+  })
   if (res.status === 404) return null
   await requireOk(res, `Reading watch ${watchId}`)
   const doc = (await res.json()) as { data?: Record<string, unknown> }
@@ -166,7 +169,7 @@ export async function runWatchActivity(input: { watchId: string }) {
   try {
     const res = await httpRequest(`${base}/api/artifacts/documents`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       body: JSON.stringify({
         id: runId,
         tenantId: (watch.tenantId as string) || 'default',
@@ -190,7 +193,7 @@ export async function runWatchActivity(input: { watchId: string }) {
     const current = (await readWatch(watchId)) || {}
     const res = await httpRequest(`${base}/api/artifacts/documents/${encodeURIComponent(watchId)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       body: JSON.stringify({
         data: {
           ...current,

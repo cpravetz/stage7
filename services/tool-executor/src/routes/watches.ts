@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { asyncHandler, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared'
+import { asyncHandler, httpRequest, interServiceTimeoutMs, getServiceAuthorizationHeaders } from '@stage7-nextgen/shared'
 import logger from '../utils/logger'
 
 const router: Router = Router()
@@ -12,7 +12,7 @@ async function artifactsFetch(path: string, init?: { method?: string; body?: str
   if (!ARTIFACTS_URL) return null
   try {
     const res = await httpRequest(`${ARTIFACTS_URL}/api/artifacts/documents${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getServiceAuthorizationHeaders()) },
       timeoutMs: interServiceTimeoutMs(),
       ...init,
     })
