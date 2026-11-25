@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MissionInputAlert from './MissionInputAlert';
+import SpendLimitNotice from './SpendLimitNotice';
 import { useFeedStore } from '../stores/feedStore';
 import { initMissionsStore, useMissionsStore } from '../stores/missionsStore';
 
@@ -21,6 +22,9 @@ const Layout = () => {
       <Sidebar />
       <div className="main-content">
         {!isMissionRoom && <MissionInputAlert />}
+        {/* Keyed by pathname so a dismissed notice reappears on navigation,
+            until a successful completion clears the flag after rollover. */}
+        <SpendLimitNotice key={location.pathname} />
         <main className="content">
           <Outlet />
         </main>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchJSON, postJSON } from '../utils/api';
 import { useFeedStore } from '../stores/feedStore';
+import { useSpendLimitStore } from '../stores/spendLimitStore';
+import { useAuthStore } from '../stores/authStore';
 
 interface BrainLogEntry {
   timestamp: string;
@@ -22,6 +24,10 @@ const LOGS_POLL_INTERVAL = 30000;
 const PAGE_SIZE = 25;
 
 const Brain = () => {
+  const recordSpendRefusal = useSpendLimitStore((s) => s.recordRefusalFromError);
+  const clearSpendRefusal = useSpendLimitStore((s) => s.clearRefusal);
+  const token = useAuthStore((s) => s.token);
+  const userId = useAuthStore((s) => s.user?.id);
   const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [cacheStats, setCacheStats] = useState<{ hits: number; misses: number } | null>(null);
@@ -82,13 +88,20 @@ const Brain = () => {
     setLoading(true);
     setResult(null);
     try {
+      // The gateway's auth gate requires the bearer token, and the spend
+      // gate attributes the completion to the logged-in user.
       const data = await postJSON<{ content: string; model: string; cached: boolean }>(
         '/api/brain/complete',
-        { prompt }
+        userId ? { prompt, userId } : { prompt },
+        token ? { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } } : undefined,
       );
+      // A completion succeeded — either under the cap or after the period
+      // rolled over — so a previously recorded spend-limit refusal is stale.
+      clearSpendRefusal();
       setResult(data.content || '');
       loadServiceLogs();
     } catch (err: unknown) {
+      recordSpendRefusal(err);
       setResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
       loadServiceLogs();
     } finally {
