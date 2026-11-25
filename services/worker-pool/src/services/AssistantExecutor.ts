@@ -228,6 +228,9 @@ export class AssistantExecutor {
           entityId,
           assistantId: definition.id,
           tenantId: definition.tenantId || DEFAULT_TENANT_ID,
+          // Spend attribution (OD-5): assistant-initiated spend keys to the
+          // assistant's owner; undefined falls to Brain's system bucket.
+          ...(definition.ownerId ? { userId: definition.ownerId } : {}),
         }),
         timeoutMs: llmCallTimeoutMs(),
       });
