@@ -39,6 +39,7 @@ export interface AssistantHarness {
   tools?: MCPTool[];
   skills?: SynthesizedSkillRef[];
   synthesizedSkills?: SynthesizedSkillRef[];
+  /** Not consumed at runtime; distillation persists to the knowledge store. */
   heuristics?: HeuristicEntry[];
   heuristicsLog?: HeuristicEntry[];
   memory?: {
