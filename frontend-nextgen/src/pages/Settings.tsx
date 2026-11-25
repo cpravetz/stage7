@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { postJSON } from '../utils/api';
 import ModelCatalogCard from '../components/ModelCatalogCard';
+import SpendLimitCard from '../components/SpendLimitCard';
 
 type SettingsState = {
   llm: {
@@ -230,6 +231,8 @@ const Settings = () => {
             </div>
           </form>
         </div>
+
+        <SpendLimitCard />
 
         <ModelCatalogCard />
       </div>

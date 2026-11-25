@@ -69,6 +69,11 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   if (!definition.tenantId) {
     definition.tenantId = 'tenant-1';
   }
+  // Spend attribution (OD-5): the creator's id, taken from the verified
+  // service token when the gateway forwarded one, else from the body.
+  const tokenUser = (req as { serviceTokenPayload?: { sub?: unknown } }).serviceTokenPayload?.sub;
+  const ownerId = definition.ownerId ?? (typeof tokenUser === 'string' && tokenUser.trim() ? tokenUser : undefined);
+  definition.ownerId = typeof ownerId === 'string' && ownerId.trim() ? ownerId.trim() : undefined;
   if (!definition.createdAt) {
     definition.createdAt = new Date();
   }
@@ -234,6 +239,13 @@ router.post('/assistants/:id/execute', asyncHandler(async (req, res) => {
   const result = context
     ? await executor.execute(definition, prompt, context)
     : await executor.execute(definition, prompt);
+  if (!result.success && result.spendRefusal) {
+    // The Brain refused the run at the user's spending cap; keeping the 429
+    // contract body lets the frontend's existing handler surface the
+    // limit-reached notice on assistant chat (OD-5 review finding B).
+    res.status(429).json(result.spendRefusal);
+    return;
+  }
   res.json(result);
 }));
 
@@ -243,6 +255,13 @@ router.post('/assistants/:id/tools/execute', asyncHandler(async (req, res) => {
     throw NextGenError.badRequest('Missing tool name');
   }
   const result = await executor.executeToolCall({ name, arguments: args }, req.params.id as string, workspaceId);
+  if (result.spendRefusal) {
+    // The tool's LLM work was refused at the user's spending cap; keeping the
+    // 429 contract body lets the frontend's existing handler surface the
+    // limit-reached notice on refused tool runs (OD-5 review finding B).
+    res.status(429).json(result.spendRefusal);
+    return;
+  }
   res.json(result);
 }));
 

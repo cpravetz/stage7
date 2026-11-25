@@ -92,6 +92,7 @@ export async function askBrain(
       maxTokens,
       spec.routingSessionId,
       spec.optimizeFor,
+      context.userId,
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

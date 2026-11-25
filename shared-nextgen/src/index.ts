@@ -21,3 +21,4 @@ export * from './utils/brainClient';
 export * from './utils/actionReceiptVerifier';
 export * from './config/missionSettings';
 export * from './config/settingsDocSource';
+export * from './config/spendLimits';

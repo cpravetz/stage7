@@ -1,10 +1,15 @@
 import {
   AssistantDefinition,
   AssistantExecutionResult,
+  logger,
+  httpRequest,
+  llmCallTimeoutMs,
+  DEFAULT_TENANT_ID,
   MCPToolCall,
   MCPToolResult,
+  parseSpendLimitRefusalPayload,
 } from '@stage7-nextgen/shared';
-import { logger, httpRequest, llmCallTimeoutMs, DEFAULT_TENANT_ID } from '@stage7-nextgen/shared';
+import type { SpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
 import {
   applyKnowledgeBudget,
@@ -14,6 +19,15 @@ import {
   selectLessons,
 } from './knowledgeBudget';
 import type { AssistantLoader } from './AssistantLoader';
+
+/** Parses a response body as JSON; anything unparseable is not a refusal. */
+function parseJsonBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
 
 export class AssistantExecutor {
   private toolExecutorUrl: string;
@@ -137,6 +151,7 @@ export class AssistantExecutor {
           assistantId: definition.id,
           success: false,
           error: brainRes.error,
+          ...(brainRes.spendRefusal ? { spendRefusal: brainRes.spendRefusal } : {}),
           tokensUsed,
           durationMs: Date.now() - start,
         };
@@ -204,7 +219,7 @@ export class AssistantExecutor {
     definition: AssistantDefinition,
     systemPrompt: string,
     conversation: Array<{ role: string; content: string }>,
-  ): Promise<{ ok: boolean; error?: string; content?: string; tokensUsed?: number }> {
+  ): Promise<{ ok: boolean; error?: string; content?: string; tokensUsed?: number; spendRefusal?: SpendLimitRefusalPayload }> {
     const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
     const prompt = conversation
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
@@ -228,10 +243,25 @@ export class AssistantExecutor {
           entityId,
           assistantId: definition.id,
           tenantId: definition.tenantId || DEFAULT_TENANT_ID,
+          // Spend attribution (OD-5): assistant-initiated spend keys to the
+          // assistant's owner; undefined falls to Brain's system bucket.
+          ...(definition.ownerId ? { userId: definition.ownerId } : {}),
         }),
         timeoutMs: llmCallTimeoutMs(),
       });
       if (!res.ok) {
+        if (res.status === 429) {
+          // Preserve the Brain's spend-limit refusal contract so the caller
+          // can surface the limit-reached notice instead of a generic failure
+          // string (OD-5 review finding B). A malformed body is not a refusal.
+          // Read the body once: a buffered Response can be consumed a single time.
+          const text = await res.text();
+          const refusal = parseSpendLimitRefusalPayload(parseJsonBody(text));
+          if (refusal) {
+            return { ok: false, error: `Brain returned ${res.status}: LLM spending limit reached`, spendRefusal: refusal };
+          }
+          return { ok: false, error: `Brain returned ${res.status}: ${text.slice(0, 200)}` };
+        }
         const text = await res.text();
         return { ok: false, error: `Brain returned ${res.status}: ${text.slice(0, 200)}` };
       }
@@ -311,6 +341,32 @@ export class AssistantExecutor {
               text: `CREDENTIAL_REQUIRED: ${data.error || 'Missing credentials'}\nRequired: ${data.request?.missingCredentials?.map((m: any) => m.label || m.key).join(', ') || 'unknown'}`,
             },
           ],
+          isError: true,
+        };
+      }
+
+      if (response.status === 429) {
+        // Preserve the spend-limit refusal contract the tool-executor now
+        // forwards from the Brain (OD-5 finding B): surface it as spendRefusal
+        // so the tools/execute route can answer 429 and the frontend's
+        // limit-reached notice fires. A malformed body is not a refusal.
+        // Read the body once: a buffered Response can be consumed a single time.
+        const text = await response.text();
+        const refusal = parseSpendLimitRefusalPayload(parseJsonBody(text));
+        if (refusal) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `LLM spending limit reached: ${refusal.spent} of ${refusal.limit} USD spent this ${refusal.period}`,
+              },
+            ],
+            isError: true,
+            spendRefusal: refusal,
+          };
+        }
+        return {
+          content: [{ type: 'text', text: `Tool executor returned ${response.status}: ${text.slice(0, 200)}` }],
           isError: true,
         };
       }

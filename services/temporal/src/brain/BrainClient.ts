@@ -12,6 +12,8 @@ export interface BrainCompleteRequest<T> {
     routingSessionId?: string;
     missionId?: string;
     attempt?: number;
+    /** Explicit spend attribution, winning over the mission's createdBy. */
+    userId?: string;
   };
   mode?: 'plan' | 'select' | 'review' | 'execute' | 'verify' | 'agent';
 }
@@ -65,6 +67,7 @@ export class BrainClient {
       routingSessionId,
       missionId,
       attempt = 1,
+      userId,
     } = requirements;
 
     let content: string;
@@ -77,6 +80,7 @@ export class BrainClient {
         missionId,
         routingSessionId,
         attempt,
+        ...(userId ? { userId } : {}),
       });
     } catch (error) {
       throw error;

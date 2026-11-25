@@ -22,6 +22,7 @@ export interface MissionSchedule {
   prompt: string;
   tenantId: string;
   assistantId?: string;
+  createdBy?: WorkflowInput['createdBy'];
   contextChunks?: WorkflowInput['contextChunks'];
   metadata?: WorkflowInput['metadata'];
   recurrence: MissionRecurrence;
@@ -126,6 +127,7 @@ export async function createMissionSchedule(
     prompt: input.prompt,
     tenantId: input.tenantId || 'tenant-1',
     ...(input.assistantId ? { assistantId: input.assistantId } : {}),
+    ...(input.createdBy ? { createdBy: input.createdBy } : {}),
     ...(input.contextChunks ? { contextChunks: input.contextChunks } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
     recurrence,
@@ -198,6 +200,7 @@ async function updateSchedule(
     missionId: occurrenceMissionId,
     tenantId: schedule.tenantId,
     assistantId: schedule.assistantId || '',
+    createdBy: schedule.createdBy,
     prompt: schedule.prompt,
     metadata: {
       ...schedule.metadata,

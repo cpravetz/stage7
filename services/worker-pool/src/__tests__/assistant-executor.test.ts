@@ -1,6 +1,7 @@
 import { AssistantExecutor } from '../services/AssistantExecutor';
 import { KnowledgeService } from '../services/KnowledgeService';
 import { AssistantDefinition, MCPToolCall, logger } from '@stage7-nextgen/shared';
+import type { SpendLimitRefusalPayload } from '@stage7-nextgen/shared';
 import { validateCatalogIntegrity } from '../routes/assistants';
 import { createTestArtifactsService } from './testArtifactsService';
 
@@ -283,6 +284,91 @@ describe('AssistantExecutor', () => {
     });
   });
 
+  describe('brain spend attribution', () => {
+    it('sends the assistant owner as userId on brain completions', async () => {
+      const definition: AssistantDefinition = {
+        id: 'assistant-owner',
+        tenantId: 'tenant-1',
+        ownerId: 'usr_owner',
+        name: 'Owned Assistant',
+        description: 'An owned assistant',
+        systemPrompt: 'You are a helpful assistant.',
+        tools: [],
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+      const brainBodies: Array<Record<string, unknown>> = [];
+      try {
+        (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+          const urlStr = String(url);
+          if (urlStr.includes('/api/brain/embeddings')) {
+            return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+          }
+          if (urlStr.includes('/api/brain/complete')) {
+            brainBodies.push(JSON.parse(init.body));
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ content: 'Final answer.', model: 'gpt-4o-mini' }),
+              text: async () => '',
+            } as any;
+          }
+          return originalFetch(url, init);
+        });
+
+        const result = await executor.execute(definition, 'Hello');
+        expect(result.success).toBe(true);
+        expect(brainBodies.length).toBeGreaterThan(0);
+        expect(brainBodies[0].userId).toBe('usr_owner');
+      } finally {
+        (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+      }
+    });
+
+    it('omits userId when the assistant has no owner, leaving spend to the system bucket', async () => {
+      const definition: AssistantDefinition = {
+        id: 'assistant-orphan',
+        tenantId: 'tenant-1',
+        name: 'Ownerless Assistant',
+        description: 'No owner recorded',
+        systemPrompt: 'You are a helpful assistant.',
+        tools: [],
+        metadata: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+      const brainBodies: Array<Record<string, unknown>> = [];
+      try {
+        (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+          const urlStr = String(url);
+          if (urlStr.includes('/api/brain/embeddings')) {
+            return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+          }
+          if (urlStr.includes('/api/brain/complete')) {
+            brainBodies.push(JSON.parse(init.body));
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ content: 'Final answer.', model: 'gpt-4o-mini' }),
+              text: async () => '',
+            } as any;
+          }
+          return originalFetch(url, init);
+        });
+
+        const result = await executor.execute(definition, 'Hello');
+        expect(result.success).toBe(true);
+        expect(brainBodies.length).toBeGreaterThan(0);
+        expect(brainBodies[0].userId).toBeUndefined();
+      } finally {
+        (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+      }
+    });
+  });
+
   describe('executeToolCall', () => {
     it('should return result for known tools', async () => {
       const toolCall: MCPToolCall = {
@@ -552,5 +638,153 @@ describe('Catalog validation', () => {
     const result = validateCatalogIntegrity(catalog as any);
     expect(result.valid).toBe(true);
     expect(result.orphaned).toHaveLength(0);
+  });
+});
+
+describe('brain spend-limit refusal propagation (OD-5 finding B)', () => {
+  const definition: AssistantDefinition = {
+    id: 'assistant-capped',
+    tenantId: 'tenant-1',
+    name: 'Capped Assistant',
+    description: 'An assistant whose owner is capped',
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [],
+    metadata: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  let executor: AssistantExecutor;
+
+  beforeEach(async () => {
+    executor = new AssistantExecutor(new KnowledgeService(createTestArtifactsService()));
+  });
+
+  function mockBrain(status: number, body: unknown): () => void {
+    const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+    (global.fetch as jest.Mock).mockImplementation(async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/api/brain/embeddings')) {
+        return { ok: true, status: 200, json: async () => ({ available: false }), text: async () => '' } as any;
+      }
+      if (urlStr.includes('/api/brain/complete')) {
+        const text = typeof body === 'string' ? body : JSON.stringify(body);
+        return { ok: status < 400, status, statusText: 'Too Many Requests', json: async () => body, text: async () => text } as any;
+      }
+      return originalFetch(url, {});
+    });
+    return () => (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+  }
+
+  it('carries the Brain 429 refusal contract on the failed result', async () => {
+    const REFUSAL = {
+      error: 'SPEND_LIMIT_REACHED',
+      userId: 'usr_owner',
+      period: 'month',
+      limit: 25,
+      spent: 25.03,
+      periodEnd: '2026-12-01T00:00:00.000Z',
+    };
+    const restore = mockBrain(429, REFUSAL);
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toEqual(REFUSAL);
+      expect(result.error).toContain('spending limit');
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not fabricate a refusal from a malformed 429 body', async () => {
+    const restore = mockBrain(429, { error: 'SPEND_LIMIT_REACHED' });
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.error).toContain('Brain returned 429');
+    } finally {
+      restore();
+    }
+  });
+
+  it('leaves non-429 brain failures untouched', async () => {
+    const restore = mockBrain(503, { error: 'provider down' });
+    try {
+      const result = await executor.execute(definition, 'Hello');
+      expect(result.success).toBe(false);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.error).toContain('Brain returned 503');
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe('executeToolCall spend-refusal surfacing (OD-5 finding B)', () => {
+  const REFUSAL: SpendLimitRefusalPayload = {
+    error: 'SPEND_LIMIT_REACHED',
+    userId: 'usr_owner',
+    period: 'month',
+    limit: 25,
+    spent: 25.03,
+    periodEnd: '2026-12-01T00:00:00.000Z',
+  };
+
+  let executor: AssistantExecutor;
+
+  beforeEach(async () => {
+    executor = new AssistantExecutor(new KnowledgeService(createTestArtifactsService()));
+  });
+
+  function mockToolExecutor(status: number, body: string): () => void {
+    const defaultImpl = (global.fetch as jest.Mock).getMockImplementation();
+    (global.fetch as jest.Mock).mockImplementation(async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/api/tool-executor/tools/execute')) {
+        return new Response(body, {
+          status,
+          statusText: status === 429 ? 'Too Many Requests' : 'Internal Server Error',
+          headers: { 'Content-Type': 'application/json' },
+        }) as any;
+      }
+      return defaultImpl(url, init);
+    });
+    return () => (global.fetch as jest.Mock).mockImplementation(defaultImpl);
+  }
+
+  it('surfaces the tool-executor 429 contract as spendRefusal', async () => {
+    const restore = mockToolExecutor(429, JSON.stringify(REFUSAL));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toEqual(REFUSAL);
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not fabricate a refusal from a malformed 429 body', async () => {
+    const restore = mockToolExecutor(429, JSON.stringify({ error: 'SPEND_LIMIT_REACHED' }));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.content[0].text).toContain('Tool executor returned 429');
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps non-429 tool-executor failures plain', async () => {
+    const restore = mockToolExecutor(500, JSON.stringify({ success: false, error: 'boom' }));
+    try {
+      const result = await executor.executeToolCall({ name: 'reasoner', arguments: {} }, 'assistant-capped');
+      expect(result.isError).toBe(true);
+      expect(result.spendRefusal).toBeUndefined();
+      expect(result.content[0].text).toContain('Tool executor returned 500');
+    } finally {
+      restore();
+    }
   });
 });

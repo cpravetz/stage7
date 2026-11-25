@@ -12,9 +12,11 @@ import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
-import { NextGenError, httpRequest, interServiceTimeoutMs } from '@stage7-nextgen/shared';
+import { NextGenError, httpRequest, interServiceTimeoutMs, spendLimitsSettings } from '@stage7-nextgen/shared';
 import { providerTimeoutMs } from '../utils/providerFetch';
 import { EntityMemoryStore } from './EntityMemoryStore';
+import { SpendGate, SpendLimitReachedError, getSpendGate } from './SpendGate';
+import type { SpendReservation } from './SpendGate';
 
 export interface CompletionOptions {
   schema?: z.ZodSchema;
@@ -28,6 +30,8 @@ export interface CompletionOptions {
   entityId?: string;
   assistantId?: string;
   tenantId?: string;
+  /** Attribution for per-user spend limits; unresolved callers fall to the system bucket. */
+  userId?: string;
   inputFormat?: string;
   outputFormat?: string;
 }
@@ -171,6 +175,7 @@ export class BrainService {
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
   private embeddingProbe: { result: { provider: LLMProvider; modelId: string } | null; expiresAt: number } | null = null;
+  private readonly spendGate: SpendGate = getSpendGate();
 
   // Performance tracking - persisted to artifacts service
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
@@ -428,6 +433,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       return { ...cachedResult, cached: true };
     }
 
+    // Pre-call spend gate: after the cache lookup (cached answers cost
+    // nothing and still serve when capped) and before candidate selection,
+    // so every billable call passes the gate exactly once.
+    const spendReservation = await this.enforceSpendLimit(prompt, options, startTime, promptPreview);
+
     await this.modelCatalogReady;
     this.router.setPerformanceMetrics(await this.loadPerformanceMetrics());
 
@@ -464,6 +474,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         const reason = eligibleCandidates.length === 0
           ? 'No models are eligible under the current Brain settings'
           : `All ${eligibleCandidates.length} eligible models have already been tried`;
+        if (spendReservation) this.spendGate.refund(spendReservation);
         const error = new NextGenError(`${reason}${settings?.freeModelsOnly ? ' (free models only is enabled)' : ''}.`, 503, {
           code: BRAIN_MODEL_SELECTION_EXHAUSTED,
           eligibleModelCount: eligibleCandidates.length,
@@ -481,6 +492,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         throw error;
       }
       const errMsg = 'No model available for the requested task under the current Brain settings. Ensure an eligible LLM provider is configured.';
+      if (spendReservation) this.spendGate.refund(spendReservation);
       this.addLog({
         type: 'error',
         promptPreview,
@@ -624,6 +636,13 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           const estimatedCost = typeof response.tokensUsed === 'number' && typeof candidate.model.costPer1kTokens === 'number'
             ? (response.tokensUsed / 1000) * candidate.model.costPer1kTokens
             : undefined;
+
+          // True the pre-call reservation up to the actual estimated cost
+          // (fire-and-forget; a ledger failure never fails the completion).
+          if (spendReservation) {
+            this.spendGate.reconcile(spendReservation, estimatedCost);
+          }
+
 
           this.addLog({
             type: 'completion',
@@ -875,6 +894,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       // verdict: the caller retries, the routing session hands it a model that
       // has not been tried yet, and the next call gets a fresh deadline. Only
       // an exhausted model set is reported as a terminal failure.
+      if (spendReservation) this.spendGate.refund(spendReservation);
       throw new NextGenError(message, 503, {
         code,
         eligibleModelCount: eligibleCandidates.length,
@@ -884,7 +904,56 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         deadlineExpired: Date.now() >= completionDeadline,
       });
     }
+    if (spendReservation) this.spendGate.refund(spendReservation);
     throw new Error(finalErrMsg);
+  }
+
+  /**
+   * Resolves the call's attribution and reserves estimated spend for it.
+   * Throws SpendLimitReachedError at the cap and a 503-class error when the
+   * limit or ledger state is unreadable (fail closed); the refusal is logged
+   * like any other completion failure before propagating.
+   */
+  private async enforceSpendLimit(
+    prompt: string,
+    options: CompletionOptions,
+    startTime: number,
+    promptPreview: string,
+  ): Promise<SpendReservation | null> {
+    try {
+      // Operator defaults live in the settings document; refresh (TTL-cached,
+      // never rejects) so an operator-set `system` cap is hot-applied like the
+      // brain settings were before the OD-8 revert.
+      await spendLimitsSettings.refresh();
+      const estimate = this.estimateMaxCompletionCostUsd(prompt, options.systemPrompt, options.maxTokens);
+      return await this.spendGate.enforce(options.userId, estimate);
+    } catch (err) {
+      if (!(err instanceof SpendLimitReachedError)) {
+        logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Spend gate failed closed');
+      }
+      this.addLog({
+        type: 'error',
+        promptPreview,
+        missionId: options.missionId,
+        success: false,
+        durationMs: Date.now() - startTime,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Conservative pre-call reservation in estimated USD: the worst registered
+   * model rate priced over prompt tokens plus the full requested completion
+   * size. Reconciliation trues the ledger up to the actual estimate after the
+   * call; an unpriced model catalogue reserves nothing.
+   */
+  private estimateMaxCompletionCostUsd(prompt: string, systemPrompt: string | undefined, maxTokens: number | undefined): number {
+    const models = this.router.listModels();
+    const maxRate = models.reduce((max, model) => Math.max(max, model.costPer1kTokens || 0), 0);
+    const estimatedTokens = Math.ceil(((systemPrompt?.length ?? 0) + prompt.length) / 3.5) + (maxTokens ?? 1024);
+    return (estimatedTokens / 1000) * maxRate;
   }
 
   private async loadLlmSettings(): Promise<{ freeModelsOnly: boolean } | null> {
