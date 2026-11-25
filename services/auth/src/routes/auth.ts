@@ -6,7 +6,7 @@ import { LoginRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } fr
 import { PersistentUserStore, PersistentServiceAccountStore } from '../data/stores';
 
 const router: Router = Router();
-const tokenService = new TokenService();
+const tokenService = new TokenService(process.env.JWT_SECRET);
 const rbacService = new RBACService();
 
 const userStore = new PersistentUserStore();
