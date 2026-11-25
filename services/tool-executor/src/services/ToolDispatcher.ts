@@ -12,6 +12,8 @@ import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';
 import { MCPClient, MCPHTTPClient } from '../services/MCPClient';
 import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
+import { extractJsonObject } from '../adk/resilience';
+import { assertPublicUrl } from '../utils/assertPublicUrl';
 import { schemaRecord, type ToolConfigResolver } from './ToolConfig';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
@@ -113,12 +115,11 @@ export class ToolDispatcher {
       }
 
       const data = (await response.json()) as { content: string };
-      const jsonMatch = data.content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
+      const parsed = extractJsonObject(data.content);
+      if (!parsed) {
         return { success: false, error: 'LLM response did not contain valid JSON' };
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
       const fixedSourceCode = parsed.sourceCode as string;
       if (!fixedSourceCode || typeof fixedSourceCode !== 'string') {
         return { success: false, error: 'LLM response missing sourceCode' };
@@ -344,30 +345,18 @@ export class ToolDispatcher {
         const method = ((manifest?.method as string) || 'GET').toUpperCase();
         const url = urlTemplate.replace(/\{(\w+)\}/g, (_, key) => encodeURIComponent((input[key] as string) || key));
 
-        // SSRF guard: validate the resolved URL
+        // SSRF guard: validate the resolved URL (lexical checks only; DNS
+        // resolution is out of scope — see assertPublicUrl).
         let targetUrl: URL;
         try {
           targetUrl = new URL(url);
         } catch {
           return { error: `Invalid URL template: ${urlTemplate}` };
         }
-        if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
-          return { error: `URL must use http or https, got ${targetUrl.protocol}` };
-        }
-        if (targetUrl.username || targetUrl.password) {
-          return { error: 'URL must not embed credentials' };
-        }
-        const hostname = targetUrl.hostname.toLowerCase();
-        if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
-          return { error: 'Requests to localhost/internal hosts are not allowed' };
-        }
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
-          const parts = hostname.split('.').map(Number);
-          if (parts.some((p) => p > 255)) return { error: 'Invalid IP address' };
-          if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return { error: 'Requests to private IP ranges are not allowed' };
-          if (parts[0] === 192 && parts[1] === 168) return { error: 'Requests to private IP ranges are not allowed' };
-          if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return { error: 'Requests to private IP ranges are not allowed' };
-          if (parts[0] === 169 && parts[1] === 254) return { error: 'Requests to link-local addresses are not allowed' };
+        try {
+          assertPublicUrl(targetUrl);
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : 'URL failed the SSRF safety check' };
         }
 
         const fetchOptions: RequestInit = {
@@ -407,30 +396,12 @@ export class ToolDispatcher {
               } catch {
                 break;
               }
-              // SSRF guard: redirect must not go to private/internal addresses
-              const nextHostname = nextUrl.hostname.toLowerCase();
-              if (
-                nextHostname === 'localhost' ||
-                nextHostname.endsWith('.localhost') ||
-                nextHostname.endsWith('.local') ||
-                nextHostname.endsWith('.internal')
-              ) {
-                logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: localhost/internal host');
-                return { error: 'Redirect to localhost/internal host not allowed' };
-              }
-              if (/^\d{1,3}(\.\d{1,3}){3}$/.test(nextHostname)) {
-                const parts = nextHostname.split('.').map(Number);
-                if (
-                  parts[0] === 10 ||
-                  parts[0] === 127 ||
-                  parts[0] === 0 ||
-                  (parts[0] === 192 && parts[1] === 168) ||
-                  (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-                  (parts[0] === 169 && parts[1] === 254)
-                ) {
-                  logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: private IP range');
-                  return { error: 'Redirect to private IP range not allowed' };
-                }
+              try {
+                assertPublicUrl(nextUrl);
+              } catch (err) {
+                const reason = err instanceof Error ? err.message : 'unsafe redirect target';
+                logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected by SSRF guard');
+                return { error: `Redirect not allowed: ${reason}` };
               }
               currentUrl = nextUrl.toString();
               continue;

@@ -1,4 +1,5 @@
 import { Tool, SchemaRecord, SchemaProperty, SkillTrigger } from '../types'
+import { extractJsonObject } from './resilience'
 import { DEFAULT_SCHEMA_VERSION, resolveSchemaVersion } from './schema-version'
 import { withDerivedGate } from './gates'
 
@@ -1296,6 +1297,11 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       ctx.delegate = async function (toolId, toolInput) { return await __bridge(toolId, toolInput); };
     }
 
+    // Shared LLM-output parser, serialized verbatim from src/adk/resilience.ts
+    // via Function.prototype.toString: the sandboxed handler has no module
+    // scope, so skills call the same single implementation the host-side
+    // executors use instead of re-rolling the greedy-regex extraction.
+    const extractJsonObject = ${extractJsonObject.toString()};
     const handler = ${rawFnStr};
     try {
       const result = await handler(ctx.input, ctx);
