@@ -12,6 +12,7 @@ import { eventSkills } from '../src/assistants/event/index'
 import { pluginGenerator as routePluginGenerator, toolRegistry as routeToolRegistry } from '../src/utils/sharedInstance'
 import { mcpToolExecutive } from '../src/services/MCPToolExecutive'
 import type { SandboxExecutionDriver } from '../src/runners/SandboxExecutionDriver'
+import { requireIsolationRuntime } from './requireIsolationRuntime'
 
 const app: Application = express()
 app.use(express.json())
@@ -37,6 +38,9 @@ let repairedSourceCode = generatedSourceCode
 const generatedPluginSystemPrompts: string[] = []
 const originalFetch = global.fetch;
 beforeAll(() => {
+  // This suite exercises the real bwrap isolation path; fail fast with the
+  // missing dependency named instead of opaque result.success=false failures.
+  requireIsolationRuntime();
   global.fetch = jest.fn(async (url: any, init: any) => {
     const urlStr = String(url);
     if (urlStr.includes('/api/brain/complete')) {

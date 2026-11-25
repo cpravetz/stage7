@@ -4,8 +4,16 @@ import { PluginGenerator } from '../src/services/PluginGenerator';
 import { ToolDiscovery } from '../src/services/ToolDiscovery';
 import { CodeExecutor } from '../src/executors/CodeExecutor';
 import { credentialProvider } from '../src/services/CredentialProvider';
+import { requireIsolationRuntime } from './requireIsolationRuntime';
 
 describe('mission tool configuration', () => {
+  beforeAll(() => {
+    // This suite validates generated tools through the real bwrap isolation
+    // path; fail fast with the missing dependency named instead of opaque
+    // result.success=false failures.
+    requireIsolationRuntime();
+  });
+
   const tool: Tool = {
     id: 'sms-probe',
     name: 'SMS probe',

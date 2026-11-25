@@ -37,7 +37,7 @@ npm ci                                 # install root workspaces
 (cd frontend-nextgen && npm ci)        # frontend deps (separate lockfile)
 npm run build --workspaces --if-present  # build shared + services
 npm run lint                           # eslint (tool-executor, worker-pool, shared-nextgen)
-npm test                               # jest unit + integration tests
+npm test                               # jest unit + integration tests (requires bubblewrap — see Local verification)
 cd frontend-nextgen && npm run dev     # vite dev server on :8080
 ```
 
@@ -82,10 +82,14 @@ contracts compiled into tools by tool-executor (ADK docs in `docs/ADK/`).
 ## Local verification
 
 1. `redis-cli ping` → PONG; mongod accepting connections on 27017.
-2. All 10 service health endpoints return `{"status":"ok",...}`.
-3. Login through the gateway: `POST /api/auth/login` with the seeded admin, then exercise
+2. Plugin isolation tests (`tool-executor.test.ts`, `mission-tool-config.test.ts`) execute generated
+   plugins through the bwrap sandbox. Install it first — `sudo apt-get install bubblewrap`
+   (Fedora: `sudo dnf install bubblewrap`); `prlimit` and `python3` must also be on `/usr/bin`.
+   Without it those suites fail fast in `beforeAll` naming the missing dependency.
+3. All 10 service health endpoints return `{"status":"ok",...}`.
+4. Login through the gateway: `POST /api/auth/login` with the seeded admin, then exercise
    artifacts CRUD (`POST/GET/PUT/DELETE /api/artifacts/documents`) — verified durable in Mongo.
-4. Frontend dashboard at :8080 shows "N Services Online" with zero console errors.
+5. Frontend dashboard at :8080 shows "N Services Online" with zero console errors.
 
 ## Snapshot
 
