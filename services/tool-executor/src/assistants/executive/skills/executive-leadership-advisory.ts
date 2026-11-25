@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory';

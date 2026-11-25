@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
@@ -57,20 +56,20 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
       const NL = '\n';
       const SAFETY = "Executive communication advisory only: drafts are for review and editing; do not send without human approval.";
 
-      function fail(status, message, title, extra) {
-        const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+      function fail(status: string, message: string, title: string, extra?: Record<string, unknown>) {
+        const base: Record<string, unknown> = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
         if (extra) { for (const key in extra) { base[key] = extra[key]; } }
         return base;
       }
 
       const occasion = input.occasion || '';
       const audience = input.audience || '';
-      const keyMessages = Array.isArray(input.keyMessages) ? input.keyMessages : [];
+      const keyMessages: string[] = Array.isArray(input.keyMessages) ? input.keyMessages : [];
       const tone = input.tone || 'executive';
       const length = input.length || 'medium';
       const format = input.format || 'speech';
       const context = input.context || '';
-      const constraints = Array.isArray(input.constraints) ? input.constraints : [];
+      const constraints: string[] = Array.isArray(input.constraints) ? input.constraints : [];
 
       if (!occasion && !audience && keyMessages.length === 0) {
         return fail('not-connected', 'Not connected: provide at least occasion, audience, or key messages', 'Input required');
