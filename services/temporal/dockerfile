@@ -8,6 +8,7 @@ RUN apt-get update \
 WORKDIR /usr/src/app
 
 COPY package*.json ./
+COPY tsconfig.base.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/temporal/package*.json ./services/temporal/
 COPY services/temporal/tsconfig.json ./services/temporal/

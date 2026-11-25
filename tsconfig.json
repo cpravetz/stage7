@@ -1,23 +1,18 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "commonjs",
     "lib": ["ES2022", "dom"],
-    "declaration": true,
     "outDir": "./dist",
     "rootDir": "./",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "paths": {
       "@stage7-nextgen/shared": ["./shared-nextgen/src"],
-      "@stage7-nextgen/shared/*": ["./shared-nextgen/src/*"]
+      "@stage7-nextgen/shared/*": ["./shared-nextgen/src/*"],
+      "@stage7-nextgen/artifacts": ["./services/artifacts/src"],
+      "@stage7-nextgen/artifacts/*": ["./services/artifacts/src/*"]
     },
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },

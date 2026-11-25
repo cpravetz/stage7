@@ -5,6 +5,7 @@ RUN apk add --no-cache python3 make g++ vips-dev
 WORKDIR /usr/src/app
 
 COPY package*.json ./
+COPY tsconfig.base.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/agent-runtime/package*.json ./services/agent-runtime/
 COPY services/artifacts/package*.json ./services/artifacts/

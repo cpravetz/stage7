@@ -6,7 +6,7 @@
     "services/*"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build -w @stage7-nextgen/shared -w @stage7-nextgen/artifacts && npm run build -w @stage7-nextgen/agent-runtime -w @stage7-nextgen/auth -w @stage7-nextgen/brain -w @stage7-nextgen/gateway -w @stage7-nextgen/temporal -w @stage7-nextgen/tool-executor -w @stage7-nextgen/vault -w @stage7-nextgen/worker-pool",
     "start": "node dist/index.js",
     "lint:md": "markdownlint --config .markdownlint.json \"**/*.md\"",
     "test": "jest",
