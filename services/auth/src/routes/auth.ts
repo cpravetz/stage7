@@ -4,7 +4,7 @@ import { Router, Request, Response } from 'express';
 import { asyncHandler, healthRouter, NextGenError, logger } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
-import { LoginRequest, RegisterRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
+import { LoginRequest, RegisterRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount, TokenPayload } from '../types';
 import { PersistentUserStore, PersistentServiceAccountStore } from '../data/stores';
 
 const router: Router = Router();
@@ -165,6 +165,17 @@ router.post('/service/auth', asyncHandler(async (req: Request, res: Response) =>
   res.status(200).json(result);
 }));
 
+// Expired-but-well-signed tokens are accepted (deliberate: no rotation yet,
+// OD-9 trade-off); anything the JWT cannot verify at all — malformed or bad
+// signature — is a plain 401, never a 500.
+const decodeExpiredToken = (token: string): TokenPayload | null => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key', { ignoreExpiration: true }) as TokenPayload;
+  } catch {
+    return null;
+  }
+};
+
 router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.body;
 
@@ -172,7 +183,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
     throw NextGenError.badRequest('Token is required');
   }
 
-  const payload = tokenService.verifyToken(token) || (jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key', { ignoreExpiration: true }) as any);
+  const payload = tokenService.verifyToken(token) || decodeExpiredToken(token);
   if (!payload) {
     throw NextGenError.unauthorized('Invalid or expired token');
   }

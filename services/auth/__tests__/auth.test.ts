@@ -244,6 +244,15 @@ describe('Auth', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.token).toBeDefined();
     });
+
+    it('returns 401 — not 500 — for a malformed or bad-signature token', async () => {
+      const response = await request(app)
+        .post('/api/auth/refresh')
+        .send({ token: 'garbage.token.value' });
+
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Invalid or expired token');
+    });
   });
 
   describe('POST /api/auth/users/:id/roles', () => {
