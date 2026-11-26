@@ -1,9 +1,10 @@
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { Router, Request, Response } from 'express';
-import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, healthRouter, NextGenError, logger } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
-import { LoginRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
+import { LoginRequest, RegisterRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
 import { PersistentUserStore, PersistentServiceAccountStore } from '../data/stores';
 
 const router: Router = Router();
@@ -14,12 +15,33 @@ const userStore = new PersistentUserStore();
 const serviceStore = new PersistentServiceAccountStore();
 
 const DEFAULT_ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
-const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change-me-in-production';
 const DEFAULT_ADMIN_TENANT = process.env.ADMIN_TENANT || 'tenant-1';
+
+// bcryptjs cost 10 — matches the TokenService.hashApiKey convention.
+const BCRYPT_COST = 10;
+
+/** Pure: copy a user without its passwordHash — the hash never leaves the service. */
+const stripPasswordHash = (user: User): Omit<User, 'passwordHash'> => {
+  const copy: Omit<User, 'passwordHash'> & { passwordHash?: string } = { ...user };
+  delete copy.passwordHash;
+  return copy;
+};
 
 async function ensureDefaultAdmin(): Promise<User> {
   const existing = await userStore.findByEmail(DEFAULT_ADMIN_EMAIL);
   if (existing) return existing;
+
+  // Deliberately fail closed: an admin seeded without ADMIN_PASSWORD has no
+  // usable credential (login refuses hash-less accounts) rather than a
+  // default password. Set ADMIN_PASSWORD and restart to seed a usable one.
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    logger.warn(
+      `[auth] ADMIN_PASSWORD is not set: seeding ${DEFAULT_ADMIN_EMAIL} without a credential. ` +
+      'Login for this account will be refused until ADMIN_PASSWORD is set and the service is restarted.'
+    );
+  }
+
   return userStore.create({
     id: 'user-admin',
     tenantId: DEFAULT_ADMIN_TENANT,
@@ -29,12 +51,20 @@ async function ensureDefaultAdmin(): Promise<User> {
     roles: ['admin'],
     permissions: ['read', 'write', 'delete'],
     metadata: {},
+    ...(adminPassword ? { passwordHash: await bcrypt.hash(adminPassword, BCRYPT_COST) } : {}),
   });
 }
 
-ensureDefaultAdmin().catch((err) => {
-  console.error('Failed to seed default admin:', err);
-});
+/**
+ * Resolves once the module-load admin seed attempt settles. Exported so test
+ * harnesses can await seeding deterministically — the seed does real bcrypt
+ * work and no longer completes within the first request's microtasks.
+ */
+export const adminSeedReady: Promise<void> = ensureDefaultAdmin()
+  .then(() => undefined)
+  .catch((err) => {
+    console.error('Failed to seed default admin:', err);
+  });
 
 router.use(healthRouter({ service: 'auth' }));
 
@@ -54,14 +84,63 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
     throw NextGenError.unauthorized('Invalid tenant');
   }
 
+  // Fail closed: an account without a stored hash (e.g. seeded without
+  // ADMIN_PASSWORD, or created by the bearer-gated admin POST /users) can
+  // never authenticate. The real reason is logged server-side only — the
+  // response never discloses account state.
+  if (!user.passwordHash) {
+    logger.error({ email }, 'Login failed: account has no passwordHash set');
+    throw NextGenError.unauthorized('Invalid credentials');
+  }
+
+  if (!(await bcrypt.compare(password, user.passwordHash))) {
+    logger.error({ email }, 'Login failed: password does not match');
+    throw NextGenError.unauthorized('Invalid credentials');
+  }
+
   const token = tokenService.generateUserToken(user);
   const result: AuthResult = {
     success: true,
-    user,
+    user: stripPasswordHash(user),
     token,
   };
 
   res.status(200).json(result);
+}));
+
+/**
+ * Public self-registration — the only path that creates an account with a
+ * usable credential. The gateway allowlists `auth/register`; POST /users
+ * stays the bearer-gated admin path (it discards passwords and therefore
+ * creates only fail-closed accounts).
+ */
+router.post('/register', asyncHandler(async (req: Request, res: Response) => {
+  const { email, password, name, tenantId } = req.body as RegisterRequest;
+
+  if (!email || !password || password.length < 8) {
+    throw NextGenError.badRequest('Email and a password of at least 8 characters are required');
+  }
+
+  if (await userStore.findByEmail(email)) {
+    throw new NextGenError('Email already registered', 409);
+  }
+
+  const user = await userStore.create({
+    id: `user-${Date.now()}`,
+    tenantId: typeof tenantId === 'string' && tenantId.trim() ? tenantId.trim() : 'tenant-1',
+    orgId: 'org-1',
+    email,
+    name: name || email,
+    roles: ['user'],
+    permissions: ['read'],
+    metadata: {},
+    passwordHash: await bcrypt.hash(password, BCRYPT_COST),
+  });
+
+  // The register flow stores the returned session and lands on the
+  // Dashboard, so the response mints the token the same way login does.
+  const token = tokenService.generateUserToken(user);
+  res.status(201).json({ success: true, user: stripPasswordHash(user), token });
 }));
 
 router.post('/service/auth', asyncHandler(async (req: Request, res: Response) => {
@@ -162,7 +241,7 @@ router.post('/users', asyncHandler(async (req: Request, res: Response) => {
 
 router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
   const users = await userStore.list();
-  res.json({ users });
+  res.json({ users: users.map(stripPasswordHash) });
 }));
 
 router.post('/services', asyncHandler(async (req: Request, res: Response) => {

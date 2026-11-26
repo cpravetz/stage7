@@ -138,6 +138,14 @@ describe('Gateway proxy authentication', () => {
     expect(downstreamHits).toBe(1);
   });
 
+  it('keeps self-registration public — the only way to create the first account', async () => {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'someone@example.com', password: 'long-enough', name: 'Someone' });
+    expect(response.status).toBe(200);
+    expect(downstreamHits).toBe(1);
+  });
+
   it('keeps health probes public', async () => {
     const response = await request(app).get('/api/downstream/health');
     expect(response.status).toBe(200);
@@ -159,6 +167,7 @@ describe('Gateway proxy authentication', () => {
   describe('isPublicProxyPath', () => {
     it('keeps token-minting auth endpoints public and normalizes trailing slashes', () => {
       expect(isPublicProxyPath('auth', 'login')).toBe(true);
+      expect(isPublicProxyPath('auth', 'register')).toBe(true);
       expect(isPublicProxyPath('auth', 'service/auth')).toBe(true);
       expect(isPublicProxyPath('auth', 'refresh/')).toBe(true);
       expect(isPublicProxyPath('auth', 'verify')).toBe(true);
