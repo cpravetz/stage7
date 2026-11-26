@@ -7,6 +7,14 @@ export interface User {
   roles: string[];
   permissions: string[];
   metadata: Record<string, unknown>;
+  /**
+   * bcrypt hash of the user's password (bcryptjs, cost 10). Optional on the
+   * type only because the admin seed creates the account without one when
+   * ADMIN_PASSWORD is unset — such an account fails closed at login and is
+   * remediated by re-registering. The hash is persisted but never leaves the
+   * auth service: every response strips it.
+   */
+  passwordHash?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +52,13 @@ export interface AuthResult {
 export interface LoginRequest {
   email: string;
   password: string;
+  tenantId?: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  name?: string;
   tenantId?: string;
 }
 

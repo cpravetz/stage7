@@ -72,8 +72,10 @@ builds `shared-nextgen` and `artifacts` first. Every tsconfig extends the root
 
 `.env.example` is the authoritative template; `env.summary` maps every variable to the
 services that read it. Required to boot: Mongo/Redis connection vars, `MASTER_KEY`.
-`ADMIN_EMAIL`/`ADMIN_PASSWORD` (defaults `admin@example.com` / `change-me-in-production`)
-seed the auth admin. LLM provider keys are optional for local dev.
+`ADMIN_EMAIL` (default `admin@example.com`) seeds the auth admin; the seed hashes
+`ADMIN_PASSWORD` into a `passwordHash` — if `ADMIN_PASSWORD` is unset the account
+is created with no usable credential and login fails closed until it is set and
+the service restarts. LLM provider keys are optional for local dev.
 
 ## Codebase map
 

@@ -13,6 +13,7 @@ const requireToken = requireServiceToken();
  */
 const PUBLIC_PROXY_PATHS = new Set([
   'auth/login',
+  'auth/register',
   'auth/service/auth',
   'auth/refresh',
   'auth/verify',

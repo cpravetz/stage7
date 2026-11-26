@@ -1,12 +1,18 @@
 import request from 'supertest';
 import express from 'express';
-import authRoutes from '../src/routes/auth';
+import authRoutes, { adminSeedReady } from '../src/routes/auth';
 import { TokenService } from '../src/services/TokenService';
 import { RBACService } from '../src/services/RBACService';
 
 describe('Auth', () => {
   let app: express.Application;
   const tokenService = new TokenService('test-secret');
+
+  beforeAll(async () => {
+    // The admin seed hashes ADMIN_PASSWORD at module load — await it so the
+    // login tests cannot outrun it.
+    await adminSeedReady;
+  });
 
   beforeEach(() => {
     app = express();
@@ -71,21 +77,25 @@ describe('Auth', () => {
       jest.restoreAllMocks();
     });
 
-    function freshAuthApp(): express.Application {
+    async function freshAuthApp(): Promise<express.Application> {
       let router: express.Router | undefined;
+      let ready: Promise<void> = Promise.resolve();
       jest.isolateModules(() => {
-        router = require('../src/routes/auth').default;
+        const mod = require('../src/routes/auth');
+        router = mod.default;
+        ready = mod.adminSeedReady;
       });
-      const app = express();
-      app.use(express.json());
-      app.use('/api/auth', router as express.Router);
-      return app;
+      await ready;
+      const fresh = express();
+      fresh.use(express.json());
+      fresh.use('/api/auth', router as express.Router);
+      return fresh;
     }
 
     it('signs route tokens with JWT_SECRET from the environment when set', async () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       process.env.JWT_SECRET = 'route-level-secret';
-      const app = freshAuthApp();
+      const app = await freshAuthApp();
 
       const response = await request(app)
         .post('/api/auth/login')
@@ -102,7 +112,7 @@ describe('Auth', () => {
     it('warns once and falls back to the development default when JWT_SECRET is absent', async () => {
       delete process.env.JWT_SECRET;
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      const app = freshAuthApp();
+      const app = await freshAuthApp();
 
       const response = await request(app)
         .post('/api/auth/login')
@@ -164,6 +174,14 @@ describe('Auth', () => {
 
     it('should reject missing fields', async () => {
       const response = await request(app).post('/api/auth/login').send({});
+
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects a non-string email (Mongo operator-injection shape) with 400', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: { $ne: null }, password: 'password' });
 
       expect(response.status).toBe(400);
     });
@@ -234,6 +252,15 @@ describe('Auth', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.token).toBeDefined();
     });
+
+    it('returns 401 — not 500 — for a malformed or bad-signature token', async () => {
+      const response = await request(app)
+        .post('/api/auth/refresh')
+        .send({ token: 'garbage.token.value' });
+
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Invalid or expired token');
+    });
   });
 
   describe('POST /api/auth/users/:id/roles', () => {
@@ -250,6 +277,158 @@ describe('Auth', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.roles).toEqual(['editor']);
+    });
+  });
+
+  describe('POST /api/auth/register', () => {
+    it('creates a user with roles/permissions defaults and returns no passwordHash', async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'new-user@example.com', password: 'sup3r-secret', name: 'New User' });
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      // The register flow stores the returned session, so the response mints
+      // a token the same way login does.
+      expect(response.body.token).toBeDefined();
+      expect(response.body.user.email).toBe('new-user@example.com');
+      expect(response.body.user.roles).toEqual(['user']);
+      expect(response.body.user.permissions).toEqual(['read']);
+      expect(response.body.user.passwordHash).toBeUndefined();
+    });
+
+    it('rejects a duplicate email with 409', async () => {
+      await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'dup@example.com', password: 'long-enough' });
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'dup@example.com', password: 'long-enough' });
+      expect(response.status).toBe(409);
+    });
+
+    it('rejects a password shorter than 8 characters with 400', async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'short@example.com', password: 'short' });
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects a missing email with 400', async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ password: 'long-enough' });
+      expect(response.status).toBe(400);
+    });
+  });
+
+  describe('password verification in POST /api/auth/login', () => {
+    const registered = { email: 'verified@example.com', password: 'correct-horse-battery' };
+
+    beforeEach(async () => {
+      await request(app).post('/api/auth/register').send(registered);
+    });
+
+    it('accepts the registered password', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: registered.email, password: registered.password });
+
+      expect(response.status).toBe(200);
+      expect(response.body.token).toBeDefined();
+      expect(response.body.user.passwordHash).toBeUndefined();
+    });
+
+    it('rejects a wrong password with the generic message', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: registered.email, password: 'wrong-password' });
+
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Invalid credentials');
+    });
+
+    it('fails closed when the account has no passwordHash', async () => {
+      // POST /users (the bearer-gated admin path) discards the submitted
+      // password — the document it creates must never authenticate.
+      await request(app)
+        .post('/api/auth/users')
+        .send({ email: 'hashless@example.com', password: 'anything' });
+
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'hashless@example.com', password: 'anything' });
+
+      expect(response.status).toBe(401);
+      // Same generic message as a wrong password — no account-state leak.
+      expect(response.body.error).toBe('Invalid credentials');
+    });
+  });
+
+  describe('GET /api/auth/users', () => {
+    it('strips passwordHash from every returned user', async () => {
+      await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'strip@example.com', password: 'long-enough-8', name: 'Strip' });
+
+      const response = await request(app).get('/api/auth/users');
+
+      expect(response.status).toBe(200);
+      expect(response.body.users.length).toBeGreaterThan(0);
+      for (const user of response.body.users) {
+        expect(user.passwordHash).toBeUndefined();
+      }
+    });
+  });
+
+  describe('ensureDefaultAdmin seed', () => {
+    afterEach(() => {
+      // Restore the credential the jest config sets for the shared module
+      // instance's tests.
+      process.env.ADMIN_PASSWORD = 'change-me-in-production';
+    });
+
+    async function freshAuthApp(): Promise<express.Application> {
+      let router: express.Router | undefined;
+      let ready: Promise<void> = Promise.resolve();
+      jest.isolateModules(() => {
+        const mod = require('../src/routes/auth');
+        router = mod.default;
+        ready = mod.adminSeedReady;
+      });
+      await ready;
+      const fresh = express();
+      fresh.use(express.json());
+      fresh.use('/api/auth', router as express.Router);
+      return fresh;
+    }
+
+    it('seeds the admin with a hash of ADMIN_PASSWORD when set', async () => {
+      process.env.ADMIN_PASSWORD = 'seeded-admin-secret';
+      const seededApp = await freshAuthApp();
+
+      const good = await request(seededApp)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'seeded-admin-secret' });
+      expect(good.status).toBe(200);
+
+      const bad = await request(seededApp)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
+      expect(bad.status).toBe(401);
+    });
+
+    it('creates no usable credential when ADMIN_PASSWORD is unset — login fails closed', async () => {
+      delete process.env.ADMIN_PASSWORD;
+      const seededApp = await freshAuthApp();
+
+      for (const password of ['change-me-in-production', 'anything-at-all']) {
+        const response = await request(seededApp)
+          .post('/api/auth/login')
+          .send({ email: 'admin@example.com', password });
+        expect(response.status).toBe(401);
+        expect(response.body.error).toBe('Invalid credentials');
+      }
     });
   });
 });

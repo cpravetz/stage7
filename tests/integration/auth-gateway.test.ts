@@ -1,11 +1,17 @@
 import request from 'supertest';
 import express from 'express';
-import authRoutes from '../../services/auth/src/routes/auth';
+import authRoutes, { adminSeedReady } from '../../services/auth/src/routes/auth';
 import { TokenService } from '../../services/auth/src/services/TokenService';
 
 describe('Integration: Auth Service', () => {
   let app: express.Application;
   const tokenService = new TokenService();
+
+  beforeAll(async () => {
+    // The admin seed hashes ADMIN_PASSWORD at module load — await it so the
+    // first login test cannot outrun it.
+    await adminSeedReady;
+  });
 
   beforeEach(() => {
     app = express();

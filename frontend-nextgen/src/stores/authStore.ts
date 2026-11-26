@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import axios from 'axios';
+import api from '../services/api';
 
 interface AuthUser {
   id: string;
@@ -13,6 +15,7 @@ interface AuthState {
   token: string | null;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   setToken: (token: string) => void;
 }
@@ -30,6 +33,22 @@ export const useAuthStore = create<AuthState>((set) => ({
     const data = await res.json();
     localStorage.setItem('token', data.token);
     set({ token: data.token, user: data.user });
+  },
+  register: async (name, email, password) => {
+    try {
+      const res = await api.post('/auth/register', { name, email, password });
+      localStorage.setItem('token', res.data.token);
+      set({ token: res.data.token, user: res.data.user });
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        if (err.response?.status === 409) {
+          throw new Error('An account with this email already exists');
+        }
+        const message = (err.response?.data as { error?: string } | undefined)?.error;
+        throw new Error(message || 'Registration failed');
+      }
+      throw err;
+    }
   },
   logout: () => {
     localStorage.removeItem('token');

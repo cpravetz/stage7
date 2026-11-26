@@ -547,6 +547,21 @@ button:disabled {
   margin-bottom: 24px;
 }
 
+.login-footer {
+  color: #94a3b8;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.login-footer a {
+  color: #38bdf8;
+  text-decoration: none;
+}
+
+.login-footer a:hover {
+  text-decoration: underline;
+}
+
 .entity-workspace {
   display: flex;
   flex-direction: column;

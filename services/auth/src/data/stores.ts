@@ -1,4 +1,4 @@
-import { User, ServiceAccount } from '../types';
+import { logger, User, ServiceAccount } from '../types';
 
 export interface UserStore {
   create(user: Omit<User, 'createdAt' | 'updatedAt'>): Promise<User>;
@@ -82,8 +82,9 @@ export class PersistentUserStore implements UserStore {
         const { MongoUserStore } = require('./mongoStore');
         this.mongoStore = new MongoUserStore();
         await this.mongoStore.connect();
-      } catch {
+      } catch (err) {
         this.mongoStore = null;
+        logger.error({ err }, 'Mongo user store failed to connect; falling back to the in-memory user store — accounts will not persist');
       }
     })();
 
@@ -95,8 +96,8 @@ export class PersistentUserStore implements UserStore {
     if (this.mongoStore) {
       try {
         return await this.mongoStore.create(user);
-      } catch {
-        // fallback
+      } catch (err) {
+        logger.error({ err }, 'Mongo user store write failed; falling back to the in-memory user store — account will not persist');
       }
     }
     return this.fallback.create(user as any);
@@ -107,8 +108,8 @@ export class PersistentUserStore implements UserStore {
     if (this.mongoStore) {
       try {
         return await this.mongoStore.findByEmail(email);
-      } catch {
-        // fallback
+      } catch (err) {
+        logger.error({ err }, 'Mongo user store read failed; falling back to the in-memory user store');
       }
     }
     return this.fallback.findByEmail(email);
@@ -119,8 +120,8 @@ export class PersistentUserStore implements UserStore {
     if (this.mongoStore) {
       try {
         return await this.mongoStore.findById(id);
-      } catch {
-        // fallback
+      } catch (err) {
+        logger.error({ err }, 'Mongo user store read failed; falling back to the in-memory user store');
       }
     }
     return this.fallback.findById(id);
@@ -131,8 +132,8 @@ export class PersistentUserStore implements UserStore {
     if (this.mongoStore) {
       try {
         return await this.mongoStore.list();
-      } catch {
-        // fallback
+      } catch (err) {
+        logger.error({ err }, 'Mongo user store list failed; falling back to the in-memory user store');
       }
     }
     return this.fallback.list();
