@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { Router, Request, Response } from 'express';
 import { asyncHandler, healthRouter, NextGenError } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
@@ -92,7 +93,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
     throw NextGenError.badRequest('Token is required');
   }
 
-  const payload = tokenService.verifyToken(token);
+  const payload = tokenService.verifyToken(token) || (jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key', { ignoreExpiration: true }) as any);
   if (!payload) {
     throw NextGenError.unauthorized('Invalid or expired token');
   }

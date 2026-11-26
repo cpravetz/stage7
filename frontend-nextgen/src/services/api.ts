@@ -20,8 +20,24 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
+  async (error) => {
+    const original = error.config;
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const res = await axios.post('/api/auth/refresh', { token });
+          const newToken = res.data?.token;
+          if (newToken) {
+            localStorage.setItem('token', newToken);
+            original.headers.Authorization = `Bearer ${newToken}`;
+            return api(original);
+          }
+        } catch {
+          // fall through to logout
+        }
+      }
       localStorage.removeItem('token');
       window.location.href = '/login';
     }

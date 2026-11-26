@@ -21,7 +21,7 @@ import { useAuthStore } from '../stores/authStore';
  * go out headerless. Callers that pass explicit headers still win.
  */
 export function withAuthHeaders(init?: RequestInit): RequestInit {
-  const token = useAuthStore.getState().token;
+  const token = useAuthStore.getState().token || localStorage.getItem('token');
   if (!token) return init ?? {};
   return {
     ...init,

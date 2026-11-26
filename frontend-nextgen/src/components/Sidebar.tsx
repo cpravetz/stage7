@@ -1,7 +1,15 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import stage7Logo from '../assets/stage7_logo.svg';
 
+import { useAuthStore } from '../stores/authStore';
+
 const Sidebar = () => {
+  const logout = useAuthStore((s) => s.logout);
+  const navigate = useNavigate();
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
   const navItems = [
     { path: '/', label: 'Dashboard', icon: '📊' },
     { path: '/assistants', label: 'Assistants', icon: '🤖' },
@@ -17,6 +25,7 @@ const Sidebar = () => {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
+        <button className="sidebar-logout" onClick={handleLogout}>Logout</button>
         <img src={stage7Logo} alt="Stage7" className="sidebar-logo" />
       </div>
       <nav className="sidebar-nav">
