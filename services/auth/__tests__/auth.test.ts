@@ -177,6 +177,14 @@ describe('Auth', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('rejects a non-string email (Mongo operator-injection shape) with 400', async () => {
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: { $ne: null }, password: 'password' });
+
+      expect(response.status).toBe(400);
+    });
   });
 
   describe('POST /api/auth/service/auth', () => {

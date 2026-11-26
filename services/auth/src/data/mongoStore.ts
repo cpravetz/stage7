@@ -30,6 +30,10 @@ export class MongoUserStore extends MongoBaseStore {
 
   async findByEmail(email: string): Promise<User | undefined> {
     if (!this.users) await this.connect();
+    // Query filters are built from request bodies upstream; a non-string
+    // value (e.g. { $ne: null } from a JSON payload) must never reach the
+    // filter — fail closed to "not found" instead.
+    if (typeof email !== 'string') return undefined;
     const result = await this.users!.findOne({ email } as any);
     return result ? stripMongoId<User>(result) : undefined;
   }

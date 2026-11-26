@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { asyncHandler, healthRouter, NextGenError, logger } from '@stage7-nextgen/shared';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
@@ -19,6 +20,25 @@ const DEFAULT_ADMIN_TENANT = process.env.ADMIN_TENANT || 'tenant-1';
 
 // bcryptjs cost 10 — matches the TokenService.hashApiKey convention.
 const BCRYPT_COST = 10;
+
+// Per-IP limits on the credential and token routes (CodeQL: authorization
+// routes must be rate-limited). The gateway's 300/min proxy limiter is the
+// edge control; it does not forward client IPs, so these aggregate per
+// gateway IP in proxied deployments — direct-port access is the primary
+// surface blunted here. Limits are sized to stay above real multi-user load.
+const AUTH_WINDOW_MS = 15 * 60_000;
+const credentialLimiter = rateLimit({
+  windowMs: AUTH_WINDOW_MS,
+  limit: 50, // login / register / service auth
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+const tokenLimiter = rateLimit({
+  windowMs: AUTH_WINDOW_MS,
+  limit: 200, // refresh / verify — the 401-recovery cycle is legitimate traffic
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 
 /** Pure: copy a user without its passwordHash — the hash never leaves the service. */
 const stripPasswordHash = (user: User): Omit<User, 'passwordHash'> => {
@@ -68,10 +88,12 @@ export const adminSeedReady: Promise<void> = ensureDefaultAdmin()
 
 router.use(healthRouter({ service: 'auth' }));
 
-router.post('/login', asyncHandler(async (req: Request, res: Response) => {
+router.post('/login', credentialLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { email, password, tenantId } = req.body as LoginRequest;
 
-  if (!email || !password) {
+  // Mongo filters must never see a non-string field (operator-injection
+  // class, e.g. { email: { $ne: null } } from a JSON body).
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
     throw NextGenError.badRequest('Email and password are required');
   }
 
@@ -114,10 +136,13 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
  * stays the bearer-gated admin path (it discards passwords and therefore
  * creates only fail-closed accounts).
  */
-router.post('/register', asyncHandler(async (req: Request, res: Response) => {
+router.post('/register', credentialLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { email, password, name, tenantId } = req.body as RegisterRequest;
 
-  if (!email || !password || password.length < 8) {
+  if (
+    !email || !password || password.length < 8 ||
+    typeof email !== 'string' || typeof password !== 'string'
+  ) {
     throw NextGenError.badRequest('Email and a password of at least 8 characters are required');
   }
 
@@ -143,7 +168,7 @@ router.post('/register', asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({ success: true, user: stripPasswordHash(user), token });
 }));
 
-router.post('/service/auth', asyncHandler(async (req: Request, res: Response) => {
+router.post('/service/auth', credentialLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { serviceId, apiKey } = req.body as ServiceAuthRequest;
 
   if (!serviceId || !apiKey) {
@@ -176,7 +201,7 @@ const decodeExpiredToken = (token: string): TokenPayload | null => {
   }
 };
 
-router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
+router.post('/refresh', tokenLimiter, asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.body;
 
   if (!token) {
@@ -197,7 +222,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({ success: true, token: newToken });
 }));
 
-router.get('/verify', asyncHandler(async (req: Request, res: Response) => {
+router.get('/verify', tokenLimiter, asyncHandler(async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     throw NextGenError.unauthorized('Missing token');
