@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express from 'express';
-import authRoutes from '../../services/auth/src/routes/auth';
+import authRoutes, { adminSeedReady } from '../../services/auth/src/routes/auth';
 import agentRoutes from '../../services/agent-runtime/src/routes/agents';
 import artifactsRoutes from '../../services/artifacts/src/routes/missions';
 import { ArtifactsService } from '../../services/artifacts/src/services/ArtifactsService';
@@ -8,6 +8,12 @@ import { ArtifactsService } from '../../services/artifacts/src/services/Artifact
 describe('Integration: Multi-Tenancy Isolation', () => {
   let app: express.Application;
   let artifactsService: ArtifactsService;
+
+  // Login is fail-closed since PR #161: it bcrypt-verifies against the
+  // ADMIN_PASSWORD hash seeded at module load — await the seed before login.
+  beforeAll(async () => {
+    await adminSeedReady;
+  });
 
   beforeEach(() => {
     artifactsService = new ArtifactsService();
@@ -22,10 +28,23 @@ describe('Integration: Multi-Tenancy Isolation', () => {
     it('should issue token with correct tenantId', async () => {
       const loginRes = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password', tenantId: 'tenant-1' });
+        .send({
+          email: 'admin@example.com',
+          // Matches the ADMIN_PASSWORD jest.config.js sets for the admin seed.
+          password: process.env.ADMIN_PASSWORD,
+          tenantId: 'tenant-1',
+        });
 
       expect(loginRes.status).toBe(200);
       expect(loginRes.body.token).toBeDefined();
+      expect(loginRes.body.user.tenantId).toBe('tenant-1');
+
+      // Fail-closed contract: wrong password is rejected with a generic 401.
+      const badRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'wrong-password', tenantId: 'tenant-1' });
+      expect(badRes.status).toBe(401);
+      expect(badRes.body.error).toBe('Invalid credentials');
     });
   });
 
