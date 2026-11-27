@@ -60,6 +60,7 @@ export interface RegisterRequest {
   password: string;
   name?: string;
   tenantId?: string;
+  orgId?: string;
 }
 
 export interface ServiceAuthRequest {

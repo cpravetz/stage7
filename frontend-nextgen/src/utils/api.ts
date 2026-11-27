@@ -35,6 +35,43 @@ export function withAuthHeaders(init?: RequestInit): RequestInit {
 
 const API_BASE = '';
 
+async function refreshTokenOnce(): Promise<string | null> {
+  const token = useAuthStore.getState().token || localStorage.getItem('token');
+  if (!token) return null;
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const newToken = data?.token;
+    if (newToken) {
+      localStorage.setItem('token', newToken);
+      useAuthStore.getState().setToken(newToken);
+      return newToken;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function authedFetch(path: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(path, withAuthHeaders(init));
+  if (res.status === 401 && (useAuthStore.getState().token || localStorage.getItem('token'))) {
+    const newToken = await refreshTokenOnce();
+    if (newToken) {
+      res = await fetch(path, withAuthHeaders({ ...init, headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${newToken}` } }));
+    } else {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+    }
+  }
+  return res;
+}
+
 /**
  * API failure with the response attached. Status and body ride on the error so
  * callers can react to a specific refusal contract (e.g. HTTP 429
@@ -61,7 +98,7 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
   // and misinterpreting it as an error which previously emptied the skill list
   // and caused a save that persisted an empty tools array.
   const defaultInit: RequestInit = { cache: 'no-store' };
-  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({ ...defaultInit, ...(init || {}) }));
+  const response = await authedFetch(`${API_BASE}${path}`, { ...defaultInit, ...(init || {}) });
   if (response.status === 304) {
     // A conditional GET should never happen with no-store; treat it as a
     // specific, diagnosable failure instead of fabricating stale data.
@@ -86,12 +123,12 @@ export async function postJSON<T>(path: string, body: unknown, init?: RequestIni
 }
 
 async function sendJSON<T>(path: string, method: string, body: unknown, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
+  const response = await authedFetch(`${API_BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     ...init,
-  }));
+  });
   if (!response.ok) {
     throw new ApiError(response.status, response.statusText, path, await safeBody(response));
   }
@@ -108,11 +145,11 @@ async function safeBody(response: Response): Promise<unknown> {
 }
 
 export async function postFormData<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
+  const response = await authedFetch(`${API_BASE}${path}`, {
     method: 'POST',
     body,
     ...init,
-  }));
+  });
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }
@@ -120,9 +157,9 @@ export async function postFormData<T>(path: string, body: FormData, init?: Reque
 }
 
 export async function deleteResource(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, withAuthHeaders({
+  const response = await authedFetch(`${API_BASE}${path}`, {
     method: 'DELETE',
-  }));
+  });
   if (!response.ok) {
     throw new ApiError(response.status, response.statusText, path);
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { postJSON } from '../utils/api';
 import { useMissionsStore } from '../stores/missionsStore';
+import { getAuthTenantId } from '../stores/authStore';
 import { MissionRecurrenceOptions, type MissionRecurrence } from '../components/MissionRecurrenceOptions';
 import { describeMissionSchedule } from '../utils/missionSchedule';
 
@@ -97,7 +98,7 @@ const Missions = () => {
         {
           missionId: missionId || `${Date.now()}`,
           prompt,
-          tenantId: 'tenant-1',
+           tenantId: getAuthTenantId() ?? undefined,
           contextChunks: [],
           metadata: {},
           ...(recurrence ? { recurrence } : {}),

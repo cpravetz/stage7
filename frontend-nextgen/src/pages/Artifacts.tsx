@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { postJSON, postFormData, deleteResource, fetchJSON } from '../utils/api';
 import MissionArtifactContent from '../components/MissionArtifactContent';
+import { getAuthTenantId } from '../stores/authStore';
 import {
   groupMissionArtifactVersions,
   getArtifactMediaCategory,
@@ -163,7 +164,7 @@ const Persistence = () => {
       const parsed = JSON.parse(data);
       await postJSON('/api/artifacts/documents', {
         id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        tenantId: 'tenant-1',
+         tenantId: getAuthTenantId() ?? undefined,
         collection,
         data: parsed,
       });

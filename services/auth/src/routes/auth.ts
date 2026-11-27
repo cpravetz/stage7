@@ -137,7 +137,7 @@ router.post('/login', credentialLimiter, asyncHandler(async (req: Request, res: 
  * creates only fail-closed accounts).
  */
 router.post('/register', credentialLimiter, asyncHandler(async (req: Request, res: Response) => {
-  const { email, password, name, tenantId } = req.body as RegisterRequest;
+  const { email, password, name, tenantId, orgId } = req.body as RegisterRequest;
 
   if (
     !email || !password || password.length < 8 ||
@@ -153,7 +153,7 @@ router.post('/register', credentialLimiter, asyncHandler(async (req: Request, re
   const user = await userStore.create({
     id: `user-${Date.now()}`,
     tenantId: typeof tenantId === 'string' && tenantId.trim() ? tenantId.trim() : 'tenant-1',
-    orgId: 'org-1',
+    orgId: typeof orgId === 'string' && orgId.trim() ? orgId.trim() : (typeof tenantId === 'string' && tenantId.trim() ? tenantId.trim() : 'org-1'),
     email,
     name: name || email,
     roles: ['user'],
